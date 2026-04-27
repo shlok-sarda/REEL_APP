@@ -21,10 +21,14 @@ app = FastAPI(
 
 @app.on_event("startup")
 def startup_event():
+    settings.storage_dir.mkdir(parents=True, exist_ok=True)
+    settings.media_dir.mkdir(parents=True, exist_ok=True)
+    settings.thumbnails_dir.mkdir(parents=True, exist_ok=True)
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
     initialize_database()
 
 
-app.mount("/media", StaticFiles(directory=str(settings.media_dir)), name="media")
+app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")
 
 app.include_router(health_router)
 app.include_router(webapp_router)

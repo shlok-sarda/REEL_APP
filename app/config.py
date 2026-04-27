@@ -8,7 +8,7 @@ PROJECT_ROOT = BASE_DIR.parent
 
 class Settings:
     api_host: str = os.getenv("API_HOST", "127.0.0.1")
-    api_port: int = int(os.getenv("API_PORT", "8000"))
+    api_port: int = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
     app_env: str = os.getenv("APP_ENV", "development")
     storage_dir: Path = Path(os.getenv("STORAGE_DIR", PROJECT_ROOT / "Shlok_reels"))
     media_dir: Path = Path(os.getenv("MEDIA_DIR", PROJECT_ROOT / "media" / "Shlok_reels"))
