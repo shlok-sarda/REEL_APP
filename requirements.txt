@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+python-telegram-bot
+openai
+opencv-python-headless
+pandas
+yt-dlp
+joblib
+

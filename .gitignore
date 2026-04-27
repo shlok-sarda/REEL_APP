@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.env
+.venv/
+venv/
+
+# Local runtime / state
+app.db
+job_worker.lock
+telegram_inbox.jsonl
+deleted_reels.csv
+
+# User and media data
+cache.json
+reel_store/
+../Shlok_reels/
+../media/
+../user_libraries/
+
+# Generated outputs
+*.csv
+*.html
+*.json
+saved_reels_*
+technology_reels_*
+
+# Local models / experiments not needed for deployment
+*.pkl
+
