@@ -74,6 +74,20 @@ def build_landing_html() -> str:
       gap:12px;
       margin-top:18px;
     }
+    .secondary-link {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      min-height:52px;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,0.06);
+      color:var(--text);
+      text-decoration:none;
+      font-size:.98rem;
+      font-weight:800;
+    }
     input, button {
       width:100%;
       min-height:52px;
@@ -111,6 +125,7 @@ def build_landing_html() -> str:
       <form id="openForm" class="form">
         <input id="userIdInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Enter your Telegram user ID" />
         <button type="submit">Open My Library</button>
+        <a class="secondary-link" href="/app/demo">View Demo Library</a>
       </form>
       <p class="tiny">For the current local build, the Telegram user ID is the account key used to separate one person’s library from another’s.</p>
     </section>

@@ -1,11 +1,207 @@
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 from app.config import settings
 from app.db.database import get_connection
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
+
+
+DEMO_USER_ID = "demo"
+
+DEMO_ROWS = [
+    {
+        "Reel ID": "demo_1",
+        "Primary Category": "Tech & Gadgets",
+        "Secondary Category": "Renewable Energy Tech",
+        "Item Name": "Piezoelectric floor tiles",
+        "Summary": "Floor tiles that convert footsteps into electricity for lights, displays, and public sensors.",
+        "URL": "https://www.instagram.com/reel/DVpFungklSN/",
+        "Best Buy Link": "https://www.amazon.in/s?k=piezoelectric+floor+tile",
+    },
+    {
+        "Reel ID": "demo_2",
+        "Primary Category": "Tech & Gadgets",
+        "Secondary Category": "Audio Accessories",
+        "Item Name": "AirPods Ear Hooks",
+        "Summary": "Clip-on hooks that make AirPods stay secure during workouts or running.",
+        "URL": "https://www.instagram.com/reel/DS2wc8BiIp4/",
+        "Best Buy Link": "https://www.amazon.in/s?k=AirPods+ear+hooks",
+    },
+    {
+        "Reel ID": "demo_3",
+        "Primary Category": "Tech & Gadgets",
+        "Secondary Category": "Science Gadgets",
+        "Item Name": "Novium Gravity-Defying Pen",
+        "Summary": "A premium pen shown as a gravity-defying object with a striking desk-toy feel.",
+        "URL": "https://www.instagram.com/reel/DUTHr4WkXLV/",
+        "Best Buy Link": "https://www.amazon.in/s?k=Novium+Gravity-Defying+Pen",
+    },
+    {
+        "Reel ID": "demo_4",
+        "Primary Category": "Sports & Hobbies",
+        "Secondary Category": "Swimming Technique",
+        "Item Name": "Lateral Breathing",
+        "Summary": "A step-by-step swimming breathing drill that helps avoid swallowing water.",
+        "URL": "https://www.instagram.com/reel/DQu_3mRDZqw/",
+    },
+    {
+        "Reel ID": "demo_5",
+        "Primary Category": "Sports & Hobbies",
+        "Secondary Category": "Remote Control Cars",
+        "Item Name": "Remote Control Drift Car",
+        "Summary": "A remote-controlled drift car reel that feels giftable and fun to explore.",
+        "URL": "https://www.instagram.com/reel/DRFPKorEXcA/",
+        "Best Buy Link": "https://www.amazon.in/s?k=remote+control+drift+car",
+    },
+    {
+        "Reel ID": "demo_6",
+        "Primary Category": "Sports & Hobbies",
+        "Secondary Category": "Remote Control Cars",
+        "Item Name": "Micro Drift Car",
+        "Summary": "A tiny but fast drift car shown as a miniature high-performance gadget.",
+        "URL": "https://www.instagram.com/reel/DRciUR6jFZX/",
+        "Best Buy Link": "https://www.amazon.in/s?k=Legend+of+Toys+Micro+Drift+Car",
+    },
+    {
+        "Reel ID": "demo_7",
+        "Primary Category": "Memes & Funny",
+        "Secondary Category": "Viral Memes",
+        "Item Name": "Khel khatam meme",
+        "Summary": "A widely shared meme format used to humorously signal that the game is over.",
+        "URL": "https://www.instagram.com/reel/DWJdz3RCr_G/",
+    },
+    {
+        "Reel ID": "demo_8",
+        "Primary Category": "Memes & Funny",
+        "Secondary Category": "Meme Templates",
+        "Item Name": "Ryan Gosling Meme Template",
+        "Summary": "A meme template built around Ryan Gosling and the idea of a new character unlocked.",
+        "URL": "https://www.instagram.com/reel/DWWd1YkD6Y3/",
+    },
+    {
+        "Reel ID": "demo_9",
+        "Primary Category": "Memes & Funny",
+        "Secondary Category": "Funny Outfit Moments",
+        "Item Name": "Ugly shirts",
+        "Summary": "Comedically bad shirts saved for fashion humor and reaction value.",
+        "URL": "https://www.instagram.com/reel/DNO8QyNxDSX/",
+    },
+    {
+        "Reel ID": "demo_10",
+        "Primary Category": "Food & Culture",
+        "Secondary Category": "Indian Street Food",
+        "Item Name": "Chicken Kebab Paratha",
+        "Summary": "A street-food style chicken kebab paratha wrap with strong visual appetite appeal.",
+        "URL": "https://www.instagram.com/reel/DRrmLt0k2Fv/",
+        "Best Buy Link": "https://www.amazon.in/s?k=Chicken+Kebab+Paratha",
+    },
+]
+
+
+def is_demo_user(user_id: str | None) -> bool:
+    return (user_id or "").strip().lower() == DEMO_USER_ID
+
+
+def _demo_cover_url(title: str) -> str:
+    svg = f"""
+    <svg xmlns='http://www.w3.org/2000/svg' width='1200' height='800'>
+      <defs>
+        <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0%' stop-color='#131822'/>
+          <stop offset='55%' stop-color='#1d2532'/>
+          <stop offset='100%' stop-color='#745f36'/>
+        </linearGradient>
+      </defs>
+      <rect width='100%' height='100%' fill='url(#g)'/>
+      <circle cx='1050' cy='160' r='160' fill='rgba(238,215,166,0.14)'/>
+      <circle cx='180' cy='650' r='220' fill='rgba(159,213,197,0.10)'/>
+      <text x='70' y='130' fill='#9fd5c5' font-size='34' font-family='Arial, sans-serif' font-weight='700'>REEL APP DEMO</text>
+      <text x='70' y='420' fill='#f4f6f8' font-size='74' font-family='Arial, sans-serif' font-weight='800'>{title}</text>
+    </svg>
+    """.strip()
+    return "data:image/svg+xml;utf8," + quote(svg)
+
+
+def _demo_rows_with_media() -> list[dict]:
+    rows = []
+    for row in DEMO_ROWS:
+        clone = dict(row)
+        clone["Thumbnail URL"] = _demo_cover_url(clone["Primary Category"])
+        clone["Media Status"] = "demo"
+        clone["Contains Product"] = "Yes" if clone.get("Best Buy Link") else "No"
+        rows.append(clone)
+    return rows
+
+
+def _demo_personalized_collections() -> list[dict]:
+    return [
+        {
+            "parent_title": "Tech & Gadgets",
+            "list_title": "Useful Products & Smart Tech",
+            "items": [
+                {
+                    "reel_id": row["Reel ID"],
+                    "name": row["Item Name"],
+                    "summary": row["Summary"],
+                    "url": row["URL"],
+                    "best_buy_link": row.get("Best Buy Link", ""),
+                    "media_status": "demo",
+                    "thumbnail_url": _demo_cover_url("Useful Products"),
+                }
+                for row in DEMO_ROWS[:3]
+            ],
+        },
+        {
+            "parent_title": "Sports & Hobbies",
+            "list_title": "Playable Hobby Finds",
+            "items": [
+                {
+                    "reel_id": row["Reel ID"],
+                    "name": row["Item Name"],
+                    "summary": row["Summary"],
+                    "url": row["URL"],
+                    "best_buy_link": row.get("Best Buy Link", ""),
+                    "media_status": "demo",
+                    "thumbnail_url": _demo_cover_url("Playable Hobby Finds"),
+                }
+                for row in DEMO_ROWS[3:6]
+            ],
+        },
+        {
+            "parent_title": "Memes & Funny",
+            "list_title": "Quick Laughs",
+            "items": [
+                {
+                    "reel_id": row["Reel ID"],
+                    "name": row["Item Name"],
+                    "summary": row["Summary"],
+                    "url": row["URL"],
+                    "media_status": "demo",
+                    "thumbnail_url": _demo_cover_url("Quick Laughs"),
+                }
+                for row in DEMO_ROWS[6:9]
+            ],
+        },
+        {
+            "parent_title": "Food & Culture",
+            "list_title": "One-Tap Cravings",
+            "items": [
+                {
+                    "reel_id": row["Reel ID"],
+                    "name": row["Item Name"],
+                    "summary": row["Summary"],
+                    "url": row["URL"],
+                    "best_buy_link": row.get("Best Buy Link", ""),
+                    "media_status": "demo",
+                    "thumbnail_url": _demo_cover_url("One-Tap Cravings"),
+                }
+                for row in DEMO_ROWS[9:10]
+            ],
+        },
+    ]
 
 
 def _existing_path(path_value: str) -> Path | None:
@@ -82,6 +278,9 @@ def _db_standard_rows(user_id: str) -> list[dict]:
 
 
 def load_standard_collections(user_id: str) -> list[dict]:
+    if is_demo_user(user_id):
+        return build_collections_from_rows(_demo_rows_with_media())
+
     db_rows = _db_standard_rows(user_id)
     if db_rows:
         collections = build_collections_from_rows(db_rows)
@@ -95,6 +294,9 @@ def load_standard_collections(user_id: str) -> list[dict]:
 
 
 def load_personalized_collections(user_id: str) -> list[dict]:
+    if is_demo_user(user_id):
+        return _demo_personalized_collections()
+
     paths = user_dashboard_paths(user_id)
     view_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_personalized_view.json"))
     graph_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_topic_graph.json"))
@@ -110,4 +312,23 @@ def load_library_payload(user_id: str) -> dict:
         "user_id": user_id,
         "standard": load_standard_collections(user_id),
         "personalized": load_personalized_collections(user_id),
+    }
+
+
+def load_demo_dashboard_payload() -> dict:
+    return {
+        "url_count": len(DEMO_ROWS),
+        "processed_url_count": len(DEMO_ROWS),
+        "pending_url_count": 0,
+        "failed_url_count": 0,
+        "running_job_count": 0,
+        "queued_job_count": 0,
+        "item_count": len(DEMO_ROWS),
+        "last_updated": "2026-05-01T18:00:00",
+        "standard_page": None,
+        "personalized_page": None,
+        "raw_output": None,
+        "accumulated_output": None,
+        "storage_mode": "demo_seeded_payload",
+        "media_mode": "demo_placeholders",
     }
