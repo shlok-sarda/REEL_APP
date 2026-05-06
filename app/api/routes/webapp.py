@@ -380,6 +380,554 @@ def build_demo_ui_review_html() -> str:
 </html>"""
 
 
+def build_demo_library_review_html() -> str:
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Reel Organizer Demo Library</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: rgba(255,255,255,0.08);
+      --panel-strong: rgba(255,255,255,0.12);
+      --line: rgba(255,255,255,0.11);
+      --text: #f7f4ee;
+      --muted: #a8a19a;
+      --accent: #f0ca8f;
+      --accent-2: #8fd5c6;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --shadow: 0 22px 60px rgba(0,0,0,0.34);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at top left, rgba(240, 202, 143, 0.14), transparent 24rem),
+        radial-gradient(circle at top right, rgba(143, 213, 198, 0.12), transparent 20rem),
+        linear-gradient(180deg, #11151d 0%, #090b10 48%, #07080c 100%);
+      color: var(--text);
+      font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif;
+    }
+    body { padding-bottom: calc(22px + var(--safe-bottom)); }
+    .shell {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      padding: calc(10px + var(--safe-top)) 14px 24px;
+    }
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      margin: calc(-10px - var(--safe-top)) -14px 12px;
+      padding: calc(10px + var(--safe-top)) 14px 12px;
+      background: linear-gradient(180deg, rgba(9,11,16,0.94), rgba(9,11,16,0.76) 82%, transparent);
+      backdrop-filter: blur(18px);
+    }
+    .hero {
+      display: grid;
+      gap: 8px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,0.05);
+      box-shadow: var(--shadow);
+    }
+    .kicker {
+      margin: 0;
+      color: var(--accent-2);
+      font-size: .68rem;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 7vw, 2.55rem);
+      line-height: .96;
+      letter-spacing: -.05em;
+    }
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.42;
+    }
+    .toolbar {
+      margin-top: 10px;
+      display: grid;
+      gap: 10px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.06);
+      backdrop-filter: blur(16px);
+    }
+    .search {
+      width: 100%;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.07);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: .94rem;
+    }
+    .stats {
+      display: flex;
+      gap: 8px;
+      overflow: auto;
+      scrollbar-width: none;
+    }
+    .stats::-webkit-scrollbar { display: none; }
+    .chip {
+      flex: 0 0 auto;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.06);
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 850;
+      display: inline-flex;
+      align-items: center;
+    }
+    .content {
+      display: grid;
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+      box-shadow: var(--shadow);
+      padding: 15px;
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .card-media {
+      position: relative;
+      margin: -15px -15px 14px;
+      aspect-ratio: 1.78;
+      overflow: hidden;
+      background: #0c0e13;
+      border-bottom: 1px solid var(--line);
+    }
+    .card-media img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(8,10,14,0.02), rgba(8,10,14,0.18) 50%, rgba(8,10,14,0.78));
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .card-title {
+      margin: 0;
+      font-size: 1.02rem;
+      line-height: 1.14;
+      letter-spacing: -.03em;
+    }
+    .card-kicker {
+      margin: 0 0 7px;
+      color: var(--accent);
+      font-size: .68rem;
+      font-weight: 900;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .count {
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: rgba(143,213,198,0.12);
+      color: var(--accent-2);
+      font-size: .72rem;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .card-copy {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.45;
+    }
+    .preview {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .preview div {
+      color: var(--muted);
+      font-size: .84rem;
+      line-height: 1.4;
+    }
+    .detail {
+      display: grid;
+      gap: 12px;
+    }
+    .back {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+    .back.hidden {
+      visibility: hidden;
+      pointer-events: none;
+      height: 0;
+      margin: 0;
+    }
+    .video-panel {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: .62;
+      background: #050607;
+    }
+    .video-wrap video, .video-wrap img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+    .video-meta {
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+    }
+    .detail-title {
+      margin: 0;
+      font-size: 1.14rem;
+      line-height: 1.05;
+      letter-spacing: -.03em;
+    }
+    .detail-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.55;
+    }
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.06);
+      color: var(--muted);
+      font-size: .74rem;
+      font-weight: 850;
+    }
+    .item-list {
+      display: grid;
+      gap: 10px;
+    }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255,255,255,0.05);
+      padding: 14px;
+      cursor: pointer;
+    }
+    .item.active {
+      border-color: rgba(240,202,143,0.35);
+      background: rgba(255,255,255,0.1);
+    }
+    .item h3 {
+      margin: 0;
+      font-size: .97rem;
+      line-height: 1.22;
+    }
+    .item p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: .86rem;
+      line-height: 1.42;
+    }
+    .footer-note {
+      margin-top: 8px;
+      color: #7d756e;
+      font-size: .8rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <div class="hero">
+        <p class="kicker">Demo Library</p>
+        <h1 id="screenTitle">Your Reel Library</h1>
+        <p id="screenSubtitle" class="subtitle">A tighter mobile layout with less wasted top space, direct search, and folder-to-item browsing.</p>
+        <div class="toolbar">
+          <input id="searchInput" class="search" type="search" placeholder="Search folders and items" />
+          <div id="stats" class="stats"></div>
+        </div>
+      </div>
+    </header>
+    <section id="content" class="content"></section>
+    <p class="footer-note">Static UI review build with 5 folders and local demo reel videos.</p>
+  </main>
+
+  <script>
+    const DATA = [
+      {
+        list_title: "European Destinations",
+        parent_title: "Travel",
+        description: "Destination-led reels where the place itself becomes the saved unit.",
+        items: [
+          { name: "Montenegro", summary: "Affordable and underrated European destination with old towns, turquoise waters, and dramatic mountain views.", video_url: "/media/videos/reel_20.mp4", thumbnail_url: "/media/thumbnails/reel_20.jpg" },
+          { name: "Santorini", summary: "Whitewashed coastal destination known for sea views and sunset scenery.", video_url: "/media/videos/reel_20.mp4", thumbnail_url: "/media/thumbnails/reel_20.jpg" },
+          { name: "Kotor", summary: "Historic Adriatic town with fortress views and winding streets.", video_url: "/media/videos/reel_20.mp4", thumbnail_url: "/media/thumbnails/reel_20.jpg" },
+          { name: "Venice", summary: "Canal city with romantic architecture and walkable old neighborhoods.", video_url: "/media/videos/reel_20.mp4", thumbnail_url: "/media/thumbnails/reel_20.jpg" },
+          { name: "Ibiza", summary: "Island destination mixing beaches, nightlife, and scenic coastlines.", video_url: "/media/videos/reel_20.mp4", thumbnail_url: "/media/thumbnails/reel_20.jpg" }
+        ]
+      },
+      {
+        list_title: "Restaurants in Banaras",
+        parent_title: "Food",
+        description: "Place-led food reels where restaurant identity matters more than the dish alone.",
+        items: [
+          { name: "Shahi Dastarkhwan", summary: "Family restaurant in Banaras known for royal-style chicken mandi and rich presentation.", video_url: "/media/videos/reel_18.mp4", thumbnail_url: "/media/thumbnails/reel_18.jpg" },
+          { name: "Voodoo Cafe", summary: "Cafe-style reel where the place itself is the thing worth remembering later.", video_url: "/media/videos/reel_18.mp4", thumbnail_url: "/media/thumbnails/reel_18.jpg" },
+          { name: "Street food place in Banaras", summary: "Fallback place-based label when the exact outlet name is unclear but the location intent is strong.", video_url: "/media/videos/reel_18.mp4", thumbnail_url: "/media/thumbnails/reel_18.jpg" },
+          { name: "Royal mandi spot", summary: "Restaurant-focused reel built around one place rather than a loose list of dishes.", video_url: "/media/videos/reel_18.mp4", thumbnail_url: "/media/thumbnails/reel_18.jpg" },
+          { name: "Late-night kebab place", summary: "Location-led food recommendation where venue is the saved item.", video_url: "/media/videos/reel_18.mp4", thumbnail_url: "/media/thumbnails/reel_18.jpg" }
+        ]
+      },
+      {
+        list_title: "Music Sync Apps",
+        parent_title: "Apps",
+        description: "Exact-name app reels where vague labels like 'an app' are not enough.",
+        items: [
+          { name: "Beatsing", summary: "App that syncs the same song across multiple devices for parties or group listening.", video_url: "/media/videos/reel_12.mp4", thumbnail_url: "/media/thumbnails/reel_12.jpg" },
+          { name: "AirDroid", summary: "Cross-device utility app that helps move files and manage phone-computer workflows.", video_url: "/media/videos/reel_12.mp4", thumbnail_url: "/media/thumbnails/reel_12.jpg" },
+          { name: "Dr.Fone", summary: "Recovery and phone management tool highlighted as a practical software utility.", video_url: "/media/videos/reel_12.mp4", thumbnail_url: "/media/thumbnails/reel_12.jpg" },
+          { name: "Hidden camera app", summary: "Exact-name-sensitive app example where on-screen text matters for saved recall.", video_url: "/media/videos/reel_12.mp4", thumbnail_url: "/media/thumbnails/reel_12.jpg" },
+          { name: "Mac utility tool", summary: "Software reel where item naming should be more precise than a generic 'tool'.", video_url: "/media/videos/reel_12.mp4", thumbnail_url: "/media/thumbnails/reel_12.jpg" }
+        ]
+      },
+      {
+        list_title: "Study Abroad Warnings",
+        parent_title: "Study & Career",
+        description: "Broad advice reels where the saved unit stays coarse and the summary holds the supporting detail.",
+        items: [
+          { name: "UK post-study job market warning", summary: "Warning about poor job outcomes, oversupply, and visa uncertainty for students planning to study abroad.", video_url: "/media/videos/reel_10.mp4", thumbnail_url: "/media/thumbnails/reel_10.jpg" },
+          { name: "College information", summary: "General college-review reel where the saved unit is the broader institution insight, not each bullet point.", video_url: "/media/videos/reel_10.mp4", thumbnail_url: "/media/thumbnails/reel_10.jpg" },
+          { name: "College rankings India", summary: "Comparison-style education reel best saved as one retrievable concept rather than many micro-items.", video_url: "/media/videos/reel_10.mp4", thumbnail_url: "/media/thumbnails/reel_10.jpg" },
+          { name: "Safer study destination advice", summary: "Education reel with decision-support framing rather than place-by-place tourism logic.", video_url: "/media/videos/reel_10.mp4", thumbnail_url: "/media/thumbnails/reel_10.jpg" },
+          { name: "AI prompt engineering tips", summary: "Advice-led informational reel better saved as one broad concept item.", video_url: "/media/videos/reel_10.mp4", thumbnail_url: "/media/thumbnails/reel_10.jpg" }
+        ]
+      },
+      {
+        list_title: "Style & Social Ideas",
+        parent_title: "Lifestyle",
+        description: "Mixed light-interest reels where the layout should still feel intentional and easy to scan.",
+        items: [
+          { name: "Men's suit color guide", summary: "Style advice reel focused on helping users choose coordinated suit colors.", video_url: "/media/videos/reel_11.mp4", thumbnail_url: "/media/thumbnails/reel_11.jpg" },
+          { name: "AI hairstyle tutorials", summary: "Beauty-tech reel where the saved unit is the hairstyle try-on concept, not every look variation.", video_url: "/media/videos/reel_11.mp4", thumbnail_url: "/media/thumbnails/reel_11.jpg" },
+          { name: "Social media humor", summary: "Humor reel that still needs a clean saved-unit treatment instead of getting lost as noise.", video_url: "/media/videos/reel_11.mp4", thumbnail_url: "/media/thumbnails/reel_11.jpg" },
+          { name: "Date ideas", summary: "Lifestyle reel where the broader social idea matters more than each tiny activity inside it.", video_url: "/media/videos/reel_11.mp4", thumbnail_url: "/media/thumbnails/reel_11.jpg" },
+          { name: "Relationship communication", summary: "Advice-based social reel saved as one broad conversation topic.", video_url: "/media/videos/reel_11.mp4", thumbnail_url: "/media/thumbnails/reel_11.jpg" }
+        ]
+      }
+    ];
+
+    const state = {
+      query: '',
+      currentList: null,
+      currentItem: 0
+    };
+
+    const content = document.getElementById('content');
+    const stats = document.getElementById('stats');
+    const screenTitle = document.getElementById('screenTitle');
+    const screenSubtitle = document.getElementById('screenSubtitle');
+    const searchInput = document.getElementById('searchInput');
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function coverForList(list) {
+      return list?.items?.[0]?.thumbnail_url || '';
+    }
+
+    function matchesItem(item, q) {
+      if (!q) return true;
+      return `${item.name} ${item.summary}`.toLowerCase().includes(q);
+    }
+
+    function matchesList(list, q) {
+      if (!q) return true;
+      return `${list.parent_title} ${list.list_title} ${list.description}`.toLowerCase().includes(q)
+        || list.items.some((item) => matchesItem(item, q));
+    }
+
+    function visibleLists() {
+      return DATA.filter((list) => matchesList(list, state.query));
+    }
+
+    function renderStats() {
+      const lists = visibleLists();
+      const items = lists.reduce((sum, list) => sum + list.items.filter((item) => matchesItem(item, state.query)).length, 0);
+      stats.innerHTML = `
+        <span class="chip">${lists.length} folders</span>
+        <span class="chip">${items} items</span>
+        <span class="chip">4 sample reels</span>
+      `;
+    }
+
+    function renderHome() {
+      const lists = visibleLists();
+      screenTitle.textContent = 'Your Reel Library';
+      screenSubtitle.textContent = 'A tighter mobile layout with less wasted top space, direct search, and folder-to-item browsing.';
+      if (!lists.length) {
+        content.innerHTML = `<article class="card"><h2 class="card-title">No matches</h2><p class="card-copy">Try a different search term.</p></article>`;
+        return;
+      }
+      content.innerHTML = lists.map((list, index) => {
+        const cover = coverForList(list);
+        const preview = list.items.slice(0, 2);
+        return `
+          <article class="card" data-list="${index}">
+            <div class="card-media">
+              <img src="${escapeHtml(cover)}" alt="" />
+              <div class="overlay"></div>
+            </div>
+            <div class="card-top">
+              <div>
+                <p class="card-kicker">${escapeHtml(list.parent_title)}</p>
+                <h2 class="card-title">${escapeHtml(list.list_title)}</h2>
+              </div>
+              <span class="count">${list.items.length} items</span>
+            </div>
+            <p class="card-copy">${escapeHtml(list.description)}</p>
+            <div class="preview">
+              ${preview.map((item) => `<div>${escapeHtml(item.name)} — ${escapeHtml(item.summary)}</div>`).join('')}
+            </div>
+          </article>
+        `;
+      }).join('');
+      content.querySelectorAll('[data-list]').forEach((node) => {
+        node.addEventListener('click', () => {
+          state.currentList = Number(node.dataset.list);
+          state.currentItem = 0;
+          render();
+        });
+      });
+    }
+
+    function renderDetail() {
+      const lists = visibleLists();
+      const list = lists[state.currentList];
+      if (!list) {
+        state.currentList = null;
+        render();
+        return;
+      }
+      const items = list.items.filter((item) => matchesItem(item, state.query));
+      const activeItem = items[state.currentItem] || items[0];
+      screenTitle.textContent = list.list_title;
+      screenSubtitle.textContent = `${list.parent_title} · ${list.items.length} saved items`;
+      content.innerHTML = `
+        <button id="backButton" class="back">‹</button>
+        <section class="detail">
+          <article class="video-panel">
+            <div class="video-wrap">
+              <video controls playsinline preload="metadata" poster="${escapeHtml(activeItem.thumbnail_url)}">
+                <source src="${escapeHtml(activeItem.video_url)}" type="video/mp4" />
+              </video>
+            </div>
+            <div class="video-meta">
+              <div class="meta-row">
+                <span class="pill">${escapeHtml(list.parent_title)}</span>
+                <span class="pill">${escapeHtml(list.list_title)}</span>
+              </div>
+              <h2 class="detail-title">${escapeHtml(activeItem.name)}</h2>
+              <p class="detail-copy">${escapeHtml(activeItem.summary)}</p>
+            </div>
+          </article>
+          <section class="item-list">
+            ${items.map((item, index) => `
+              <article class="item ${index === state.currentItem ? 'active' : ''}" data-item="${index}">
+                <h3>${escapeHtml(item.name)}</h3>
+                <p>${escapeHtml(item.summary)}</p>
+              </article>
+            `).join('')}
+          </section>
+        </section>
+      `;
+      document.getElementById('backButton').addEventListener('click', () => {
+        state.currentList = null;
+        state.currentItem = 0;
+        render();
+      });
+      content.querySelectorAll('[data-item]').forEach((node) => {
+        node.addEventListener('click', () => {
+          state.currentItem = Number(node.dataset.item);
+          render();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+    }
+
+    function render() {
+      renderStats();
+      if (state.currentList === null) renderHome();
+      else renderDetail();
+    }
+
+    searchInput.addEventListener('input', (event) => {
+      state.query = event.target.value.trim().toLowerCase();
+      state.currentList = null;
+      state.currentItem = 0;
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>"""
+
+
 def build_landing_html() -> str:
     return """<!DOCTYPE html>
 <html lang="en">
@@ -1117,7 +1665,7 @@ def root_app():
 
 @router.get("/demo/ui-review", response_class=HTMLResponse)
 def demo_ui_review():
-    return HTMLResponse(build_demo_ui_review_html())
+    return HTMLResponse(build_demo_library_review_html())
 
 
 @router.get("/app/{user_id}", response_class=HTMLResponse)
