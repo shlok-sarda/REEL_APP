@@ -477,26 +477,6 @@ def build_demo_library_review_html() -> str:
       padding: 0 14px;
       font-size: .94rem;
     }
-    .stats {
-      display: flex;
-      gap: 8px;
-      overflow: auto;
-      scrollbar-width: none;
-    }
-    .stats::-webkit-scrollbar { display: none; }
-    .chip {
-      flex: 0 0 auto;
-      min-height: 28px;
-      padding: 0 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.06);
-      color: var(--muted);
-      font-size: .72rem;
-      font-weight: 850;
-      display: inline-flex;
-      align-items: center;
-    }
     .content {
       display: grid;
       gap: 12px;
@@ -509,25 +489,6 @@ def build_demo_library_review_html() -> str:
       padding: 15px;
       cursor: pointer;
       overflow: hidden;
-    }
-    .card-media {
-      position: relative;
-      margin: -15px -15px 14px;
-      aspect-ratio: 1.78;
-      overflow: hidden;
-      background: #0c0e13;
-      border-bottom: 1px solid var(--line);
-    }
-    .card-media img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    .overlay {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(8,10,14,0.02), rgba(8,10,14,0.18) 50%, rgba(8,10,14,0.78));
     }
     .card-top {
       display: flex;
@@ -557,22 +518,6 @@ def build_demo_library_review_html() -> str:
       font-size: .72rem;
       font-weight: 900;
       white-space: nowrap;
-    }
-    .card-copy {
-      margin: 10px 0 0;
-      color: var(--muted);
-      font-size: .88rem;
-      line-height: 1.45;
-    }
-    .preview {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .preview div {
-      color: var(--muted);
-      font-size: .84rem;
-      line-height: 1.4;
     }
     .detail {
       display: grid;
@@ -607,14 +552,14 @@ def build_demo_library_review_html() -> str:
     .video-wrap {
       position: relative;
       width: 100%;
-      aspect-ratio: .62;
+      height: clamp(220px, 42vh, 340px);
       background: #050607;
     }
     .video-wrap video, .video-wrap img {
       width: 100%;
       height: 100%;
       display: block;
-      object-fit: cover;
+      object-fit: contain;
     }
     .video-meta {
       padding: 16px;
@@ -693,7 +638,6 @@ def build_demo_library_review_html() -> str:
         <p id="screenSubtitle" class="subtitle">A tighter mobile layout with less wasted top space, direct search, and folder-to-item browsing.</p>
         <div class="toolbar">
           <input id="searchInput" class="search" type="search" placeholder="Search folders and items" />
-          <div id="stats" class="stats"></div>
         </div>
       </div>
     </header>
@@ -772,7 +716,6 @@ def build_demo_library_review_html() -> str:
     };
 
     const content = document.getElementById('content');
-    const stats = document.getElementById('stats');
     const screenTitle = document.getElementById('screenTitle');
     const screenSubtitle = document.getElementById('screenSubtitle');
     const searchInput = document.getElementById('searchInput');
@@ -784,10 +727,6 @@ def build_demo_library_review_html() -> str:
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
-    }
-
-    function coverForList(list) {
-      return list?.items?.[0]?.thumbnail_url || '';
     }
 
     function matchesItem(item, q) {
@@ -805,16 +744,6 @@ def build_demo_library_review_html() -> str:
       return DATA.filter((list) => matchesList(list, state.query));
     }
 
-    function renderStats() {
-      const lists = visibleLists();
-      const items = lists.reduce((sum, list) => sum + list.items.filter((item) => matchesItem(item, state.query)).length, 0);
-      stats.innerHTML = `
-        <span class="chip">${lists.length} folders</span>
-        <span class="chip">${items} items</span>
-        <span class="chip">4 sample reels</span>
-      `;
-    }
-
     function renderHome() {
       const lists = visibleLists();
       screenTitle.textContent = 'Your Reel Library';
@@ -824,24 +753,14 @@ def build_demo_library_review_html() -> str:
         return;
       }
       content.innerHTML = lists.map((list, index) => {
-        const cover = coverForList(list);
-        const preview = list.items.slice(0, 2);
         return `
           <article class="card" data-list="${index}">
-            <div class="card-media">
-              <img src="${escapeHtml(cover)}" alt="" />
-              <div class="overlay"></div>
-            </div>
             <div class="card-top">
               <div>
                 <p class="card-kicker">${escapeHtml(list.parent_title)}</p>
                 <h2 class="card-title">${escapeHtml(list.list_title)}</h2>
               </div>
               <span class="count">${list.items.length} items</span>
-            </div>
-            <p class="card-copy">${escapeHtml(list.description)}</p>
-            <div class="preview">
-              ${preview.map((item) => `<div>${escapeHtml(item.name)} — ${escapeHtml(item.summary)}</div>`).join('')}
             </div>
           </article>
         `;
@@ -910,7 +829,6 @@ def build_demo_library_review_html() -> str:
     }
 
     function render() {
-      renderStats();
       if (state.currentList === null) renderHome();
       else renderDetail();
     }
