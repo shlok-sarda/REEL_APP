@@ -5,6 +5,381 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(tags=["webapp"])
 
 
+def build_demo_ui_review_html() -> str:
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Reel Organizer UI Review</title>
+  <style>
+    :root {
+      --bg:#efe6d7;
+      --card:#fffaf2;
+      --ink:#1d1a16;
+      --muted:#675f55;
+      --line:rgba(29,26,22,0.12);
+      --accent:#ca5b2e;
+      --accent-2:#0d665b;
+      --shadow:0 24px 50px rgba(48, 31, 14, 0.12);
+      --safe-top:env(safe-area-inset-top, 0px);
+      --safe-bottom:env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing:border-box; }
+    html, body {
+      margin:0;
+      min-height:100%;
+      background:
+        radial-gradient(circle at top left, rgba(202,91,46,0.12), transparent 18rem),
+        radial-gradient(circle at bottom right, rgba(13,102,91,0.10), transparent 20rem),
+        var(--bg);
+      color:var(--ink);
+      font-family:"Avenir Next", "SF Pro Display", ui-sans-serif, system-ui, sans-serif;
+    }
+    body { padding-bottom:calc(24px + var(--safe-bottom)); }
+    .shell {
+      width:min(1120px, 100%);
+      margin:0 auto;
+      padding:calc(22px + var(--safe-top)) 16px 28px;
+      display:grid;
+      gap:16px;
+    }
+    .hero {
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:rgba(255,250,242,0.88);
+      box-shadow:var(--shadow);
+      padding:20px;
+    }
+    .eyebrow {
+      margin:0 0 10px;
+      color:var(--accent-2);
+      font-size:.75rem;
+      font-weight:900;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+    }
+    h1 {
+      margin:0;
+      font-size:clamp(2rem, 8vw, 4rem);
+      line-height:.92;
+      letter-spacing:-.06em;
+    }
+    .hero p {
+      margin:12px 0 0;
+      color:var(--muted);
+      line-height:1.55;
+      font-size:.97rem;
+      max-width:52rem;
+    }
+    .hero-meta {
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:14px;
+    }
+    .chip {
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,0.72);
+      font-size:.78rem;
+      font-weight:800;
+      color:var(--muted);
+    }
+    .layout {
+      display:grid;
+      gap:16px;
+    }
+    .panel {
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:rgba(255,250,242,0.9);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .panel-head {
+      padding:16px 16px 12px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.15));
+    }
+    .panel-head h2 {
+      margin:0;
+      font-size:1.05rem;
+      letter-spacing:-.03em;
+    }
+    .panel-head p {
+      margin:8px 0 0;
+      color:var(--muted);
+      font-size:.87rem;
+      line-height:1.45;
+    }
+    .reel-grid {
+      display:grid;
+      gap:14px;
+      padding:14px;
+    }
+    .reel-card {
+      border:1px solid var(--line);
+      border-radius:22px;
+      background:rgba(255,255,255,0.66);
+      overflow:hidden;
+    }
+    .video-frame {
+      position:relative;
+      aspect-ratio:.66;
+      background:#0f1114;
+    }
+    .video-frame video, .video-frame img {
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
+      background:#0f1114;
+    }
+    .video-badge {
+      position:absolute;
+      left:12px;
+      bottom:12px;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:30px;
+      padding:0 10px;
+      border-radius:999px;
+      background:rgba(17,18,20,0.74);
+      color:#fff7ea;
+      font-size:.72rem;
+      font-weight:900;
+      letter-spacing:.02em;
+      border:1px solid rgba(255,255,255,0.12);
+      backdrop-filter:blur(8px);
+    }
+    .reel-body {
+      padding:14px;
+      display:grid;
+      gap:10px;
+    }
+    .card-kicker {
+      margin:0;
+      color:var(--accent);
+      font-size:.7rem;
+      font-weight:900;
+      letter-spacing:.11em;
+      text-transform:uppercase;
+    }
+    .card-title {
+      margin:0;
+      font-size:1.02rem;
+      line-height:1.14;
+      letter-spacing:-.03em;
+    }
+    .card-copy {
+      margin:0;
+      color:var(--muted);
+      font-size:.9rem;
+      line-height:1.5;
+    }
+    .item-list {
+      display:grid;
+      gap:8px;
+    }
+    .item-pill {
+      display:flex;
+      gap:8px;
+      align-items:flex-start;
+      padding:10px 12px;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(255,255,255,0.65);
+    }
+    .item-dot {
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:var(--accent-2);
+      margin-top:6px;
+      flex:0 0 auto;
+    }
+    .item-pill strong {
+      display:block;
+      font-size:.88rem;
+      line-height:1.25;
+    }
+    .item-pill span {
+      display:block;
+      margin-top:3px;
+      color:var(--muted);
+      font-size:.82rem;
+      line-height:1.4;
+    }
+    .notes {
+      padding:14px;
+      display:grid;
+      gap:10px;
+    }
+    .note {
+      border:1px dashed rgba(29,26,22,0.22);
+      border-radius:18px;
+      padding:12px 13px;
+      background:rgba(255,255,255,0.56);
+    }
+    .note strong {
+      display:block;
+      font-size:.82rem;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      color:var(--accent-2);
+      margin-bottom:6px;
+    }
+    .note p {
+      margin:0;
+      color:var(--muted);
+      font-size:.88rem;
+      line-height:1.45;
+    }
+    .footer {
+      text-align:center;
+      color:var(--muted);
+      font-size:.82rem;
+      padding:4px 0 0;
+    }
+    @media (min-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, .9fr);
+        align-items:start;
+      }
+      .reel-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">UI Review Prototype</p>
+      <h1>How should saved reels feel on a phone?</h1>
+      <p>This is a lightweight review page with four sample reel cards, inline video, item extraction, and list framing. The goal is to make it easy to discuss layout, hierarchy, and what should be visible in one screen without getting blocked by backend logic.</p>
+      <div class="hero-meta">
+        <span class="chip">4 sample reels</span>
+        <span class="chip">Mobile-first layout</span>
+        <span class="chip">Shareable review link</span>
+      </div>
+    </section>
+
+    <section class="layout">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Sample Reel Cards</h2>
+          <p>These are intentionally varied so you can discuss travel, food, apps, and advice-style reels in one place.</p>
+        </div>
+        <div class="reel-grid">
+          <article class="reel-card">
+            <div class="video-frame">
+              <video controls playsinline preload="metadata" poster="/media/thumbnails/reel_20.jpg">
+                <source src="/media/videos/reel_20.mp4" type="video/mp4" />
+              </video>
+              <span class="video-badge">Travel / Destination</span>
+            </div>
+            <div class="reel-body">
+              <p class="card-kicker">Travel</p>
+              <h3 class="card-title">European Destinations</h3>
+              <p class="card-copy">A destination-led card where the main saved unit is the place itself, not every sub-stop in the itinerary.</p>
+              <div class="item-list">
+                <div class="item-pill"><span class="item-dot"></span><div><strong>Montenegro</strong><span>Underrated, affordable destination with coastal drives, old towns, and mountain views.</span></div></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="reel-card">
+            <div class="video-frame">
+              <video controls playsinline preload="metadata" poster="/media/thumbnails/reel_18.jpg">
+                <source src="/media/videos/reel_18.mp4" type="video/mp4" />
+              </video>
+              <span class="video-badge">Food / Restaurant</span>
+            </div>
+            <div class="reel-body">
+              <p class="card-kicker">Food</p>
+              <h3 class="card-title">Restaurants in Banaras</h3>
+              <p class="card-copy">A place-led food card where the restaurant name becomes the saved item instead of the dish.</p>
+              <div class="item-list">
+                <div class="item-pill"><span class="item-dot"></span><div><strong>Shahi Dastarkhwan</strong><span>Banaras family restaurant highlighted for chicken mandi and a royal-style presentation.</span></div></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="reel-card">
+            <div class="video-frame">
+              <video controls playsinline preload="metadata" poster="/media/thumbnails/reel_12.jpg">
+                <source src="/media/videos/reel_12.mp4" type="video/mp4" />
+              </video>
+              <span class="video-badge">App / Tool</span>
+            </div>
+            <div class="reel-body">
+              <p class="card-kicker">Apps</p>
+              <h3 class="card-title">Music Sync Apps</h3>
+              <p class="card-copy">An example where exact naming matters: the reel should save the app name, not just “an app.”</p>
+              <div class="item-list">
+                <div class="item-pill"><span class="item-dot"></span><div><strong>Beatsing</strong><span>App for synchronized music playback across multiple devices without needing a shared speaker setup.</span></div></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="reel-card">
+            <div class="video-frame">
+              <video controls playsinline preload="metadata" poster="/media/thumbnails/reel_10.jpg">
+                <source src="/media/videos/reel_10.mp4" type="video/mp4" />
+              </video>
+              <span class="video-badge">Advice / Generic</span>
+            </div>
+            <div class="reel-body">
+              <p class="card-kicker">Generic</p>
+              <h3 class="card-title">Study Abroad Warnings</h3>
+              <p class="card-copy">A broad advice reel where the saved unit stays coarse and the supporting detail lives in the summary.</p>
+              <div class="item-list">
+                <div class="item-pill"><span class="item-dot"></span><div><strong>UK post-study job market warning</strong><span>Warning about poor job outcomes, oversupply, and visa uncertainty for students planning to study abroad.</span></div></div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-head">
+          <h2>What To Review</h2>
+          <p>Share this page with your UI/UX reviewer and ask how the core reel, list, item, and summary hierarchy should feel on mobile.</p>
+        </div>
+        <div class="notes">
+          <div class="note">
+            <strong>Hierarchy</strong>
+            <p>Should the reel video dominate the card, or should the saved list title and extracted item get more visual weight?</p>
+          </div>
+          <div class="note">
+            <strong>Information Density</strong>
+            <p>Can a user understand list title, item name, and why it was saved within one fast glance on an iPhone screen?</p>
+          </div>
+          <div class="note">
+            <strong>Preview vs Detail</strong>
+            <p>Should this stay card-based like a library, or should the app open into a more immersive reel-first detail screen?</p>
+          </div>
+          <div class="note">
+            <strong>Travel & Food Edge</strong>
+            <p>The biggest UX problem is often location-heavy content. Ask whether destination/place context should be emphasized more strongly than we show here.</p>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <p class="footer">Prototype review page for early UI direction. This is intentionally simple and meant for discussion, not final production UX.</p>
+  </main>
+</body>
+</html>"""
+
+
 def build_landing_html() -> str:
     return """<!DOCTYPE html>
 <html lang="en">
@@ -738,6 +1113,11 @@ def build_web_app_html(user_id: str) -> str:
 @router.get("/", response_class=HTMLResponse)
 def root_app():
     return HTMLResponse(build_landing_html())
+
+
+@router.get("/demo/ui-review", response_class=HTMLResponse)
+def demo_ui_review():
+    return HTMLResponse(build_demo_ui_review_html())
 
 
 @router.get("/app/{user_id}", response_class=HTMLResponse)
