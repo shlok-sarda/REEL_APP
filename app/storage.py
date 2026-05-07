@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.config import PROJECT_ROOT
+from app.config import settings
 
 
 def normalize(value: str) -> str:
@@ -23,6 +23,7 @@ def slugify_user(user_id: str) -> str:
 
 def user_storage_dir(user_id: str) -> Path:
     slug = slugify_user(user_id)
+    storage_root = settings.storage_dir.parent
     if slug == "default":
-        return PROJECT_ROOT / "Shlok_reels"
-    return PROJECT_ROOT / "user_libraries" / f"{slug}_reels"
+        return settings.storage_dir
+    return storage_root / "user_libraries" / f"{slug}_reels"
