@@ -1108,13 +1108,20 @@ def build_web_app_html(user_id: str) -> str:
     .popout-video {{
       width:100%; height:100%; display:block; object-fit:cover; background:#050607;
     }}
-    .popout-controls {{
-      position:absolute; top:8px; left:8px; right:8px; display:flex; align-items:center; justify-content:space-between; gap:10px; z-index:2;
+    .popout-overlay {{
+      position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity .18s ease;
+      background:linear-gradient(180deg, rgba(5,7,10,0.34), rgba(5,7,10,0.02) 34%, rgba(5,7,10,0.42));
+    }}
+    .popout-player-card.show-ui .popout-overlay {{
+      opacity:1; pointer-events:auto;
+    }}
+    .popout-topbar {{
+      position:absolute; top:8px; left:8px; right:8px; display:flex; align-items:center; justify-content:space-between; gap:10px;
     }}
     .popout-dragbar {{
       flex:1 1 auto; min-width:0; height:30px; border-radius:999px;
       border:1px solid rgba(255,255,255,0.14); background:rgba(7,9,12,0.4);
-      display:flex; align-items:center; padding:0 10px; color:rgba(255,255,255,0.78); font-size:.72rem; font-weight:800;
+      display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.78); font-size:.72rem; font-weight:800;
       letter-spacing:.08em; text-transform:uppercase; cursor:grab; user-select:none;
     }}
     .popout-dragbar:active {{ cursor:grabbing; }}
@@ -1123,6 +1130,14 @@ def build_web_app_html(user_id: str) -> str:
       width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
       cursor:pointer; font-size:.86rem;
+    }}
+    .popout-center {{
+      position:absolute; inset:0; display:grid; place-items:center;
+    }}
+    .popout-play {{
+      width:56px; height:56px; border-radius:999px; border:1px solid rgba(255,255,255,0.2);
+      background:rgba(7,9,12,0.56); color:#ffffff; display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer; font-size:1.2rem;
     }}
     .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
@@ -1144,6 +1159,7 @@ def build_web_app_html(user_id: str) -> str:
       cursor:pointer;
     }}
     .item.active {{ border-color: rgba(238,215,166,0.34); background: rgba(255,255,255,0.09); }}
+    .item-body {{ display:grid; gap:10px; margin-top:10px; }}
     .item h3 {{ margin:0; font-size:.98rem; line-height:1.22; }}
     .item p {{ margin:8px 0 0; color:var(--muted); font-size:.88rem; line-height:1.45; }}
     .status-sheet {{
@@ -1232,6 +1248,10 @@ def build_web_app_html(user_id: str) -> str:
       library: {{ standard: [], personalized: [] }},
       currentList: null,
       currentItem: 0,
+      playerOpen: false,
+      playerExpanded: false,
+      playerControlsVisible: true,
+      playerOffset: {{ x: 0, y: 0 }},
       jobs: [],
       dashboard: null,
       loading: true
@@ -1351,6 +1371,10 @@ def build_web_app_html(user_id: str) -> str:
         node.addEventListener('click', () => {{
           state.currentList = Number(node.dataset.collection);
           state.currentItem = 0;
+          state.playerOpen = false;
+          state.playerExpanded = false;
+          state.playerControlsVisible = true;
+          state.playerOffset = {{ x: 0, y: 0 }};
           render();
         }});
       }});
@@ -1435,17 +1459,13 @@ def build_web_app_html(user_id: str) -> str:
         if (!dragging || shell.classList.contains('expanded')) return;
         const nextX = originX + (event.clientX - startX);
         const nextY = originY + (event.clientY - startY);
+        state.playerOffset = {{ x: nextX, y: nextY }};
         card.style.transform = `translate(${{nextX}}px, ${{nextY}}px)`;
       }};
 
       const onPointerUp = () => {{
         if (!dragging) return;
         dragging = false;
-        const match = /translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)/.exec(card.style.transform || '');
-        if (match) {{
-          card.dataset.offsetX = match[1];
-          card.dataset.offsetY = match[2];
-        }}
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
       }};
@@ -1455,12 +1475,39 @@ def build_web_app_html(user_id: str) -> str:
         dragging = true;
         startX = event.clientX;
         startY = event.clientY;
-        originX = Number(card.dataset.offsetX || 0);
-        originY = Number(card.dataset.offsetY || 0);
+        originX = Number(state.playerOffset.x || 0);
+        originY = Number(state.playerOffset.y || 0);
         event.preventDefault();
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('pointerup', onPointerUp);
       }});
+    }}
+
+    let popoutUiTimer = null;
+    function syncPopoutShell() {{
+      const shell = document.getElementById('popoutPlayerShell');
+      const card = document.querySelector('.popout-player-card');
+      if (!shell || !card) return;
+      shell.classList.toggle('open', state.playerOpen);
+      shell.classList.toggle('expanded', state.playerExpanded);
+      card.classList.toggle('show-ui', state.playerControlsVisible);
+      if (state.playerExpanded) {{
+        card.style.transform = '';
+      }} else {{
+        card.style.transform = `translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px)`;
+      }}
+    }}
+
+    function setPopoutControlsVisible(visible, autoHide = false) {{
+      state.playerControlsVisible = visible;
+      if (popoutUiTimer) clearTimeout(popoutUiTimer);
+      syncPopoutShell();
+      if (visible && autoHide) {{
+        popoutUiTimer = setTimeout(() => {{
+          state.playerControlsVisible = false;
+          syncPopoutShell();
+        }}, 1500);
+      }}
     }}
 
     function syncPopoutButtons() {{
@@ -1468,17 +1515,17 @@ def build_web_app_html(user_id: str) -> str:
       const playButton = document.getElementById('popoutPlayButton');
       const muteButton = document.getElementById('popoutMuteButton');
       const fullscreenButton = document.getElementById('popoutFullscreenButton');
-      const shell = document.getElementById('popoutPlayerShell');
       if (video && playButton) playButton.textContent = video.paused ? '▶' : '❚❚';
-      if (video && muteButton) muteButton.textContent = video.muted ? '🔇' : '🔊';
-      if (shell && fullscreenButton) fullscreenButton.textContent = shell.classList.contains('expanded') ? '🗗' : '⤢';
+      if (video && muteButton) muteButton.textContent = video.muted ? '🔇' : '🔈';
+      if (fullscreenButton) fullscreenButton.textContent = state.playerExpanded ? '🗗' : '⤢';
+      syncPopoutShell();
     }}
 
     async function openPopoutPlayer() {{
-      const shell = document.getElementById('popoutPlayerShell');
       const video = document.getElementById('popoutVideo');
-      if (!shell || !video) return;
-      shell.classList.add('open');
+      if (!video) return;
+      state.playerOpen = true;
+      setPopoutControlsVisible(true, true);
       try {{
         await video.play();
       }} catch (error) {{
@@ -1488,12 +1535,11 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     function closePopoutPlayer() {{
-      const shell = document.getElementById('popoutPlayerShell');
       const video = document.getElementById('popoutVideo');
-      if (!shell || !video) return;
-      video.pause();
-      shell.classList.remove('open');
-      shell.classList.remove('expanded');
+      if (video) video.pause();
+      state.playerOpen = false;
+      state.playerExpanded = false;
+      state.playerControlsVisible = false;
       syncPopoutButtons();
     }}
 
@@ -1509,6 +1555,7 @@ def build_web_app_html(user_id: str) -> str:
       }} else {{
         video.pause();
       }}
+      setPopoutControlsVisible(true, true);
       syncPopoutButtons();
     }}
 
@@ -1516,13 +1563,13 @@ def build_web_app_html(user_id: str) -> str:
       const video = document.getElementById('popoutVideo');
       if (!video) return;
       video.muted = !video.muted;
+      setPopoutControlsVisible(true, true);
       syncPopoutButtons();
     }}
 
     async function togglePopoutFullscreen() {{
-      const shell = document.getElementById('popoutPlayerShell');
-      if (!shell) return;
-      shell.classList.toggle('expanded');
+      state.playerExpanded = !state.playerExpanded;
+      setPopoutControlsVisible(true, true);
       syncPopoutButtons();
     }}
 
@@ -1544,70 +1591,71 @@ def build_web_app_html(user_id: str) -> str:
       backButton.classList.remove('hidden');
       screenTitle.textContent = collection.list_title;
       screenSubtitle.textContent = '';
+      if (!item?.local_video_url) {{
+        state.playerOpen = false;
+      }}
       content.innerHTML = `
         <section class="detail">
-          <article class="detail-card">
-            <div class="video-meta">
-              <h2 class="detail-title">${{escapeHtml(item?.name || '')}}</h2>
-              <div class="detail-meta">
-                <span class="mini-chip">${{collection.parent_title ? escapeHtml(collection.parent_title) : 'Saved reel'}}</span>
-                <span class="mini-chip">Item ${{Math.min(state.currentItem + 1, items.length)}} of ${{items.length}}</span>
-                ${{item?.best_buy_link ? '<span class="mini-chip">Buy link ready</span>' : ''}}
-              </div>
-              <p class="detail-summary">${{escapeHtml(item?.summary || '')}}</p>
-              ${{buyBox(item)}}
-              <div class="actions">
-                ${{item?.local_video_url ? '<button id="popoutPlayerButton" class="action primary" type="button">Open Reel</button>' : ''}}
-                ${{item?.media_status === 'failed' || item?.name === 'Processing Failed' ? '<button id="retryReelButton" class="action" type="button">Retry Reel</button>' : ''}}
-                <button id="deleteReelButton" class="action danger" type="button">Delete Reel</button>
-              </div>
-            </div>
-          </article>
-          ${{
-            item?.local_video_url
-              ? `
-                <section id="popoutPlayerShell" class="popout-player-shell">
-                  <article class="popout-player-card" data-offset-x="0" data-offset-y="0">
-                    <div class="popout-controls">
-                      <div class="popout-dragbar" data-popout-drag>Reel</div>
-                      <div class="popout-actions">
-                        <button id="popoutPlayButton" class="popout-btn" type="button" aria-label="Play or pause">❚❚</button>
-                        <button id="popoutMuteButton" class="popout-btn" type="button" aria-label="Mute or unmute">🔇</button>
-                        <button id="popoutFullscreenButton" class="popout-btn" type="button" aria-label="Expand reel">⤢</button>
-                        <button id="popoutCloseButton" class="popout-btn" type="button" aria-label="Close reel">✕</button>
-                      </div>
-                    </div>
-                    <video id="popoutVideo" class="popout-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
-                  </article>
-                </section>
-              `
-              : ''
-          }}
           <section class="items">
             ${{
               items.map((entry, index) => `
                 <article class="item ${{index === state.currentItem ? 'active' : ''}}" data-item="${{index}}">
                   <h3>${{escapeHtml(entry.name)}}</h3>
-                  <p>${{escapeHtml(entry.summary || 'No summary available.')}}</p>
+                  ${{index === state.currentItem ? `
+                    <div class="item-body">
+                      <div class="detail-meta">
+                        <span class="mini-chip">${{collection.parent_title ? escapeHtml(collection.parent_title) : 'Saved reel'}}</span>
+                        <span class="mini-chip">Item ${{index + 1}} of ${{items.length}}</span>
+                        ${{entry?.best_buy_link ? '<span class="mini-chip">Buy link ready</span>' : ''}}
+                      </div>
+                      <p>${{escapeHtml(entry.summary || 'No summary available.')}}</p>
+                      ${{buyBox(entry)}}
+                      <div class="actions">
+                        ${{entry?.media_status === 'failed' || entry?.name === 'Processing Failed' ? '<button id="retryReelButton" class="action" type="button">Retry Reel</button>' : ''}}
+                        <button id="deleteReelButton" class="action danger" type="button">Delete Reel</button>
+                      </div>
+                    </div>
+                  ` : `<p>${{escapeHtml(entry.summary || 'No summary available.')}}</p>`}}
                 </article>
               `).join('')
             }}
           </section>
+          ${{
+            item?.local_video_url
+              ? `
+                <section id="popoutPlayerShell" class="popout-player-shell ${{state.playerOpen ? 'open' : ''}} ${{state.playerExpanded ? 'expanded' : ''}}">
+                  <article class="popout-player-card ${{state.playerControlsVisible ? 'show-ui' : ''}}" style="${{state.playerExpanded ? '' : `transform:translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px);`}}">
+                    <video id="popoutVideo" class="popout-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
+                    <div class="popout-overlay">
+                      <div class="popout-topbar">
+                        <div class="popout-dragbar" data-popout-drag>···</div>
+                        <div class="popout-actions">
+                          <button id="popoutMuteButton" class="popout-btn" type="button" aria-label="Mute or unmute">🔇</button>
+                          <button id="popoutFullscreenButton" class="popout-btn" type="button" aria-label="Expand reel">⤢</button>
+                          <button id="popoutCloseButton" class="popout-btn" type="button" aria-label="Close reel">✕</button>
+                        </div>
+                      </div>
+                      <div class="popout-center">
+                        <button id="popoutPlayButton" class="popout-play" type="button" aria-label="Play or pause">❚❚</button>
+                      </div>
+                    </div>
+                  </article>
+                </section>
+              `
+              : ''
+          }}
         </section>
       `;
       content.querySelectorAll('[data-item]').forEach((node) => {{
-        node.addEventListener('click', () => {{
+        node.addEventListener('click', (event) => {{
+          if (event.target.closest('button') || event.target.closest('a')) return;
           state.currentItem = Number(node.dataset.item);
+          state.playerOpen = Boolean(items[state.currentItem]?.local_video_url);
+          state.playerExpanded = false;
+          state.playerControlsVisible = true;
           renderDetail();
         }});
       }});
-      const popoutPlayerButton = document.getElementById('popoutPlayerButton');
-      if (popoutPlayerButton) {{
-        popoutPlayerButton.addEventListener('click', (event) => {{
-          event.stopPropagation();
-          openPopoutPlayer();
-        }});
-      }}
       const popoutCloseButton = document.getElementById('popoutCloseButton');
       if (popoutCloseButton) {{
         popoutCloseButton.addEventListener('click', closePopoutPlayer);
@@ -1627,17 +1675,20 @@ def build_web_app_html(user_id: str) -> str:
       const popoutShell = document.getElementById('popoutPlayerShell');
       if (popoutShell) {{
         attachPopoutDrag(popoutShell);
-        popoutShell.addEventListener('click', (event) => {{
-          if (event.target === popoutShell && popoutShell.classList.contains('expanded')) {{
-            togglePopoutFullscreen();
-          }}
-        }});
       }}
       const popoutVideo = document.getElementById('popoutVideo');
       if (popoutVideo) {{
+        popoutVideo.addEventListener('click', () => setPopoutControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible));
         popoutVideo.addEventListener('play', syncPopoutButtons);
         popoutVideo.addEventListener('pause', syncPopoutButtons);
         popoutVideo.addEventListener('volumechange', syncPopoutButtons);
+        if (state.playerOpen) {{
+          openPopoutPlayer();
+        }} else {{
+          syncPopoutButtons();
+        }}
+      }} else {{
+        state.playerOpen = false;
         syncPopoutButtons();
       }}
       const deleteButton = document.getElementById('deleteReelButton');
@@ -1694,6 +1745,10 @@ def build_web_app_html(user_id: str) -> str:
     backButton.addEventListener('click', () => {{
       state.currentList = null;
       state.currentItem = 0;
+      state.playerOpen = false;
+      state.playerExpanded = false;
+      state.playerControlsVisible = true;
+      state.playerOffset = {{ x: 0, y: 0 }};
       render();
     }});
     statusButton.addEventListener('click', () => statusSheet.classList.add('open'));
