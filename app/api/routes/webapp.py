@@ -1032,16 +1032,16 @@ def build_web_app_html(user_id: str) -> str:
     }}
     .header {{
       position: sticky; top:0; z-index:20;
-      margin: calc(-16px - var(--safe-top)) -16px 12px;
-      padding: calc(16px + var(--safe-top)) 16px 14px;
+      margin: calc(-16px - var(--safe-top)) -16px 8px;
+      padding: calc(10px + var(--safe-top)) 16px 10px;
       background: linear-gradient(180deg, rgba(7,9,12,0.96), rgba(7,9,12,0.8) 72%, transparent);
       backdrop-filter: blur(18px);
     }}
-    .topbar {{ display:flex; gap:10px; align-items:center; margin-bottom:12px; }}
+    .topbar {{ display:flex; gap:10px; align-items:center; margin-bottom:8px; }}
     .back, .status-btn, .refresh-btn {{
-      width:42px; height:42px; border-radius:999px; border:1px solid var(--line);
+      width:38px; height:38px; border-radius:999px; border:1px solid var(--line);
       background: rgba(255,255,255,0.08); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      font-size:1rem; cursor:pointer;
+      font-size:.95rem; cursor:pointer;
     }}
     .status-wrap {{ position:relative; }}
     .status-badge {{
@@ -1052,44 +1052,24 @@ def build_web_app_html(user_id: str) -> str:
     .status-badge.visible {{ display:flex; }}
     .back.hidden {{ visibility:hidden; pointer-events:none; }}
     .title-wrap {{ flex:1; min-width:0; }}
-    .kicker {{ margin:0 0 6px; color:var(--accent-2); font-size:.72rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
-    .title {{ margin:0; font-size: clamp(1.8rem, 7vw, 2.7rem); letter-spacing:-.05em; line-height:.96; }}
-    .subtitle {{ margin:8px 0 0; color:var(--muted); font-size:.92rem; line-height:1.45; }}
-    .segmented {{
-      display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px;
-      padding:6px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,0.05);
-    }}
-    .segmented button {{
-      height:42px; border:0; border-radius:12px; background:transparent; color:var(--muted); font-weight:850; cursor:pointer;
-    }}
-    .segmented button.active {{ background:rgba(255,255,255,0.1); color:var(--text); }}
+    .kicker {{ margin:0 0 2px; color:var(--accent-2); font-size:.64rem; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }}
+    .title {{ margin:0; font-size: clamp(1.02rem, 5vw, 1.3rem); letter-spacing:-.03em; line-height:1.02; }}
+    .subtitle {{ margin:2px 0 0; color:var(--muted); font-size:.75rem; line-height:1.3; }}
     .search {{
-      width:100%; height:48px; margin-top:14px; border-radius:18px; border:1px solid var(--line);
-      background:rgba(255,255,255,0.07); color:var(--text); padding:0 16px; font-size:.96rem;
+      width:100%; height:42px; margin-top:4px; border-radius:16px; border:1px solid var(--line);
+      background:rgba(255,255,255,0.07); color:var(--text); padding:0 14px; font-size:.9rem;
     }}
-    .stats {{ display:flex; gap:8px; overflow:auto; padding:4px 0 2px; margin-bottom:12px; scrollbar-width:none; }}
+    .stats {{ display:none; }}
     .stats::-webkit-scrollbar {{ display:none; }}
     .chip {{
       flex:0 0 auto; padding:8px 11px; border:1px solid var(--line); border-radius:999px;
       color:var(--muted); background:rgba(255,255,255,0.055); font-size:.74rem; font-weight:900;
     }}
-    .sync-note {{ margin: 6px 0 0; color: var(--soft); font-size: .78rem; }}
+    .sync-note {{ margin: 2px 0 0; color: var(--soft); font-size: .72rem; }}
     .content {{ display:grid; gap:12px; }}
     .card {{
       border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
       box-shadow: var(--shadow); padding:16px; cursor:pointer; overflow:hidden;
-    }}
-    .card-media {{
-      position:relative; margin:-16px -16px 14px; aspect-ratio:1.8; background:#0b0d11;
-      border-bottom:1px solid var(--line); overflow:hidden;
-    }}
-    .card-media img {{
-      width:100%; height:100%; display:block; object-fit:cover;
-      filter:saturate(1.02) contrast(1.04);
-    }}
-    .card-overlay {{
-      position:absolute; inset:0;
-      background:linear-gradient(180deg, rgba(6,7,10,0.0) 0%, rgba(6,7,10,0.15) 45%, rgba(6,7,10,0.72) 100%);
     }}
     .card-meta-row {{
       display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;
@@ -1102,13 +1082,11 @@ def build_web_app_html(user_id: str) -> str:
     .card-kicker {{ margin:0 0 8px; color:var(--accent-2); font-size:.7rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
     .card-title {{ margin:0; font-size:1.08rem; line-height:1.15; letter-spacing:-.02em; }}
     .count {{ padding:6px 8px; border-radius:999px; background:rgba(159,213,197,0.12); color:var(--accent-2); font-size:.72rem; font-weight:900; }}
-    .preview-lines {{ display:grid; gap:8px; }}
-    .preview-lines div {{ color:var(--muted); font-size:.88rem; line-height:1.4; }}
     .detail {{ display:grid; gap:12px; }}
     .video-panel {{
       overflow:hidden; border:1px solid var(--line); border-radius:26px; background:var(--panel); box-shadow:var(--shadow);
     }}
-    .video-wrap {{ position:relative; width:100%; aspect-ratio:.62; background:#050607; }}
+    .video-wrap {{ position:relative; width:100%; aspect-ratio:1.05; max-height:250px; background:#050607; }}
     .video-wrap video, .video-wrap img {{ width:100%; height:100%; display:block; object-fit:cover; }}
     .video-empty {{
       position:absolute; inset:0; display:grid; place-items:center; padding:24px; text-align:center; color:var(--muted);
@@ -1162,11 +1140,24 @@ def build_web_app_html(user_id: str) -> str:
     .loading {{
       min-height:36vh; display:grid; place-items:center; border:1px dashed rgba(255,255,255,0.12); border-radius:24px; color:var(--muted); text-align:center; padding:24px;
     }}
+    .header.compact {{
+      padding-bottom:8px;
+      margin-bottom:4px;
+    }}
+    .header.compact .kicker,
+    .header.compact .subtitle,
+    .header.compact .sync-note {{
+      display:none;
+    }}
+    .header.compact .title {{
+      font-size:1rem;
+      line-height:1.12;
+    }}
   </style>
 </head>
 <body>
   <main class="shell">
-    <header class="header">
+    <header id="header" class="header">
       <div class="topbar">
         <button id="backButton" class="back hidden">‹</button>
         <div class="title-wrap">
@@ -1180,10 +1171,6 @@ def build_web_app_html(user_id: str) -> str:
           <button id="statusButton" class="status-btn">◎</button>
           <span id="statusBadge" class="status-badge">0</span>
         </div>
-      </div>
-      <div class="segmented">
-        <button id="standardTab" class="active">Standard</button>
-        <button id="personalizedTab">Personalized</button>
       </div>
       <input id="searchInput" class="search" type="search" placeholder="Search lists and items" />
     </header>
@@ -1231,6 +1218,7 @@ def build_web_app_html(user_id: str) -> str:
     const searchInput = document.getElementById('searchInput');
     const syncNote = document.getElementById('syncNote');
     const statusBadge = document.getElementById('statusBadge');
+    const header = document.getElementById('header');
 
     function escapeHtml(value) {{
       return String(value ?? '')
@@ -1300,12 +1288,7 @@ def build_web_app_html(user_id: str) -> str:
       syncNote.textContent = dash.last_updated
         ? `Last sync ${{new Date(dash.last_updated).toLocaleString()}}`
         : 'Waiting for the first completed sync.';
-      stats.innerHTML = `
-        <span class="chip">${{collections.length}} Lists</span>
-        <span class="chip">${{items}} Items</span>
-        <span class="chip">${{dash.item_count || items}} Indexed</span>
-        <span class="chip">${{dash.pending_url_count || 0}} Pending</span>
-      `;
+      stats.innerHTML = '';
     }}
 
     function renderHome() {{
@@ -1314,41 +1297,23 @@ def build_web_app_html(user_id: str) -> str:
         return;
       }}
       const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
+      header.classList.remove('compact');
       backButton.classList.add('hidden');
-      screenTitle.textContent = state.mode === 'personalized' ? 'Your Personalized Library' : 'Your Reel Library';
-      screenSubtitle.textContent = state.mode === 'personalized'
-        ? 'Repeated interests get separated automatically; everything else stays broad.'
-        : 'Browse your saved reels by clean collection titles.';
+      screenTitle.textContent = 'Your Reel Library';
+      screenSubtitle.textContent = '';
       if (!collections.length) {{
         content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No collections yet</h2><p style="margin:0;">Send reels to the bot and they’ll appear here.</p></div></div>`;
         return;
       }}
       content.innerHTML = collections.map((collection, index) => {{
-        const preview = collection.items.filter((item) => matchesItem(item, state.query)).slice(0, 2);
-        const cover = coverForCollection(collection);
         return `
           <article class="card" data-collection="${{index}}">
-            <div class="card-media">
-              ${{
-                cover
-                  ? `<img src="${{escapeHtml(cover)}}" alt="" />`
-                  : `<div class="video-empty">Open this list to explore the saved reels inside.</div>`
-              }}
-              <div class="card-overlay"></div>
-            </div>
             <div class="card-top">
               <div>
                 ${{collection.parent_title ? `<p class="card-kicker">${{escapeHtml(collection.parent_title)}}</p>` : ''}}
                 <h2 class="card-title">${{escapeHtml(collection.list_title)}}</h2>
               </div>
               <span class="count">${{collection.items.length}} items</span>
-            </div>
-            <div class="preview-lines">
-              ${{preview.map((item) => `<div>${{escapeHtml(item.summary || item.name)}}</div>`).join('')}}
-            </div>
-            <div class="card-meta-row">
-              <span class="mini-chip">${{state.mode === 'personalized' ? 'Personalized view' : 'Standard view'}}</span>
-              <span class="mini-chip">${{preview.length ? `${{preview.length}} quick previews` : 'Ready to browse'}}</span>
             </div>
           </article>
         `;
@@ -1440,9 +1405,10 @@ def build_web_app_html(user_id: str) -> str:
       }}
       const items = collection.items.filter((item) => matchesItem(item, state.query));
       const item = items[state.currentItem] || items[0];
+      header.classList.add('compact');
       backButton.classList.remove('hidden');
       screenTitle.textContent = collection.list_title;
-      screenSubtitle.textContent = `${{collection.parent_title ? `${{collection.parent_title}} · ` : ''}}${{items.length}} items`;
+      screenSubtitle.textContent = '';
       content.innerHTML = `
         <section class="detail">
           <article class="video-panel">
@@ -1538,21 +1504,6 @@ def build_web_app_html(user_id: str) -> str:
       if (state.currentList === null) renderHome();
       else renderDetail();
     }}
-
-    document.getElementById('standardTab').addEventListener('click', () => {{
-      state.mode = 'standard';
-      state.currentList = null;
-      document.getElementById('standardTab').classList.add('active');
-      document.getElementById('personalizedTab').classList.remove('active');
-      render();
-    }});
-    document.getElementById('personalizedTab').addEventListener('click', () => {{
-      state.mode = 'personalized';
-      state.currentList = null;
-      document.getElementById('personalizedTab').classList.add('active');
-      document.getElementById('standardTab').classList.remove('active');
-      render();
-    }});
     backButton.addEventListener('click', () => {{
       state.currentList = null;
       state.currentItem = 0;
