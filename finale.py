@@ -84,7 +84,7 @@ You are analyzing Instagram reel keyframes together with textual context.
 TEXTUAL CONTEXT:
 Caption: {result.get('caption', '')}
 Transcript: {result.get('transcript', '')}
-Hashtags: {', '.join(result.get('hashtags', []))}
+Hashtags: {format_hashtags(result.get('hashtags', ''))}
 
 OBJECTIVE:
 Understand what the reel is about and extract meaningful visuals.
@@ -133,6 +133,12 @@ def normalize_label(value):
     return " ".join((value or "").strip().split())
 
 
+def format_hashtags(value):
+    if isinstance(value, list):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return normalize_label(value)
+
+
 def load_json_content(response):
     try:
         return json.loads(response.choices[0].message.content)
@@ -161,7 +167,7 @@ Important:
 TEXTUAL DATA:
 Caption: {result.get('caption', '')}
 Transcript: {result.get('transcript', '')}
-Hashtags: {', '.join(result.get('hashtags', []))}
+Hashtags: {format_hashtags(result.get('hashtags', ''))}
 
 VISUAL DATA:
 Theme: {visual_data.get('inferred_main_theme', '')}
@@ -242,7 +248,7 @@ ITEM RULES:
 TEXTUAL DATA:
 Caption: {result.get('caption', '')}
 Transcript: {result.get('transcript', '')}
-Hashtags: {', '.join(result.get('hashtags', []))}
+Hashtags: {format_hashtags(result.get('hashtags', ''))}
 
 VISUAL DATA:
 Theme: {visual_data.get('inferred_main_theme', '')}
@@ -293,7 +299,7 @@ Extracted Items: {item_preview}
 TEXTUAL DATA:
 Transcript: {result.get('transcript', '')}
 Caption: {result.get('caption', '')}
-Hashtags: {', '.join(result.get('hashtags', []))}
+Hashtags: {format_hashtags(result.get('hashtags', ''))}
 
 VISUAL DATA:
 Visible Text: {', '.join(visual_data.get('relevant_visible_text', []))}
@@ -490,6 +496,11 @@ def pretty_print(final_output):
     print("="*60 + "\n")
 
 
+def summarize_error(exc: Exception, limit: int = 180) -> str:
+    text = " ".join(str(exc).strip().split())
+    return text[:limit] if text else exc.__class__.__name__
+
+
 # --------------------------------------------------
 # MAIN PIPELINE
 # --------------------------------------------------
@@ -499,19 +510,37 @@ def run_pipeline(url):
     # Step 1: text
     result = process_reel(url)
 
-    # Step 2: video download
-    video_path = download_reel(url)
+    # Step 2 + 3: visuals are helpful, but the MVP should still work without them.
+    visual_data = {}
+    try:
+        video_path = download_reel(url)
+    except Exception as exc:
+        print(f"⚠️ Video download skipped: {summarize_error(exc)}")
+        video_path = ""
 
-    # Step 3: visuals
-    visual_data = extract_visual_data(result, video_path)
+    if video_path:
+        try:
+            visual_data = extract_visual_data(result, video_path)
+        except Exception as exc:
+            print(f"⚠️ Visual extraction skipped: {summarize_error(exc)}")
+            try:
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+            except Exception:
+                pass
 
     # Step 4: classification
     final_output = classify_reel(result, visual_data)
 
     # Step 5: product extraction + buy links
-    product_data = extract_product_data(result, visual_data, final_output)
-    final_output["contains_products"] = product_data["contains_products"]
-    final_output["products"] = product_data["products"]
+    try:
+        product_data = extract_product_data(result, visual_data, final_output)
+        final_output["contains_products"] = product_data["contains_products"]
+        final_output["products"] = product_data["products"]
+    except Exception as exc:
+        print(f"⚠️ Product extraction skipped: {summarize_error(exc)}")
+        final_output["contains_products"] = False
+        final_output["products"] = []
 
     return final_output
 
@@ -535,7 +564,26 @@ def process_csv(input_csv, output_csv):
                 output = run_pipeline(url)
 
                 if "error" in output:
-                    results.append([url, "", "", "ERROR", "", "", "", "", "", "", "", "", "", "", ""])
+                    results.append(
+                        [
+                            url,
+                            "Failed Reels",
+                            "Processing Failures",
+                            "failed",
+                            "Processing Failed",
+                            normalize_label(output.get("error")) or "Model returned invalid output.",
+                            "no",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                        ]
+                    )
                     continue
 
                 primary = output.get("primary_category", "")
@@ -595,7 +643,26 @@ def process_csv(input_csv, output_csv):
 
             except Exception as e:
                 print(f"❌ Failed: {url} | {e}")
-                results.append([url, "", "", "FAILED", "", "", "", "", "", "", "", "", "", "", "", ""])
+                results.append(
+                    [
+                        url,
+                        "Failed Reels",
+                        "Processing Failures",
+                        "failed",
+                        "Processing Failed",
+                        f"Processing error: {summarize_error(e)}",
+                        "no",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
 
     # Write output CSV
     with open(output_csv, "w", newline="") as outfile:
