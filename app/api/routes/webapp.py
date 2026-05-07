@@ -1082,17 +1082,41 @@ def build_web_app_html(user_id: str) -> str:
     .card-kicker {{ margin:0 0 8px; color:var(--accent-2); font-size:.7rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
     .card-title {{ margin:0; font-size:1.08rem; line-height:1.15; letter-spacing:-.02em; }}
     .count {{ padding:6px 8px; border-radius:999px; background:rgba(159,213,197,0.12); color:var(--accent-2); font-size:.72rem; font-weight:900; }}
-    .detail {{ display:grid; gap:12px; }}
-    .video-panel {{
-      overflow:hidden; border:1px solid var(--line); border-radius:26px; background:var(--panel); box-shadow:var(--shadow);
+    .detail {{ display:grid; gap:12px; padding-bottom:calc(min(35vh, 280px) + 44px + var(--safe-bottom)); }}
+    .detail-card {{
+      border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
+      box-shadow: var(--shadow); padding:16px;
     }}
-    .video-wrap {{ position:relative; width:100%; aspect-ratio:1.05; max-height:250px; background:#050607; }}
+    .mini-player-shell {{
+      position:fixed; left:12px; bottom:calc(12px + var(--safe-bottom)); z-index:35;
+    }}
+    .mini-player-shell.expanded {{
+      inset:0; left:0; bottom:0; display:grid; place-items:center;
+      background:rgba(5,7,10,0.78); backdrop-filter:blur(10px); padding:20px;
+    }}
+    .mini-player-card {{
+      position:relative; height:min(35vh, 280px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
+      border:1px solid var(--line); background:#050607; box-shadow:var(--shadow);
+    }}
+    .mini-player-shell.expanded .mini-player-card {{
+      height:min(72vh, 620px);
+      max-width:min(92vw, 420px);
+    }}
+    .video-wrap {{ position:relative; width:100%; height:100%; background:#050607; }}
     .video-wrap video, .video-wrap img {{ width:100%; height:100%; display:block; object-fit:cover; }}
     .video-empty {{
       position:absolute; inset:0; display:grid; place-items:center; padding:24px; text-align:center; color:var(--muted);
       font-size:.95rem; line-height:1.5;
     }}
-    .video-meta {{ padding:16px; display:grid; gap:10px; }}
+    .mini-player-controls {{
+      position:absolute; top:8px; right:8px; display:flex; gap:6px; z-index:2;
+    }}
+    .player-btn {{
+      width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
+      background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
+      cursor:pointer; font-size:.9rem;
+    }}
+    .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
     .detail-summary {{ margin:0; color:var(--muted); font-size:.94rem; line-height:1.55; }}
     .detail-meta {{ display:flex; gap:8px; flex-wrap:wrap; }}
@@ -1200,6 +1224,7 @@ def build_web_app_html(user_id: str) -> str:
       library: {{ standard: [], personalized: [] }},
       currentList: null,
       currentItem: 0,
+      playerExpanded: false,
       jobs: [],
       dashboard: null,
       loading: true
@@ -1231,10 +1256,6 @@ def build_web_app_html(user_id: str) -> str:
 
     function modeCollections() {{
       return state.library[state.mode] || [];
-    }}
-
-    function coverForCollection(collection) {{
-      return collection?.items?.find((item) => item.thumbnail_url)?.thumbnail_url || '';
     }}
 
     function matchesItem(item, q) {{
@@ -1273,6 +1294,7 @@ def build_web_app_html(user_id: str) -> str:
     let refreshTimer = null;
     function scheduleNextRefresh() {{
       if (refreshTimer) clearTimeout(refreshTimer);
+      if (state.currentList !== null || state.playerExpanded) return;
       const dash = state.dashboard || {{}};
       const hasActiveWork = (dash.pending_url_count || 0) > 0 || (dash.running_job_count || 0) > 0 || (dash.failed_url_count || 0) > 0;
       refreshTimer = setTimeout(loadData, hasActiveWork ? 5000 : 20000);
@@ -1322,6 +1344,7 @@ def build_web_app_html(user_id: str) -> str:
         node.addEventListener('click', () => {{
           state.currentList = Number(node.dataset.collection);
           state.currentItem = 0;
+          state.playerExpanded = false;
           render();
         }});
       }});
@@ -1391,6 +1414,11 @@ def build_web_app_html(user_id: str) -> str:
       await loadData();
     }}
 
+    function togglePlayerExpanded() {{
+      state.playerExpanded = !state.playerExpanded;
+      renderDetail();
+    }}
+
     function renderDetail() {{
       if (state.loading) {{
         content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Refreshing this list…</h2><p style="margin:0;">Updating the reel player and item cards.</p></div></div>`;
@@ -1411,16 +1439,7 @@ def build_web_app_html(user_id: str) -> str:
       screenSubtitle.textContent = '';
       content.innerHTML = `
         <section class="detail">
-          <article class="video-panel">
-            <div class="video-wrap">
-              ${{
-                item?.local_video_url
-                  ? `<video src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} controls playsinline preload="metadata"></video>`
-                  : item?.thumbnail_url
-                    ? `<img src="${{escapeHtml(item.thumbnail_url)}}" alt="" />`
-                    : `<div class="video-empty">This reel is still waiting for local playback or media extraction.</div>`
-              }}
-            </div>
+          <article class="detail-card">
             <div class="video-meta">
               <h2 class="detail-title">${{escapeHtml(item?.name || '')}}</h2>
               <div class="detail-meta">
@@ -1436,6 +1455,22 @@ def build_web_app_html(user_id: str) -> str:
               </div>
             </div>
           </article>
+          <section class="mini-player-shell ${{state.playerExpanded ? 'expanded' : ''}}" id="miniPlayerShell">
+            <article class="mini-player-card">
+              <div class="mini-player-controls">
+                <button id="togglePlayerButton" class="player-btn" type="button">${{state.playerExpanded ? '×' : '⤢'}}</button>
+              </div>
+              <div class="video-wrap">
+                ${{
+                  item?.local_video_url
+                    ? `<video src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} controls playsinline preload="metadata"></video>`
+                    : item?.thumbnail_url
+                      ? `<img src="${{escapeHtml(item.thumbnail_url)}}" alt="" />`
+                      : `<div class="video-empty">This reel is still waiting for local playback or media extraction.</div>`
+                }}
+              </div>
+            </article>
+          </section>
           <section class="items">
             ${{
               items.map((entry, index) => `
@@ -1451,9 +1486,25 @@ def build_web_app_html(user_id: str) -> str:
       content.querySelectorAll('[data-item]').forEach((node) => {{
         node.addEventListener('click', () => {{
           state.currentItem = Number(node.dataset.item);
+          state.playerExpanded = false;
           renderDetail();
         }});
       }});
+      const miniPlayerShell = document.getElementById('miniPlayerShell');
+      if (miniPlayerShell) {{
+        miniPlayerShell.addEventListener('click', (event) => {{
+          if (event.target === miniPlayerShell && state.playerExpanded) {{
+            togglePlayerExpanded();
+          }}
+        }});
+      }}
+      const togglePlayerButton = document.getElementById('togglePlayerButton');
+      if (togglePlayerButton) {{
+        togglePlayerButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          togglePlayerExpanded();
+        }});
+      }}
       const deleteButton = document.getElementById('deleteReelButton');
       if (deleteButton) {{
         deleteButton.addEventListener('click', deleteCurrentReel);
@@ -1503,10 +1554,12 @@ def build_web_app_html(user_id: str) -> str:
       renderStatus();
       if (state.currentList === null) renderHome();
       else renderDetail();
+      scheduleNextRefresh();
     }}
     backButton.addEventListener('click', () => {{
       state.currentList = null;
       state.currentItem = 0;
+      state.playerExpanded = false;
       render();
     }});
     statusButton.addEventListener('click', () => statusSheet.classList.add('open'));
