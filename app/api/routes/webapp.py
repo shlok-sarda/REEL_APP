@@ -1082,46 +1082,47 @@ def build_web_app_html(user_id: str) -> str:
     .card-kicker {{ margin:0 0 8px; color:var(--accent-2); font-size:.7rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
     .card-title {{ margin:0; font-size:1.08rem; line-height:1.15; letter-spacing:-.02em; }}
     .count {{ padding:6px 8px; border-radius:999px; background:rgba(159,213,197,0.12); color:var(--accent-2); font-size:.72rem; font-weight:900; }}
-    .detail {{ display:grid; gap:12px; padding-bottom:calc(min(35vh, 280px) + 44px + var(--safe-bottom)); }}
+    .detail {{ display:grid; gap:12px; }}
     .detail-card {{
       border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
       box-shadow: var(--shadow); padding:16px;
     }}
-    .mini-player-shell {{
-      position:fixed; right:12px; bottom:calc(12px + var(--safe-bottom)); z-index:35;
+    .popout-player-shell {{
+      position:fixed; right:12px; bottom:calc(12px + var(--safe-bottom)); z-index:38;
+      display:none;
     }}
-    .mini-player-shell.expanded {{
-      inset:0; left:0; bottom:0; display:grid; place-items:center;
-      background:rgba(5,7,10,0.78); backdrop-filter:blur(10px); padding:20px;
-    }}
-    .mini-player-card {{
+    .popout-player-shell.open {{ display:block; }}
+    .popout-player-card {{
       position:relative; height:min(35vh, 280px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
       border:1px solid var(--line); background:#050607; box-shadow:var(--shadow);
+      touch-action:none;
     }}
-    .mini-player-shell.expanded .mini-player-card {{
-      height:min(72vh, 620px);
+    .popout-player-shell.expanded {{
+      inset:0; right:0; bottom:0; display:grid; place-items:center;
+      background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); padding:20px;
+    }}
+    .popout-player-shell.expanded .popout-player-card {{
+      height:min(78vh, 680px);
       max-width:min(92vw, 420px);
     }}
-    .video-wrap {{ position:relative; width:100%; height:100%; background:#050607; }}
-    .video-wrap video, .video-wrap img {{ width:100%; height:100%; display:block; object-fit:cover; }}
-    .video-empty {{
-      position:absolute; inset:0; display:grid; place-items:center; padding:24px; text-align:center; color:var(--muted);
-      font-size:.95rem; line-height:1.5;
+    .popout-video {{
+      width:100%; height:100%; display:block; object-fit:cover; background:#050607;
     }}
-    .mini-player-controls {{
-      position:absolute; top:8px; right:8px; display:flex; gap:6px; z-index:2;
+    .popout-controls {{
+      position:absolute; top:8px; left:8px; right:8px; display:flex; align-items:center; justify-content:space-between; gap:10px; z-index:2;
     }}
-    .mini-player-drag {{
-      position:absolute; top:8px; left:8px; z-index:2;
+    .popout-dragbar {{
+      flex:1 1 auto; min-width:0; height:30px; border-radius:999px;
+      border:1px solid rgba(255,255,255,0.14); background:rgba(7,9,12,0.4);
+      display:flex; align-items:center; padding:0 10px; color:rgba(255,255,255,0.78); font-size:.72rem; font-weight:800;
+      letter-spacing:.08em; text-transform:uppercase; cursor:grab; user-select:none;
+    }}
+    .popout-dragbar:active {{ cursor:grabbing; }}
+    .popout-actions {{ display:flex; align-items:center; gap:6px; }}
+    .popout-btn {{
       width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      cursor:grab; font-size:.85rem; touch-action:none;
-    }}
-    .mini-player-drag:active {{ cursor:grabbing; }}
-    .player-btn {{
-      width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
-      background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:.9rem;
+      cursor:pointer; font-size:.86rem;
     }}
     .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
@@ -1231,8 +1232,6 @@ def build_web_app_html(user_id: str) -> str:
       library: {{ standard: [], personalized: [] }},
       currentList: null,
       currentItem: 0,
-      playerExpanded: false,
-      playerOffset: {{ x: 0, y: 0 }},
       jobs: [],
       dashboard: null,
       loading: true
@@ -1302,7 +1301,7 @@ def build_web_app_html(user_id: str) -> str:
     let refreshTimer = null;
     function scheduleNextRefresh() {{
       if (refreshTimer) clearTimeout(refreshTimer);
-      if (state.currentList !== null || state.playerExpanded) return;
+      if (state.currentList !== null) return;
       const dash = state.dashboard || {{}};
       const hasActiveWork = (dash.pending_url_count || 0) > 0 || (dash.running_job_count || 0) > 0 || (dash.failed_url_count || 0) > 0;
       refreshTimer = setTimeout(loadData, hasActiveWork ? 5000 : 20000);
@@ -1352,7 +1351,6 @@ def build_web_app_html(user_id: str) -> str:
         node.addEventListener('click', () => {{
           state.currentList = Number(node.dataset.collection);
           state.currentItem = 0;
-          state.playerExpanded = false;
           render();
         }});
       }});
@@ -1422,60 +1420,110 @@ def build_web_app_html(user_id: str) -> str:
       await loadData();
     }}
 
-    function togglePlayerExpanded() {{
-      state.playerExpanded = !state.playerExpanded;
-      renderDetail();
-    }}
-
-    function clampPlayerOffset(x, y) {{
-      const maxX = Math.max(0, Math.floor(window.innerWidth * 0.58));
-      const maxY = Math.max(0, Math.floor(window.innerHeight * 0.48));
-      return {{
-        x: Math.max(-maxX, Math.min(maxX, x)),
-        y: Math.max(-maxY, Math.min(maxY, y)),
-      }};
-    }}
-
-    function attachMiniPlayerDrag() {{
-      const dragHandle = document.getElementById('miniPlayerDrag');
-      const shell = document.getElementById('miniPlayerShell');
-      const card = shell?.querySelector('.mini-player-card');
-      if (!dragHandle || !shell || !card || state.playerExpanded) return;
+    function attachPopoutDrag(shell) {{
+      const handle = shell.querySelector('[data-popout-drag]');
+      const card = shell.querySelector('.popout-player-card');
+      if (!handle || !card) return;
 
       let dragging = false;
+      let originX = 0;
+      let originY = 0;
       let startX = 0;
       let startY = 0;
-      let originX = state.playerOffset.x;
-      let originY = state.playerOffset.y;
 
       const onPointerMove = (event) => {{
-        if (!dragging) return;
-        const next = clampPlayerOffset(
-          originX + (event.clientX - startX),
-          originY + (event.clientY - startY),
-        );
-        state.playerOffset = next;
-        card.style.transform = `translate(${{next.x}}px, ${{next.y}}px)`;
+        if (!dragging || shell.classList.contains('expanded')) return;
+        const nextX = originX + (event.clientX - startX);
+        const nextY = originY + (event.clientY - startY);
+        card.style.transform = `translate(${{nextX}}px, ${{nextY}}px)`;
       }};
 
       const onPointerUp = () => {{
         if (!dragging) return;
         dragging = false;
+        const match = /translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)/.exec(card.style.transform || '');
+        if (match) {{
+          card.dataset.offsetX = match[1];
+          card.dataset.offsetY = match[2];
+        }}
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
       }};
 
-      dragHandle.addEventListener('pointerdown', (event) => {{
-        event.preventDefault();
-        event.stopPropagation();
+      handle.addEventListener('pointerdown', (event) => {{
+        if (shell.classList.contains('expanded')) return;
         dragging = true;
         startX = event.clientX;
         startY = event.clientY;
-        originX = state.playerOffset.x;
-        originY = state.playerOffset.y;
+        originX = Number(card.dataset.offsetX || 0);
+        originY = Number(card.dataset.offsetY || 0);
+        event.preventDefault();
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('pointerup', onPointerUp);
       }});
+    }}
+
+    function syncPopoutButtons() {{
+      const video = document.getElementById('popoutVideo');
+      const playButton = document.getElementById('popoutPlayButton');
+      const muteButton = document.getElementById('popoutMuteButton');
+      const fullscreenButton = document.getElementById('popoutFullscreenButton');
+      const shell = document.getElementById('popoutPlayerShell');
+      if (video && playButton) playButton.textContent = video.paused ? '▶' : '❚❚';
+      if (video && muteButton) muteButton.textContent = video.muted ? '🔇' : '🔊';
+      if (shell && fullscreenButton) fullscreenButton.textContent = shell.classList.contains('expanded') ? '🗗' : '⤢';
+    }}
+
+    async function openPopoutPlayer() {{
+      const shell = document.getElementById('popoutPlayerShell');
+      const video = document.getElementById('popoutVideo');
+      if (!shell || !video) return;
+      shell.classList.add('open');
+      try {{
+        await video.play();
+      }} catch (error) {{
+        // Autoplay may be blocked until the user presses play.
+      }}
+      syncPopoutButtons();
+    }}
+
+    function closePopoutPlayer() {{
+      const shell = document.getElementById('popoutPlayerShell');
+      const video = document.getElementById('popoutVideo');
+      if (!shell || !video) return;
+      video.pause();
+      shell.classList.remove('open');
+      shell.classList.remove('expanded');
+      syncPopoutButtons();
+    }}
+
+    async function togglePopoutPlayback() {{
+      const video = document.getElementById('popoutVideo');
+      if (!video) return;
+      if (video.paused) {{
+        try {{
+          await video.play();
+        }} catch (error) {{
+          return;
+        }}
+      }} else {{
+        video.pause();
+      }}
+      syncPopoutButtons();
+    }}
+
+    function togglePopoutMute() {{
+      const video = document.getElementById('popoutVideo');
+      if (!video) return;
+      video.muted = !video.muted;
+      syncPopoutButtons();
+    }}
+
+    async function togglePopoutFullscreen() {{
+      const shell = document.getElementById('popoutPlayerShell');
+      if (!shell) return;
+      shell.classList.toggle('expanded');
+      syncPopoutButtons();
     }}
 
     function renderDetail() {{
@@ -1509,28 +1557,32 @@ def build_web_app_html(user_id: str) -> str:
               <p class="detail-summary">${{escapeHtml(item?.summary || '')}}</p>
               ${{buyBox(item)}}
               <div class="actions">
+                ${{item?.local_video_url ? '<button id="popoutPlayerButton" class="action primary" type="button">Open Reel</button>' : ''}}
                 ${{item?.media_status === 'failed' || item?.name === 'Processing Failed' ? '<button id="retryReelButton" class="action" type="button">Retry Reel</button>' : ''}}
                 <button id="deleteReelButton" class="action danger" type="button">Delete Reel</button>
               </div>
             </div>
           </article>
-          <section class="mini-player-shell ${{state.playerExpanded ? 'expanded' : ''}}" id="miniPlayerShell">
-            <article class="mini-player-card" style="${{state.playerExpanded ? '' : `transform:translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px);`}}">
-              ${{state.playerExpanded ? '' : '<button id="miniPlayerDrag" class="mini-player-drag" type="button">⋮⋮</button>'}}
-              <div class="mini-player-controls">
-                <button id="togglePlayerButton" class="player-btn" type="button">${{state.playerExpanded ? '×' : '⤢'}}</button>
-              </div>
-              <div class="video-wrap">
-                ${{
-                  item?.local_video_url
-                    ? `<video src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} controls playsinline preload="metadata"></video>`
-                    : item?.thumbnail_url
-                      ? `<img src="${{escapeHtml(item.thumbnail_url)}}" alt="" />`
-                      : `<div class="video-empty">This reel is still waiting for local playback or media extraction.</div>`
-                }}
-              </div>
-            </article>
-          </section>
+          ${{
+            item?.local_video_url
+              ? `
+                <section id="popoutPlayerShell" class="popout-player-shell">
+                  <article class="popout-player-card" data-offset-x="0" data-offset-y="0">
+                    <div class="popout-controls">
+                      <div class="popout-dragbar" data-popout-drag>Reel</div>
+                      <div class="popout-actions">
+                        <button id="popoutPlayButton" class="popout-btn" type="button" aria-label="Play or pause">❚❚</button>
+                        <button id="popoutMuteButton" class="popout-btn" type="button" aria-label="Mute or unmute">🔇</button>
+                        <button id="popoutFullscreenButton" class="popout-btn" type="button" aria-label="Expand reel">⤢</button>
+                        <button id="popoutCloseButton" class="popout-btn" type="button" aria-label="Close reel">✕</button>
+                      </div>
+                    </div>
+                    <video id="popoutVideo" class="popout-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
+                  </article>
+                </section>
+              `
+              : ''
+          }}
           <section class="items">
             ${{
               items.map((entry, index) => `
@@ -1546,26 +1598,48 @@ def build_web_app_html(user_id: str) -> str:
       content.querySelectorAll('[data-item]').forEach((node) => {{
         node.addEventListener('click', () => {{
           state.currentItem = Number(node.dataset.item);
-          state.playerExpanded = false;
           renderDetail();
         }});
       }});
-      const miniPlayerShell = document.getElementById('miniPlayerShell');
-      if (miniPlayerShell) {{
-        miniPlayerShell.addEventListener('click', (event) => {{
-          if (event.target === miniPlayerShell && state.playerExpanded) {{
-            togglePlayerExpanded();
+      const popoutPlayerButton = document.getElementById('popoutPlayerButton');
+      if (popoutPlayerButton) {{
+        popoutPlayerButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          openPopoutPlayer();
+        }});
+      }}
+      const popoutCloseButton = document.getElementById('popoutCloseButton');
+      if (popoutCloseButton) {{
+        popoutCloseButton.addEventListener('click', closePopoutPlayer);
+      }}
+      const popoutPlayButton = document.getElementById('popoutPlayButton');
+      if (popoutPlayButton) {{
+        popoutPlayButton.addEventListener('click', togglePopoutPlayback);
+      }}
+      const popoutMuteButton = document.getElementById('popoutMuteButton');
+      if (popoutMuteButton) {{
+        popoutMuteButton.addEventListener('click', togglePopoutMute);
+      }}
+      const popoutFullscreenButton = document.getElementById('popoutFullscreenButton');
+      if (popoutFullscreenButton) {{
+        popoutFullscreenButton.addEventListener('click', togglePopoutFullscreen);
+      }}
+      const popoutShell = document.getElementById('popoutPlayerShell');
+      if (popoutShell) {{
+        attachPopoutDrag(popoutShell);
+        popoutShell.addEventListener('click', (event) => {{
+          if (event.target === popoutShell && popoutShell.classList.contains('expanded')) {{
+            togglePopoutFullscreen();
           }}
         }});
       }}
-      const togglePlayerButton = document.getElementById('togglePlayerButton');
-      if (togglePlayerButton) {{
-        togglePlayerButton.addEventListener('click', (event) => {{
-          event.stopPropagation();
-          togglePlayerExpanded();
-        }});
+      const popoutVideo = document.getElementById('popoutVideo');
+      if (popoutVideo) {{
+        popoutVideo.addEventListener('play', syncPopoutButtons);
+        popoutVideo.addEventListener('pause', syncPopoutButtons);
+        popoutVideo.addEventListener('volumechange', syncPopoutButtons);
+        syncPopoutButtons();
       }}
-      attachMiniPlayerDrag();
       const deleteButton = document.getElementById('deleteReelButton');
       if (deleteButton) {{
         deleteButton.addEventListener('click', deleteCurrentReel);
@@ -1620,7 +1694,6 @@ def build_web_app_html(user_id: str) -> str:
     backButton.addEventListener('click', () => {{
       state.currentList = null;
       state.currentItem = 0;
-      state.playerExpanded = false;
       render();
     }});
     statusButton.addEventListener('click', () => statusSheet.classList.add('open'));
