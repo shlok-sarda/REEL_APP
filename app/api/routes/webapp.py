@@ -1088,7 +1088,7 @@ def build_web_app_html(user_id: str) -> str:
       box-shadow: var(--shadow); padding:16px;
     }}
     .mini-player-shell {{
-      position:fixed; left:12px; bottom:calc(12px + var(--safe-bottom)); z-index:35;
+      position:fixed; right:12px; bottom:calc(12px + var(--safe-bottom)); z-index:35;
     }}
     .mini-player-shell.expanded {{
       inset:0; left:0; bottom:0; display:grid; place-items:center;
@@ -1111,6 +1111,13 @@ def build_web_app_html(user_id: str) -> str:
     .mini-player-controls {{
       position:absolute; top:8px; right:8px; display:flex; gap:6px; z-index:2;
     }}
+    .mini-player-drag {{
+      position:absolute; top:8px; left:8px; z-index:2;
+      width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
+      background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
+      cursor:grab; font-size:.85rem; touch-action:none;
+    }}
+    .mini-player-drag:active {{ cursor:grabbing; }}
     .player-btn {{
       width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
@@ -1225,6 +1232,7 @@ def build_web_app_html(user_id: str) -> str:
       currentList: null,
       currentItem: 0,
       playerExpanded: false,
+      playerOffset: {{ x: 0, y: 0 }},
       jobs: [],
       dashboard: null,
       loading: true
@@ -1419,6 +1427,57 @@ def build_web_app_html(user_id: str) -> str:
       renderDetail();
     }}
 
+    function clampPlayerOffset(x, y) {{
+      const maxX = Math.max(0, Math.floor(window.innerWidth * 0.58));
+      const maxY = Math.max(0, Math.floor(window.innerHeight * 0.48));
+      return {{
+        x: Math.max(-maxX, Math.min(maxX, x)),
+        y: Math.max(-maxY, Math.min(maxY, y)),
+      }};
+    }}
+
+    function attachMiniPlayerDrag() {{
+      const dragHandle = document.getElementById('miniPlayerDrag');
+      const shell = document.getElementById('miniPlayerShell');
+      const card = shell?.querySelector('.mini-player-card');
+      if (!dragHandle || !shell || !card || state.playerExpanded) return;
+
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let originX = state.playerOffset.x;
+      let originY = state.playerOffset.y;
+
+      const onPointerMove = (event) => {{
+        if (!dragging) return;
+        const next = clampPlayerOffset(
+          originX + (event.clientX - startX),
+          originY + (event.clientY - startY),
+        );
+        state.playerOffset = next;
+        card.style.transform = `translate(${{next.x}}px, ${{next.y}}px)`;
+      }};
+
+      const onPointerUp = () => {{
+        if (!dragging) return;
+        dragging = false;
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+      }};
+
+      dragHandle.addEventListener('pointerdown', (event) => {{
+        event.preventDefault();
+        event.stopPropagation();
+        dragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        originX = state.playerOffset.x;
+        originY = state.playerOffset.y;
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+      }});
+    }}
+
     function renderDetail() {{
       if (state.loading) {{
         content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Refreshing this list…</h2><p style="margin:0;">Updating the reel player and item cards.</p></div></div>`;
@@ -1456,7 +1515,8 @@ def build_web_app_html(user_id: str) -> str:
             </div>
           </article>
           <section class="mini-player-shell ${{state.playerExpanded ? 'expanded' : ''}}" id="miniPlayerShell">
-            <article class="mini-player-card">
+            <article class="mini-player-card" style="${{state.playerExpanded ? '' : `transform:translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px);`}}">
+              ${{state.playerExpanded ? '' : '<button id="miniPlayerDrag" class="mini-player-drag" type="button">⋮⋮</button>'}}
               <div class="mini-player-controls">
                 <button id="togglePlayerButton" class="player-btn" type="button">${{state.playerExpanded ? '×' : '⤢'}}</button>
               </div>
@@ -1505,6 +1565,7 @@ def build_web_app_html(user_id: str) -> str:
           togglePlayerExpanded();
         }});
       }}
+      attachMiniPlayerDrag();
       const deleteButton = document.getElementById('deleteReelButton');
       if (deleteButton) {{
         deleteButton.addEventListener('click', deleteCurrentReel);
