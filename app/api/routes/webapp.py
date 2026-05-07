@@ -1087,57 +1087,63 @@ def build_web_app_html(user_id: str) -> str:
       border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
       box-shadow: var(--shadow); padding:16px;
     }}
-    .popout-player-shell {{
+    .mini-player-shell {{
       position:fixed; right:12px; bottom:calc(12px + var(--safe-bottom)); z-index:38;
       display:none;
     }}
-    .popout-player-shell.open {{ display:block; }}
-    .popout-player-card {{
+    .mini-player-shell.open {{ display:block; }}
+    .mini-player-shell.expanded {{
+      inset:0; right:0; bottom:0; display:grid; place-items:center;
+      background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); padding:20px;
+    }}
+    .mini-player-card {{
       position:relative; height:min(35vh, 280px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
       border:1px solid var(--line); background:#050607; box-shadow:var(--shadow);
       touch-action:none;
     }}
-    .popout-player-shell.expanded {{
-      inset:0; right:0; bottom:0; display:grid; place-items:center;
-      background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); padding:20px;
-    }}
-    .popout-player-shell.expanded .popout-player-card {{
+    .mini-player-shell.expanded .mini-player-card {{
       height:min(78vh, 680px);
       max-width:min(92vw, 420px);
     }}
-    .popout-video {{
+    .video-wrap {{
+      position:relative; width:100%; height:100%; background:#050607;
+    }}
+    .mini-player-video {{
       width:100%; height:100%; display:block; object-fit:cover; background:#050607;
     }}
-    .popout-overlay {{
+    .mini-player-overlay {{
       position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity .18s ease;
       background:linear-gradient(180deg, rgba(5,7,10,0.34), rgba(5,7,10,0.02) 34%, rgba(5,7,10,0.42));
     }}
-    .popout-player-card.show-ui .popout-overlay {{
-      opacity:1; pointer-events:auto;
+    .mini-player-card.show-ui .mini-player-overlay {{
+      opacity:1; pointer-events:none;
     }}
-    .popout-topbar {{
-      position:absolute; top:8px; left:8px; right:8px; display:flex; align-items:center; justify-content:space-between; gap:10px;
-    }}
-    .popout-dragbar {{
-      flex:1 1 auto; min-width:0; height:30px; border-radius:999px;
-      border:1px solid rgba(255,255,255,0.14); background:rgba(7,9,12,0.4);
-      display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.78); font-size:.72rem; font-weight:800;
-      letter-spacing:.08em; text-transform:uppercase; cursor:grab; user-select:none;
-    }}
-    .popout-dragbar:active {{ cursor:grabbing; }}
-    .popout-actions {{ display:flex; align-items:center; gap:6px; }}
-    .popout-btn {{
-      width:30px; height:30px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
+    .mini-player-btn {{
+      position:absolute; width:32px; height:32px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:.86rem;
+      cursor:pointer; font-size:.9rem; pointer-events:auto;
     }}
-    .popout-center {{
+    .mini-player-btn.expand {{ top:8px; left:8px; }}
+    .mini-player-btn.close {{ top:8px; right:8px; }}
+    .mini-player-btn.mute {{ right:8px; bottom:8px; }}
+    .mini-player-peek {{
+      position:absolute; top:50%; left:-14px; transform:translateY(-50%);
+      width:28px; height:48px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
+      background:rgba(7,9,12,0.76); color:var(--text); display:none; align-items:center; justify-content:center;
+      cursor:pointer; z-index:3;
+    }}
+    .mini-player-peek.visible {{ display:inline-flex; }}
+    .mini-player-dragzone {{
+      position:absolute; inset:0; cursor:grab; z-index:1;
+    }}
+    .mini-player-dragzone:active {{ cursor:grabbing; }}
+    .mini-player-center {{
       position:absolute; inset:0; display:grid; place-items:center;
     }}
-    .popout-play {{
+    .mini-player-play {{
       width:56px; height:56px; border-radius:999px; border:1px solid rgba(255,255,255,0.2);
       background:rgba(7,9,12,0.56); color:#ffffff; display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:1.2rem;
+      cursor:pointer; font-size:1.2rem; pointer-events:auto;
     }}
     .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
@@ -1252,6 +1258,7 @@ def build_web_app_html(user_id: str) -> str:
       playerExpanded: false,
       playerControlsVisible: true,
       playerOffset: {{ x: 0, y: 0 }},
+      playerMuted: true,
       jobs: [],
       dashboard: null,
       loading: true
@@ -1444,9 +1451,19 @@ def build_web_app_html(user_id: str) -> str:
       await loadData();
     }}
 
-    function attachPopoutDrag(shell) {{
-      const handle = shell.querySelector('[data-popout-drag]');
-      const card = shell.querySelector('.popout-player-card');
+    function clampPlayerOffset(x, y) {{
+      const maxLeft = Math.max(0, Math.floor(window.innerWidth * 0.58));
+      const maxRight = Math.max(0, Math.floor(window.innerWidth * 0.42));
+      const maxY = Math.max(0, Math.floor(window.innerHeight * 0.48));
+      return {{
+        x: Math.max(-maxLeft, Math.min(maxRight, x)),
+        y: Math.max(-maxY, Math.min(maxY, y)),
+      }};
+    }}
+
+    function attachMiniPlayerDrag(shell) {{
+      const handle = shell.querySelector('.mini-player-dragzone');
+      const card = shell.querySelector('.mini-player-card');
       if (!handle || !card) return;
 
       let dragging = false;
@@ -1454,25 +1471,35 @@ def build_web_app_html(user_id: str) -> str:
       let originY = 0;
       let startX = 0;
       let startY = 0;
+      let moved = false;
 
       const onPointerMove = (event) => {{
         if (!dragging || shell.classList.contains('expanded')) return;
-        const nextX = originX + (event.clientX - startX);
-        const nextY = originY + (event.clientY - startY);
-        state.playerOffset = {{ x: nextX, y: nextY }};
-        card.style.transform = `translate(${{nextX}}px, ${{nextY}}px)`;
+        moved = true;
+        const next = clampPlayerOffset(
+          originX + (event.clientX - startX),
+          originY + (event.clientY - startY),
+        );
+        state.playerOffset = next;
+        card.style.transform = `translate(${{next.x}}px, ${{next.y}}px)`;
+        syncMiniPlayerShell();
       }};
 
       const onPointerUp = () => {{
         if (!dragging) return;
         dragging = false;
+        if (!moved) {{
+          setMiniPlayerControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible);
+        }}
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
       }};
 
       handle.addEventListener('pointerdown', (event) => {{
+        if (event.target.closest('button')) return;
         if (shell.classList.contains('expanded')) return;
         dragging = true;
+        moved = false;
         startX = event.clientX;
         startY = event.clientY;
         originX = Number(state.playerOffset.x || 0);
@@ -1483,10 +1510,11 @@ def build_web_app_html(user_id: str) -> str:
       }});
     }}
 
-    let popoutUiTimer = null;
-    function syncPopoutShell() {{
-      const shell = document.getElementById('popoutPlayerShell');
-      const card = document.querySelector('.popout-player-card');
+    let playerUiTimer = null;
+    function syncMiniPlayerShell() {{
+      const shell = document.getElementById('miniPlayerShell');
+      const card = document.querySelector('.mini-player-card');
+      const peek = document.getElementById('miniPlayerPeek');
       if (!shell || !card) return;
       shell.classList.toggle('open', state.playerOpen);
       shell.classList.toggle('expanded', state.playerExpanded);
@@ -1496,55 +1524,59 @@ def build_web_app_html(user_id: str) -> str:
       }} else {{
         card.style.transform = `translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px)`;
       }}
+      if (peek) {{
+        peek.classList.toggle('visible', !state.playerExpanded && state.playerOffset.x > 56);
+      }}
     }}
 
-    function setPopoutControlsVisible(visible, autoHide = false) {{
+    function setMiniPlayerControlsVisible(visible, autoHide = false) {{
       state.playerControlsVisible = visible;
-      if (popoutUiTimer) clearTimeout(popoutUiTimer);
-      syncPopoutShell();
+      if (playerUiTimer) clearTimeout(playerUiTimer);
+      syncMiniPlayerShell();
       if (visible && autoHide) {{
-        popoutUiTimer = setTimeout(() => {{
+        playerUiTimer = setTimeout(() => {{
           state.playerControlsVisible = false;
-          syncPopoutShell();
+          syncMiniPlayerShell();
         }}, 1500);
       }}
     }}
 
-    function syncPopoutButtons() {{
-      const video = document.getElementById('popoutVideo');
-      const playButton = document.getElementById('popoutPlayButton');
-      const muteButton = document.getElementById('popoutMuteButton');
-      const fullscreenButton = document.getElementById('popoutFullscreenButton');
+    function syncMiniPlayerButtons() {{
+      const video = document.getElementById('miniPlayerVideo');
+      const playButton = document.getElementById('miniPlayerPlayButton');
+      const muteButton = document.getElementById('miniPlayerMuteButton');
+      const fullscreenButton = document.getElementById('miniPlayerExpandButton');
       if (video && playButton) playButton.textContent = video.paused ? '▶' : '❚❚';
       if (video && muteButton) muteButton.textContent = video.muted ? '🔇' : '🔈';
       if (fullscreenButton) fullscreenButton.textContent = state.playerExpanded ? '🗗' : '⤢';
-      syncPopoutShell();
+      syncMiniPlayerShell();
     }}
 
-    async function openPopoutPlayer() {{
-      const video = document.getElementById('popoutVideo');
+    async function openMiniPlayer() {{
+      const video = document.getElementById('miniPlayerVideo');
       if (!video) return;
       state.playerOpen = true;
-      setPopoutControlsVisible(true, true);
+      video.muted = state.playerMuted;
+      setMiniPlayerControlsVisible(true, true);
       try {{
         await video.play();
       }} catch (error) {{
         // Autoplay may be blocked until the user presses play.
       }}
-      syncPopoutButtons();
+      syncMiniPlayerButtons();
     }}
 
-    function closePopoutPlayer() {{
-      const video = document.getElementById('popoutVideo');
+    function closeMiniPlayer() {{
+      const video = document.getElementById('miniPlayerVideo');
       if (video) video.pause();
       state.playerOpen = false;
       state.playerExpanded = false;
       state.playerControlsVisible = false;
-      syncPopoutButtons();
+      syncMiniPlayerButtons();
     }}
 
-    async function togglePopoutPlayback() {{
-      const video = document.getElementById('popoutVideo');
+    async function toggleMiniPlayerPlayback() {{
+      const video = document.getElementById('miniPlayerVideo');
       if (!video) return;
       if (video.paused) {{
         try {{
@@ -1555,22 +1587,28 @@ def build_web_app_html(user_id: str) -> str:
       }} else {{
         video.pause();
       }}
-      setPopoutControlsVisible(true, true);
-      syncPopoutButtons();
+      setMiniPlayerControlsVisible(true, true);
+      syncMiniPlayerButtons();
     }}
 
-    function togglePopoutMute() {{
-      const video = document.getElementById('popoutVideo');
+    function toggleMiniPlayerMute() {{
+      const video = document.getElementById('miniPlayerVideo');
       if (!video) return;
       video.muted = !video.muted;
-      setPopoutControlsVisible(true, true);
-      syncPopoutButtons();
+      state.playerMuted = video.muted;
+      setMiniPlayerControlsVisible(true, true);
+      syncMiniPlayerButtons();
     }}
 
-    async function togglePopoutFullscreen() {{
+    function toggleMiniPlayerExpanded() {{
       state.playerExpanded = !state.playerExpanded;
-      setPopoutControlsVisible(true, true);
-      syncPopoutButtons();
+      setMiniPlayerControlsVisible(true, true);
+      syncMiniPlayerButtons();
+    }}
+
+    function dockMiniPlayerBack() {{
+      state.playerOffset = {{ x: 0, y: 0 }};
+      syncMiniPlayerShell();
     }}
 
     function renderDetail() {{
@@ -1623,21 +1661,20 @@ def build_web_app_html(user_id: str) -> str:
           ${{
             item?.local_video_url
               ? `
-                <section id="popoutPlayerShell" class="popout-player-shell ${{state.playerOpen ? 'open' : ''}} ${{state.playerExpanded ? 'expanded' : ''}}">
-                  <article class="popout-player-card ${{state.playerControlsVisible ? 'show-ui' : ''}}" style="${{state.playerExpanded ? '' : `transform:translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px);`}}">
-                    <video id="popoutVideo" class="popout-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
-                    <div class="popout-overlay">
-                      <div class="popout-topbar">
-                        <div class="popout-dragbar" data-popout-drag>···</div>
-                        <div class="popout-actions">
-                          <button id="popoutMuteButton" class="popout-btn" type="button" aria-label="Mute or unmute">🔇</button>
-                          <button id="popoutFullscreenButton" class="popout-btn" type="button" aria-label="Expand reel">⤢</button>
-                          <button id="popoutCloseButton" class="popout-btn" type="button" aria-label="Close reel">✕</button>
+                <section id="miniPlayerShell" class="mini-player-shell ${{state.playerOpen ? 'open' : ''}} ${{state.playerExpanded ? 'expanded' : ''}}">
+                  <article class="mini-player-card ${{state.playerControlsVisible ? 'show-ui' : ''}}" style="${{state.playerExpanded ? '' : `transform:translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px);`}}">
+                    <div class="video-wrap">
+                      <div class="mini-player-dragzone"></div>
+                      <video id="miniPlayerVideo" class="mini-player-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
+                      <div class="mini-player-overlay">
+                        <button id="miniPlayerExpandButton" class="mini-player-btn expand" type="button" aria-label="Expand reel">⤢</button>
+                        <button id="miniPlayerCloseButton" class="mini-player-btn close" type="button" aria-label="Close reel">✕</button>
+                        <div class="mini-player-center">
+                          <button id="miniPlayerPlayButton" class="mini-player-play" type="button" aria-label="Play or pause">❚❚</button>
                         </div>
+                        <button id="miniPlayerMuteButton" class="mini-player-btn mute" type="button" aria-label="Mute or unmute">🔇</button>
                       </div>
-                      <div class="popout-center">
-                        <button id="popoutPlayButton" class="popout-play" type="button" aria-label="Play or pause">❚❚</button>
-                      </div>
+                      <button id="miniPlayerPeek" class="mini-player-peek" type="button" aria-label="Bring reel back">‹</button>
                     </div>
                   </article>
                 </section>
@@ -1656,40 +1693,49 @@ def build_web_app_html(user_id: str) -> str:
           renderDetail();
         }});
       }});
-      const popoutCloseButton = document.getElementById('popoutCloseButton');
-      if (popoutCloseButton) {{
-        popoutCloseButton.addEventListener('click', closePopoutPlayer);
+      const miniPlayerCloseButton = document.getElementById('miniPlayerCloseButton');
+      if (miniPlayerCloseButton) {{
+        miniPlayerCloseButton.addEventListener('click', closeMiniPlayer);
       }}
-      const popoutPlayButton = document.getElementById('popoutPlayButton');
-      if (popoutPlayButton) {{
-        popoutPlayButton.addEventListener('click', togglePopoutPlayback);
+      const miniPlayerPlayButton = document.getElementById('miniPlayerPlayButton');
+      if (miniPlayerPlayButton) {{
+        miniPlayerPlayButton.addEventListener('click', toggleMiniPlayerPlayback);
       }}
-      const popoutMuteButton = document.getElementById('popoutMuteButton');
-      if (popoutMuteButton) {{
-        popoutMuteButton.addEventListener('click', togglePopoutMute);
+      const miniPlayerMuteButton = document.getElementById('miniPlayerMuteButton');
+      if (miniPlayerMuteButton) {{
+        miniPlayerMuteButton.addEventListener('click', toggleMiniPlayerMute);
       }}
-      const popoutFullscreenButton = document.getElementById('popoutFullscreenButton');
-      if (popoutFullscreenButton) {{
-        popoutFullscreenButton.addEventListener('click', togglePopoutFullscreen);
+      const miniPlayerExpandButton = document.getElementById('miniPlayerExpandButton');
+      if (miniPlayerExpandButton) {{
+        miniPlayerExpandButton.addEventListener('click', toggleMiniPlayerExpanded);
       }}
-      const popoutShell = document.getElementById('popoutPlayerShell');
-      if (popoutShell) {{
-        attachPopoutDrag(popoutShell);
+      const miniPlayerPeek = document.getElementById('miniPlayerPeek');
+      if (miniPlayerPeek) {{
+        miniPlayerPeek.addEventListener('click', dockMiniPlayerBack);
       }}
-      const popoutVideo = document.getElementById('popoutVideo');
-      if (popoutVideo) {{
-        popoutVideo.addEventListener('click', () => setPopoutControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible));
-        popoutVideo.addEventListener('play', syncPopoutButtons);
-        popoutVideo.addEventListener('pause', syncPopoutButtons);
-        popoutVideo.addEventListener('volumechange', syncPopoutButtons);
+      const miniPlayerShell = document.getElementById('miniPlayerShell');
+      if (miniPlayerShell) {{
+        attachMiniPlayerDrag(miniPlayerShell);
+        miniPlayerShell.addEventListener('click', (event) => {{
+          if (event.target === miniPlayerShell && state.playerExpanded) {{
+            toggleMiniPlayerExpanded();
+          }}
+        }});
+      }}
+      const miniPlayerVideo = document.getElementById('miniPlayerVideo');
+      if (miniPlayerVideo) {{
+        miniPlayerVideo.addEventListener('click', () => setMiniPlayerControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible));
+        miniPlayerVideo.addEventListener('play', syncMiniPlayerButtons);
+        miniPlayerVideo.addEventListener('pause', syncMiniPlayerButtons);
+        miniPlayerVideo.addEventListener('volumechange', syncMiniPlayerButtons);
         if (state.playerOpen) {{
-          openPopoutPlayer();
+          openMiniPlayer();
         }} else {{
-          syncPopoutButtons();
+          syncMiniPlayerButtons();
         }}
       }} else {{
         state.playerOpen = false;
-        syncPopoutButtons();
+        syncMiniPlayerButtons();
       }}
       const deleteButton = document.getElementById('deleteReelButton');
       if (deleteButton) {{
