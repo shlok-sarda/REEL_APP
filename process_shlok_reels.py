@@ -255,10 +255,14 @@ def main(user_id="default", only_urls=None):
         write_input_urls(pending_urls, pending_input)
 
         finale_failed = False
+        processor_failure_message = ""
         try:
             run_step([sys.executable, extraction_script(), "--input", pending_input, "--output", pending_output])
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             finale_failed = True
+            stderr = normalize(getattr(exc, "stderr", ""))
+            stdout = normalize(getattr(exc, "stdout", ""))
+            processor_failure_message = stderr or stdout or f"Processor exited with code {exc.returncode}"
         pending_input.unlink(missing_ok=True)
         pending_rows = []
         if pending_output.exists():
@@ -273,7 +277,7 @@ def main(user_id="default", only_urls=None):
                     "Secondary Category": "Failed Processing",
                     "Folder": "failed",
                     "Item Name": "Processing Failed",
-                    "Summary": "This reel could not be processed in the current run.",
+                    "Summary": f"Processing error: {processor_failure_message or 'This reel could not be processed in the current run.'}",
                     "Contains Product": "no",
                     "Product Name": "",
                     "Product Brand": "",
