@@ -1567,14 +1567,14 @@ def build_web_app_html(user_id: str) -> str:
       shell.classList.toggle('open', state.playerOpen);
       shell.classList.toggle('expanded', mode === 'expanded');
       card.classList.toggle('show-ui', state.playerControlsVisible && mode !== 'docked-left' && mode !== 'docked-right');
-      card.style.width = `${metrics.width}px`;
-      card.style.height = `${metrics.height}px`;
+      card.style.width = `${{metrics.width}}px`;
+      card.style.height = `${{metrics.height}}px`;
       card.style.borderRadius = mode === 'compact' ? '20px' : '22px';
       const scale = mode === 'compact' ? 0.94 : 1;
       const shadowLift = Math.max(12, Math.min(34, 18 + Math.abs(state.playerOffset.y - playerBounds(mode).maxY) * 0.05));
-      card.style.boxShadow = `0 ${shadowLift}px ${shadowLift * 2.2}px rgba(0,0,0,0.34)`;
+      card.style.boxShadow = `0 ${{shadowLift}}px ${{shadowLift * 2.2}}px rgba(0,0,0,0.34)`;
       card.style.opacity = docked ? '0.92' : '1';
-      card.style.transform = `translate3d(${state.playerOffset.x}px, ${state.playerOffset.y}px, 0) scale(${scale})`;
+      card.style.transform = `translate3d(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px, 0) scale(${{scale}})`;
       if (peek) {{
         peek.classList.toggle('visible', docked);
         peek.classList.toggle('right', mode === 'docked-right');
