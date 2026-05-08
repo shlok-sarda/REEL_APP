@@ -28,6 +28,13 @@ def normalize(value):
     return " ".join((value or "").strip().split())
 
 
+def summarize_subprocess_output(stderr: str, stdout: str, limit: int = 300) -> str:
+    combined = normalize(stderr) or normalize(stdout)
+    if not combined:
+        return ""
+    return combined[-limit:]
+
+
 def build_paths(storage_dir: Path):
     return SimpleNamespace(
         storage_dir=storage_dir,
@@ -144,7 +151,21 @@ def write_input_urls(urls, output_path):
 
 
 def run_step(cmd):
-    subprocess.run([str(part) for part in cmd], cwd=str(BASE_DIR), check=True)
+    result = subprocess.run(
+        [str(part) for part in cmd],
+        cwd=str(BASE_DIR),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return result
 
 
 def build_file_uri(path_value):
@@ -260,9 +281,9 @@ def main(user_id="default", only_urls=None):
             run_step([sys.executable, extraction_script(), "--input", pending_input, "--output", pending_output])
         except subprocess.CalledProcessError as exc:
             finale_failed = True
-            stderr = normalize(getattr(exc, "stderr", ""))
-            stdout = normalize(getattr(exc, "stdout", ""))
-            processor_failure_message = stderr or stdout or f"Processor exited with code {exc.returncode}"
+            stderr = getattr(exc, "stderr", "") or ""
+            stdout = getattr(exc, "output", "") or getattr(exc, "stdout", "") or ""
+            processor_failure_message = summarize_subprocess_output(stderr, stdout) or f"Processor exited with code {exc.returncode}"
         pending_input.unlink(missing_ok=True)
         pending_rows = []
         if pending_output.exists():
