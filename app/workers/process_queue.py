@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -48,6 +49,10 @@ def process_job(job: dict):
             )
     except subprocess.TimeoutExpired:
         fail_job(job["id"], f"Processor timed out after {settings.processor_timeout_seconds}s")
+        return
+    except Exception as exc:
+        detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+        fail_job(job["id"], f"Worker error: {detail}")
         return
 
     if result.returncode != 0:
