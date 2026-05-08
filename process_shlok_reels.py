@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,13 @@ from app.storage import user_storage_dir
 
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def extraction_script() -> Path:
+    mode = os.getenv("PROCESSOR_MODE", "legacy").strip().lower()
+    if mode == "pipeline_b":
+        return BASE_DIR / "pipeline_b_processor.py"
+    return BASE_DIR / "finale.py"
 
 
 def normalize(value):
@@ -248,7 +256,7 @@ def main(user_id="default", only_urls=None):
 
         finale_failed = False
         try:
-            run_step([sys.executable, BASE_DIR / "finale.py", "--input", pending_input, "--output", pending_output])
+            run_step([sys.executable, extraction_script(), "--input", pending_input, "--output", pending_output])
         except subprocess.CalledProcessError:
             finale_failed = True
         pending_input.unlink(missing_ok=True)
