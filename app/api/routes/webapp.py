@@ -1163,7 +1163,7 @@ def build_web_app_html(user_id: str) -> str:
       opacity:1; transform:scale(1);
     }}
     .floating-player-peek {{
-      position:absolute; top:50%; width:28px; height:88px; margin-top:-44px; border:1px solid rgba(255,255,255,0.14);
+      position:absolute; top:0; width:28px; height:88px; border:1px solid rgba(255,255,255,0.14);
       background:rgba(7,9,12,0.72); color:var(--text); display:none; align-items:center; justify-content:center;
       font-size:1rem; font-weight:900; cursor:pointer; pointer-events:auto; backdrop-filter:blur(12px);
       box-shadow:0 12px 28px rgba(0,0,0,0.24);
@@ -1474,8 +1474,9 @@ def build_web_app_html(user_id: str) -> str:
         }}
         return {{ width, height }};
       }}
-      let height = clamp(Math.round(view.height * 0.35), 240, 360);
-      if (mode === 'compact') height = Math.round(height * 0.82);
+      const baseHeight = clamp(Math.round(view.height * 0.35), 240, 360);
+      let height = clamp(Math.round(baseHeight * 1.4), 320, 500);
+      if (mode === 'compact') height = Math.round(height * 0.84);
       return {{ width: Math.round(height * 9 / 16), height }};
     }}
 
@@ -1564,7 +1565,7 @@ def build_web_app_html(user_id: str) -> str:
       }}
     }}
 
-    function showPlayerControls(duration = 1800) {{
+    function showPlayerControls(duration = 1000) {{
       playerUi.controlsVisible = true;
       queuePlayerPaint();
       clearPlayerControlsTimer();
@@ -1598,15 +1599,17 @@ def build_web_app_html(user_id: str) -> str:
       floatingPlayerFrame.classList.toggle('docked', Boolean(playerUi.dockedSide));
       floatingPlayerFrame.classList.toggle('paused', !!floatingPlayerVideo.src && floatingPlayerVideo.paused);
       floatingPlayerFrame.classList.toggle('show-controls', playerUi.controlsVisible || playerUi.mode === 'expanded');
-      const scale = playerUi.dragging ? 1.015 : 1;
       floatingPlayerFrame.style.width = `${{playerUi.width}}px`;
       floatingPlayerFrame.style.height = `${{playerUi.height}}px`;
       floatingPlayerFrame.style.borderRadius = playerUi.mode === 'expanded' ? '30px' : (playerUi.mode === 'compact' ? '24px' : '26px');
-      floatingPlayerFrame.style.transform = `translate3d(${{playerUi.x}}px, ${{playerUi.y}}px, 0) scale(${{scale}})`;
+      floatingPlayerFrame.style.transform = `translate3d(${{playerUi.x}}px, ${{playerUi.y}}px, 0)`;
       playerExpandButton.textContent = playerUi.mode === 'expanded' ? '↘' : '⤢';
       playerMuteButton.textContent = floatingPlayerVideo.muted ? 'M' : 'S';
       playerPlayButton.textContent = floatingPlayerVideo.paused ? '▶' : '❚❚';
       floatingPlayerPeek.textContent = playerUi.dockedSide === 'left' ? '›' : '‹';
+      const view = playerViewport();
+      const peekTop = clamp(playerUi.y + (playerUi.height / 2) - 44, view.safeTop + 10, view.height - view.safeBottom - 98);
+      floatingPlayerPeek.style.top = `${{Math.round(peekTop)}}px`;
     }}
 
     function commitPlayerTarget(target) {{
@@ -1624,9 +1627,9 @@ def build_web_app_html(user_id: str) -> str:
       clearPlayerControlsTimer();
       playerUi.mode = target.mode;
       playerUi.dockedSide = target.dockedSide || null;
-      const stiffness = options.stiffness || 0.15;
-      const damping = options.damping || 0.8;
-      const sizeLerp = options.sizeLerp || 0.22;
+      const stiffness = options.stiffness || 0.11;
+      const damping = options.damping || 0.68;
+      const sizeLerp = options.sizeLerp || 0.18;
       let lastTs = performance.now();
       const finish = () => {{
         playerUi.vx = 0;
@@ -1736,7 +1739,7 @@ def build_web_app_html(user_id: str) -> str:
       ensureMiniAnchor(playerUi.mode === 'compact' ? 'compact' : 'mini');
       playerUi.active = true;
       syncPlayerMedia(item);
-      showPlayerControls(1400);
+      showPlayerControls(900);
       queuePlayerPaint();
     }}
 
@@ -1761,7 +1764,7 @@ def build_web_app_html(user_id: str) -> str:
         }}
       }}
       showPlayerControls();
-      animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.18, damping: 0.82, sizeLerp: 0.26 }});
+      animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.12, damping: 0.72, sizeLerp: 0.18 }});
     }}
 
     function collapseFloatingPlayer() {{
@@ -1777,8 +1780,8 @@ def build_web_app_html(user_id: str) -> str:
         height: playerSizeForMode(mode).height,
         dockedSide: null,
       }};
-      showPlayerControls(1100);
-      animatePlayerTo(target, {{ stiffness: 0.16, damping: 0.82 }});
+      showPlayerControls(900);
+      animatePlayerTo(target, {{ stiffness: 0.11, damping: 0.72 }});
     }}
 
     function restoreDockedPlayer(startDrag = false) {{
@@ -1793,7 +1796,7 @@ def build_web_app_html(user_id: str) -> str:
       playerUi.x = clamp(playerUi.restoreX || playerUi.x, bounds.minX, bounds.maxX);
       playerUi.y = clamp(playerUi.restoreY || playerUi.y, bounds.minY, bounds.maxY);
       if (!startDrag) {{
-        showPlayerControls(1200);
+        showPlayerControls(900);
         animatePlayerTo({{
           mode,
           x: playerUi.x,
@@ -1801,7 +1804,7 @@ def build_web_app_html(user_id: str) -> str:
           width: size.width,
           height: size.height,
           dockedSide: null,
-        }}, {{ stiffness: 0.17, damping: 0.82 }});
+        }}, {{ stiffness: 0.11, damping: 0.72 }});
       }} else {{
         queuePlayerPaint();
       }}
@@ -1859,7 +1862,7 @@ def build_web_app_html(user_id: str) -> str:
       playerUi.lastMoveX = event.clientX;
       playerUi.lastMoveY = event.clientY;
       playerUi.lastMoveTs = performance.now();
-      showPlayerControls(900);
+      showPlayerControls(800);
       queuePlayerPaint();
       window.addEventListener('pointermove', onPlayerPointerMove);
       window.addEventListener('pointerup', onPlayerPointerUp);
@@ -1922,7 +1925,7 @@ def build_web_app_html(user_id: str) -> str:
         if (releaseDy > 120 || vy > 0.32) {{
           collapseFloatingPlayer();
         }} else {{
-          animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.18, damping: 0.82, sizeLerp: 0.26 }});
+          animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.12, damping: 0.72, sizeLerp: 0.18 }});
         }}
         return;
       }}
@@ -1944,14 +1947,14 @@ def build_web_app_html(user_id: str) -> str:
           width: size.width,
           height: size.height,
           dockedSide: null,
-        }}, {{ stiffness: 0.16, damping: 0.82 }});
+        }}, {{ stiffness: 0.11, damping: 0.72 }});
         return;
       }}
       if (Math.abs(vy) > Math.abs(vx) * 1.35 && vy < -0.55) {{
         expandFloatingPlayer();
         return;
       }}
-      animatePlayerTo(releaseTargetForMiniPlayer(), {{ stiffness: 0.16, damping: 0.82 }});
+      animatePlayerTo(releaseTargetForMiniPlayer(), {{ stiffness: 0.11, damping: 0.72 }});
     }}
 
     function bindFloatingPlayer() {{
@@ -2004,7 +2007,7 @@ def build_web_app_html(user_id: str) -> str:
         event.stopPropagation();
         playerUi.muted = !floatingPlayerVideo.muted;
         floatingPlayerVideo.muted = playerUi.muted;
-        showPlayerControls(1200);
+        showPlayerControls(900);
         queuePlayerPaint();
       }});
 
@@ -2018,7 +2021,7 @@ def build_web_app_html(user_id: str) -> str:
         }} else {{
           floatingPlayerVideo.pause();
         }}
-        showPlayerControls(1200);
+        showPlayerControls(900);
         queuePlayerPaint();
       }});
 
