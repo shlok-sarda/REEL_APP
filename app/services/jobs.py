@@ -111,7 +111,13 @@ def claim_next_job() -> dict | None:
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
             FROM processing_jobs
             WHERE status = 'pending'
-            ORDER BY id ASC
+            ORDER BY
+                CASE
+                    WHEN job_type = 'process_reel' THEN 0
+                    WHEN job_type = 'rebuild_library' THEN 1
+                    ELSE 2
+                END ASC,
+                id ASC
             LIMIT 1
             """,
         ).fetchone()
@@ -195,6 +201,21 @@ def recover_orphaned_jobs() -> int:
     if is_worker_running():
         return 0
     with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE processing_jobs
+            SET status = 'failed',
+                error_message = CASE
+                    WHEN error_message = '' THEN 'Library rebuild interrupted repeatedly'
+                    ELSE error_message
+                END,
+                finished_at = ?
+            WHERE status = 'running'
+              AND job_type = 'rebuild_library'
+              AND attempts >= 3
+            """,
+            (_now(),),
+        )
         cursor = connection.execute(
             """
             UPDATE processing_jobs
@@ -203,6 +224,7 @@ def recover_orphaned_jobs() -> int:
                 ELSE error_message
             END
             WHERE status = 'running'
+              AND NOT (job_type = 'rebuild_library' AND attempts >= 3)
             """
         )
         return cursor.rowcount
