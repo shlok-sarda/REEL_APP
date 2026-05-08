@@ -1082,20 +1082,98 @@ def build_web_app_html(user_id: str) -> str:
     .card-kicker {{ margin:0 0 8px; color:var(--accent-2); font-size:.7rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
     .card-title {{ margin:0; font-size:1.08rem; line-height:1.15; letter-spacing:-.02em; }}
     .count {{ padding:6px 8px; border-radius:999px; background:rgba(159,213,197,0.12); color:var(--accent-2); font-size:.72rem; font-weight:900; }}
-    .detail {{ display:grid; gap:12px; }}
-    .video-panel {{
-      overflow:hidden; border:1px solid var(--line); border-radius:26px; background:var(--panel); box-shadow:var(--shadow);
+    .detail {{ display:grid; gap:12px; padding-bottom:calc(min(42vh, 360px) + 28px + var(--safe-bottom)); }}
+    .detail-card {{
+      border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
+      box-shadow:var(--shadow); padding:16px;
     }}
-    .video-wrap {{ position:relative; width:100%; aspect-ratio:1.05; max-height:250px; background:#050607; }}
+    .video-wrap {{ position:relative; width:100%; height:100%; background:#050607; }}
     .video-wrap video, .video-wrap img {{ width:100%; height:100%; display:block; object-fit:cover; }}
     .video-empty {{
       position:absolute; inset:0; display:grid; place-items:center; padding:24px; text-align:center; color:var(--muted);
       font-size:.95rem; line-height:1.5;
     }}
-    .video-meta {{ padding:16px; display:grid; gap:10px; }}
+    .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
     .detail-summary {{ margin:0; color:var(--muted); font-size:.94rem; line-height:1.55; }}
     .detail-meta {{ display:flex; gap:8px; flex-wrap:wrap; }}
+    .floating-player-root {{
+      position:fixed; inset:0; z-index:35; pointer-events:none;
+    }}
+    .floating-player-root.hidden {{ display:none; }}
+    .floating-player-root.expanded {{ pointer-events:auto; }}
+    .floating-player-backdrop {{
+      position:absolute; inset:0; background:rgba(5,7,10,0.76); backdrop-filter:blur(12px); opacity:0; pointer-events:none;
+      transition:opacity 180ms ease;
+    }}
+    .floating-player-root.expanded .floating-player-backdrop {{
+      opacity:1; pointer-events:auto;
+    }}
+    .floating-player-frame {{
+      position:absolute; top:0; left:0; width:202px; height:360px; overflow:hidden; border-radius:26px;
+      border:1px solid rgba(255,255,255,0.14); background:#050607; box-shadow:0 24px 52px rgba(0,0,0,0.36);
+      pointer-events:auto; touch-action:none; user-select:none; -webkit-user-select:none;
+      will-change:transform,width,height,box-shadow,opacity;
+    }}
+    .floating-player-frame.dragging {{
+      box-shadow:0 32px 64px rgba(0,0,0,0.46);
+    }}
+    .floating-player-frame.compact {{
+      border-radius:24px;
+    }}
+    .floating-player-frame.docked {{
+      opacity:0.98;
+    }}
+    .floating-player-media {{
+      position:relative; width:100%; height:100%; background:#050607; overflow:hidden;
+    }}
+    .floating-player-media video,
+    .floating-player-media img {{
+      width:100%; height:100%; display:block; object-fit:cover;
+      background:#050607;
+      pointer-events:none;
+    }}
+    .floating-player-bar {{
+      position:absolute; top:10px; left:10px; right:10px; display:flex; justify-content:space-between; align-items:flex-start;
+      z-index:3; pointer-events:none;
+    }}
+    .floating-player-side {{
+      display:flex; gap:8px; pointer-events:none;
+    }}
+    .player-control {{
+      width:34px; height:34px; border-radius:999px; border:1px solid rgba(255,255,255,0.16);
+      background:rgba(6,8,11,0.56); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
+      font-size:.88rem; font-weight:900; cursor:pointer; pointer-events:auto; backdrop-filter:blur(12px);
+      box-shadow:0 10px 22px rgba(0,0,0,0.22);
+    }}
+    .player-control.bottom-right {{
+      position:absolute; right:10px; bottom:10px; z-index:3;
+    }}
+    .player-center {{
+      position:absolute; inset:0; display:grid; place-items:center; z-index:2; pointer-events:none;
+    }}
+    .player-play {{
+      width:58px; height:58px; border-radius:999px; border:1px solid rgba(255,255,255,0.16);
+      background:rgba(6,8,11,0.58); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
+      font-size:1rem; font-weight:900; cursor:pointer; pointer-events:auto; backdrop-filter:blur(12px);
+      box-shadow:0 14px 32px rgba(0,0,0,0.26); opacity:0; transform:scale(0.94); transition:opacity 160ms ease, transform 160ms ease;
+    }}
+    .floating-player-frame.paused .player-play,
+    .floating-player-frame.show-controls .player-play {{
+      opacity:1; transform:scale(1);
+    }}
+    .floating-player-peek {{
+      position:absolute; top:50%; width:28px; height:88px; margin-top:-44px; border:1px solid rgba(255,255,255,0.14);
+      background:rgba(7,9,12,0.72); color:var(--text); display:none; align-items:center; justify-content:center;
+      font-size:1rem; font-weight:900; cursor:pointer; pointer-events:auto; backdrop-filter:blur(12px);
+      box-shadow:0 12px 28px rgba(0,0,0,0.24);
+    }}
+    .floating-player-root.docked-left .floating-player-peek {{
+      left:0; display:flex; border-radius:0 18px 18px 0;
+    }}
+    .floating-player-root.docked-right .floating-player-peek {{
+      right:0; display:flex; border-radius:18px 0 0 18px;
+    }}
     .buy-box {{
       display:grid; gap:10px; padding:12px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,0.05);
     }}
@@ -1192,6 +1270,30 @@ def build_web_app_html(user_id: str) -> str:
     </div>
   </section>
 
+  <section id="floatingPlayerRoot" class="floating-player-root hidden" aria-live="polite">
+    <div id="floatingPlayerBackdrop" class="floating-player-backdrop"></div>
+    <article id="floatingPlayerFrame" class="floating-player-frame hidden">
+      <div id="floatingPlayerSurface" class="floating-player-media">
+        <video id="floatingPlayerVideo" playsinline preload="metadata"></video>
+        <img id="floatingPlayerPoster" alt="" hidden />
+        <div id="floatingPlayerEmpty" class="video-empty">This reel is still waiting for local playback or media extraction.</div>
+        <div class="floating-player-bar">
+          <div class="floating-player-side">
+            <button id="playerExpandButton" class="player-control" type="button" aria-label="Expand reel">⤢</button>
+          </div>
+          <div class="floating-player-side">
+            <button id="playerCloseButton" class="player-control" type="button" aria-label="Close reel">×</button>
+          </div>
+        </div>
+        <button id="playerMuteButton" class="player-control bottom-right" type="button" aria-label="Toggle sound">M</button>
+        <div class="player-center">
+          <button id="playerPlayButton" class="player-play" type="button" aria-label="Play or pause reel">❚❚</button>
+        </div>
+      </div>
+    </article>
+    <button id="floatingPlayerPeek" class="floating-player-peek" type="button" aria-label="Restore reel player">›</button>
+  </section>
+
   <script>
     const USER_ID = '{safe_user_id}';
     const state = {{
@@ -1219,6 +1321,50 @@ def build_web_app_html(user_id: str) -> str:
     const syncNote = document.getElementById('syncNote');
     const statusBadge = document.getElementById('statusBadge');
     const header = document.getElementById('header');
+    const floatingPlayerRoot = document.getElementById('floatingPlayerRoot');
+    const floatingPlayerBackdrop = document.getElementById('floatingPlayerBackdrop');
+    const floatingPlayerFrame = document.getElementById('floatingPlayerFrame');
+    const floatingPlayerVideo = document.getElementById('floatingPlayerVideo');
+    const floatingPlayerPoster = document.getElementById('floatingPlayerPoster');
+    const floatingPlayerEmpty = document.getElementById('floatingPlayerEmpty');
+    const playerExpandButton = document.getElementById('playerExpandButton');
+    const playerCloseButton = document.getElementById('playerCloseButton');
+    const playerMuteButton = document.getElementById('playerMuteButton');
+    const playerPlayButton = document.getElementById('playerPlayButton');
+    const floatingPlayerPeek = document.getElementById('floatingPlayerPeek');
+
+    const playerUi = {{
+      active: false,
+      ready: false,
+      mode: 'mini',
+      dockedSide: null,
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      vx: 0,
+      vy: 0,
+      dragging: false,
+      pointerId: null,
+      gesture: null,
+      startPointerX: 0,
+      startPointerY: 0,
+      dragOriginX: 0,
+      dragOriginY: 0,
+      dragMoved: false,
+      lastMoveTs: 0,
+      lastMoveX: 0,
+      lastMoveY: 0,
+      animationFrame: 0,
+      paintFrame: 0,
+      restoreX: 0,
+      restoreY: 0,
+      restoreMode: 'mini',
+      controlsVisible: false,
+      controlsTimer: 0,
+      muted: true,
+      itemKey: '',
+    }};
 
     function escapeHtml(value) {{
       return String(value ?? '')
@@ -1233,10 +1379,6 @@ def build_web_app_html(user_id: str) -> str:
       return state.library[state.mode] || [];
     }}
 
-    function coverForCollection(collection) {{
-      return collection?.items?.find((item) => item.thumbnail_url)?.thumbnail_url || '';
-    }}
-
     function matchesItem(item, q) {{
       if (!q) return true;
       return `${{item.name}} ${{item.summary}} ${{item.product_name || ''}} ${{item.product_brand || ''}}`.toLowerCase().includes(q);
@@ -1245,6 +1387,15 @@ def build_web_app_html(user_id: str) -> str:
     function matchesCollection(collection, q) {{
       if (!q) return true;
       return `${{collection.parent_title || ''}} ${{collection.list_title}}`.toLowerCase().includes(q) || collection.items.some((item) => matchesItem(item, q));
+    }}
+
+    function visibleCollections() {{
+      return modeCollections().filter((collection) => matchesCollection(collection, state.query));
+    }}
+
+    function visibleItemsForCurrentList() {{
+      const collection = visibleCollections()[state.currentList];
+      return collection ? collection.items.filter((item) => matchesItem(item, state.query)) : [];
     }}
 
     async function loadData() {{
@@ -1260,10 +1411,11 @@ def build_web_app_html(user_id: str) -> str:
       state.jobs = await jobsRes.json();
       state.loading = false;
       if (state.currentList !== null) {{
-        const visibleCollections = modeCollections().filter((c) => matchesCollection(c, state.query));
-        if (!visibleCollections[state.currentList]) {{
+        const collections = visibleCollections();
+        if (!collections[state.currentList]) {{
           state.currentList = null;
           state.currentItem = 0;
+          hideFloatingPlayer();
         }}
       }}
       render();
@@ -1273,6 +1425,7 @@ def build_web_app_html(user_id: str) -> str:
     let refreshTimer = null;
     function scheduleNextRefresh() {{
       if (refreshTimer) clearTimeout(refreshTimer);
+      if (state.currentList !== null || playerUi.active || playerUi.dragging) return;
       const dash = state.dashboard || {{}};
       const hasActiveWork = (dash.pending_url_count || 0) > 0 || (dash.running_job_count || 0) > 0 || (dash.failed_url_count || 0) > 0;
       refreshTimer = setTimeout(loadData, hasActiveWork ? 5000 : 20000);
@@ -1291,16 +1444,613 @@ def build_web_app_html(user_id: str) -> str:
       stats.innerHTML = '';
     }}
 
+    function clamp(value, min, max) {{
+      return Math.min(max, Math.max(min, value));
+    }}
+
+    function readInset(name) {{
+      return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+    }}
+
+    function playerViewport() {{
+      return {{
+        width: window.innerWidth,
+        height: window.innerHeight,
+        safeTop: readInset('--safe-top'),
+        safeBottom: readInset('--safe-bottom'),
+        margin: 12,
+        peek: 26,
+      }};
+    }}
+
+    function playerSizeForMode(mode) {{
+      const view = playerViewport();
+      if (mode === 'expanded') {{
+        let height = Math.min(view.height - view.safeTop - view.safeBottom - 40, 720);
+        let width = Math.round(height * 9 / 16);
+        if (width > view.width - 24) {{
+          width = view.width - 24;
+          height = Math.round(width * 16 / 9);
+        }}
+        return {{ width, height }};
+      }}
+      let height = clamp(Math.round(view.height * 0.35), 240, 360);
+      if (mode === 'compact') height = Math.round(height * 0.82);
+      return {{ width: Math.round(height * 9 / 16), height }};
+    }}
+
+    function playerBoundsForMode(mode) {{
+      const view = playerViewport();
+      const size = playerSizeForMode(mode);
+      return {{
+        minX: view.margin,
+        maxX: view.width - view.margin - size.width,
+        minY: view.safeTop + 10,
+        maxY: view.height - view.safeBottom - 12 - size.height,
+      }};
+    }}
+
+    function playerDragBoundsForMode(mode) {{
+      const view = playerViewport();
+      const size = playerSizeForMode(mode);
+      const snapBounds = playerBoundsForMode(mode);
+      return {{
+        minX: -size.width + view.peek,
+        maxX: view.width - view.peek,
+        minY: snapBounds.minY - 8,
+        maxY: snapBounds.maxY + 8,
+      }};
+    }}
+
+    function playerCornerTargets(mode) {{
+      const bounds = playerBoundsForMode(mode);
+      return [
+        {{ name: 'top-left', x: bounds.minX, y: bounds.minY, mode }},
+        {{ name: 'top-right', x: bounds.maxX, y: bounds.minY, mode }},
+        {{ name: 'bottom-left', x: bounds.minX, y: bounds.maxY, mode }},
+        {{ name: 'bottom-right', x: bounds.maxX, y: bounds.maxY, mode }},
+      ];
+    }}
+
+    function centerTargetForExpanded() {{
+      const view = playerViewport();
+      const size = playerSizeForMode('expanded');
+      return {{
+        mode: 'expanded',
+        x: Math.round((view.width - size.width) / 2),
+        y: Math.round(Math.max(view.safeTop + 12, (view.height - view.safeBottom - size.height) / 2)),
+        width: size.width,
+        height: size.height,
+        dockedSide: null,
+      }};
+    }}
+
+    function nearestCornerTarget(x, y, mode, vx = 0, vy = 0) {{
+      const projectedX = x + (vx * 180);
+      const projectedY = y + (vy * 180);
+      return playerCornerTargets(mode).reduce((best, target) => {{
+        const score = Math.hypot(projectedX - target.x, projectedY - target.y);
+        if (!best || score < best.score) return {{ target, score }};
+        return best;
+      }}, null).target;
+    }}
+
+    function dockTarget(side, y, mode) {{
+      const view = playerViewport();
+      const size = playerSizeForMode(mode);
+      const bounds = playerBoundsForMode(mode);
+      return {{
+        mode,
+        x: side === 'left' ? -size.width + view.peek : view.width - view.peek,
+        y: clamp(y, bounds.minY, bounds.maxY),
+        width: size.width,
+        height: size.height,
+        dockedSide: side,
+      }};
+    }}
+
+    function queuePlayerPaint() {{
+      if (playerUi.paintFrame) return;
+      playerUi.paintFrame = window.requestAnimationFrame(() => {{
+        playerUi.paintFrame = 0;
+        applyPlayerLayout();
+      }});
+    }}
+
+    function clearPlayerControlsTimer() {{
+      if (playerUi.controlsTimer) {{
+        clearTimeout(playerUi.controlsTimer);
+        playerUi.controlsTimer = 0;
+      }}
+    }}
+
+    function showPlayerControls(duration = 1800) {{
+      playerUi.controlsVisible = true;
+      queuePlayerPaint();
+      clearPlayerControlsTimer();
+      if (playerUi.mode === 'expanded') return;
+      playerUi.controlsTimer = window.setTimeout(() => {{
+        playerUi.controlsVisible = false;
+        queuePlayerPaint();
+      }}, duration);
+    }}
+
+    function stopPlayerAnimation() {{
+      if (playerUi.animationFrame) {{
+        cancelAnimationFrame(playerUi.animationFrame);
+        playerUi.animationFrame = 0;
+      }}
+    }}
+
+    function applyPlayerLayout() {{
+      if (!playerUi.active) {{
+        floatingPlayerRoot.classList.add('hidden');
+        floatingPlayerFrame.classList.add('hidden');
+        return;
+      }}
+      floatingPlayerRoot.classList.remove('hidden');
+      floatingPlayerFrame.classList.remove('hidden');
+      floatingPlayerRoot.classList.toggle('expanded', playerUi.mode === 'expanded');
+      floatingPlayerRoot.classList.toggle('docked-left', playerUi.dockedSide === 'left');
+      floatingPlayerRoot.classList.toggle('docked-right', playerUi.dockedSide === 'right');
+      floatingPlayerFrame.classList.toggle('dragging', playerUi.dragging);
+      floatingPlayerFrame.classList.toggle('compact', playerUi.mode === 'compact');
+      floatingPlayerFrame.classList.toggle('docked', Boolean(playerUi.dockedSide));
+      floatingPlayerFrame.classList.toggle('paused', !!floatingPlayerVideo.src && floatingPlayerVideo.paused);
+      floatingPlayerFrame.classList.toggle('show-controls', playerUi.controlsVisible || playerUi.mode === 'expanded');
+      const scale = playerUi.dragging ? 1.015 : 1;
+      floatingPlayerFrame.style.width = `${{playerUi.width}}px`;
+      floatingPlayerFrame.style.height = `${{playerUi.height}}px`;
+      floatingPlayerFrame.style.borderRadius = playerUi.mode === 'expanded' ? '30px' : (playerUi.mode === 'compact' ? '24px' : '26px');
+      floatingPlayerFrame.style.transform = `translate3d(${{playerUi.x}}px, ${{playerUi.y}}px, 0) scale(${{scale}})`;
+      playerExpandButton.textContent = playerUi.mode === 'expanded' ? '↘' : '⤢';
+      playerMuteButton.textContent = floatingPlayerVideo.muted ? 'M' : 'S';
+      playerPlayButton.textContent = floatingPlayerVideo.paused ? '▶' : '❚❚';
+      floatingPlayerPeek.textContent = playerUi.dockedSide === 'left' ? '›' : '‹';
+    }}
+
+    function commitPlayerTarget(target) {{
+      playerUi.mode = target.mode;
+      playerUi.dockedSide = target.dockedSide || null;
+      playerUi.x = target.x;
+      playerUi.y = target.y;
+      playerUi.width = target.width;
+      playerUi.height = target.height;
+      queuePlayerPaint();
+    }}
+
+    function animatePlayerTo(target, options = {{}}) {{
+      stopPlayerAnimation();
+      clearPlayerControlsTimer();
+      playerUi.mode = target.mode;
+      playerUi.dockedSide = target.dockedSide || null;
+      const stiffness = options.stiffness || 0.15;
+      const damping = options.damping || 0.8;
+      const sizeLerp = options.sizeLerp || 0.22;
+      let lastTs = performance.now();
+      const finish = () => {{
+        playerUi.vx = 0;
+        playerUi.vy = 0;
+        commitPlayerTarget(target);
+        if (options.onComplete) options.onComplete();
+      }};
+      const step = (now) => {{
+        const dt = Math.min(26, now - lastTs) / 16.6667;
+        lastTs = now;
+        playerUi.vx += (target.x - playerUi.x) * stiffness * dt;
+        playerUi.vy += (target.y - playerUi.y) * stiffness * dt;
+        playerUi.vx *= Math.pow(damping, dt);
+        playerUi.vy *= Math.pow(damping, dt);
+        playerUi.x += playerUi.vx * dt;
+        playerUi.y += playerUi.vy * dt;
+        playerUi.width += (target.width - playerUi.width) * sizeLerp * dt;
+        playerUi.height += (target.height - playerUi.height) * sizeLerp * dt;
+        queuePlayerPaint();
+        const settled = Math.abs(target.x - playerUi.x) < 0.8
+          && Math.abs(target.y - playerUi.y) < 0.8
+          && Math.abs(target.width - playerUi.width) < 0.8
+          && Math.abs(target.height - playerUi.height) < 0.8
+          && Math.abs(playerUi.vx) < 0.12
+          && Math.abs(playerUi.vy) < 0.12;
+        if (settled) {{
+          finish();
+          return;
+        }}
+        playerUi.animationFrame = requestAnimationFrame(step);
+      }};
+      playerUi.animationFrame = requestAnimationFrame(step);
+    }}
+
+    function ensureMiniAnchor(mode = 'mini') {{
+      const targetMode = mode === 'compact' ? 'compact' : 'mini';
+      const size = playerSizeForMode(targetMode);
+      if (!playerUi.ready) {{
+        const target = playerCornerTargets(targetMode)[3];
+        playerUi.ready = true;
+        playerUi.mode = targetMode;
+        playerUi.width = size.width;
+        playerUi.height = size.height;
+        playerUi.x = target.x;
+        playerUi.y = target.y;
+        playerUi.restoreX = target.x;
+        playerUi.restoreY = target.y;
+        playerUi.restoreMode = targetMode;
+        return;
+      }}
+      if (playerUi.mode === 'expanded') return;
+      const bounds = playerBoundsForMode(targetMode);
+      playerUi.mode = targetMode;
+      playerUi.width = size.width;
+      playerUi.height = size.height;
+      playerUi.x = clamp(playerUi.x, bounds.minX, bounds.maxX);
+      playerUi.y = clamp(playerUi.y, bounds.minY, bounds.maxY);
+    }}
+
+    function syncPlayerMedia(item) {{
+      const itemKey = item?.reel_id || item?.local_video_url || item?.thumbnail_url || item?.name || '';
+      const sameItem = playerUi.itemKey === itemKey;
+      playerUi.itemKey = itemKey;
+      floatingPlayerVideo.loop = true;
+      floatingPlayerVideo.muted = playerUi.muted;
+      if (item?.local_video_url) {{
+        floatingPlayerVideo.hidden = false;
+        floatingPlayerPoster.hidden = true;
+        floatingPlayerEmpty.hidden = true;
+        if (!sameItem || floatingPlayerVideo.getAttribute('src') !== item.local_video_url) {{
+          floatingPlayerVideo.pause();
+          floatingPlayerVideo.setAttribute('src', item.local_video_url);
+          if (item.thumbnail_url) floatingPlayerVideo.setAttribute('poster', item.thumbnail_url);
+          else floatingPlayerVideo.removeAttribute('poster');
+          floatingPlayerVideo.load();
+        }}
+        floatingPlayerVideo.play().catch(() => {{
+          queuePlayerPaint();
+        }});
+      }} else if (item?.thumbnail_url) {{
+        if (floatingPlayerVideo.getAttribute('src')) {{
+          floatingPlayerVideo.pause();
+          floatingPlayerVideo.removeAttribute('src');
+          floatingPlayerVideo.load();
+        }}
+        floatingPlayerVideo.hidden = true;
+        floatingPlayerPoster.hidden = false;
+        if (floatingPlayerPoster.getAttribute('src') !== item.thumbnail_url) {{
+          floatingPlayerPoster.setAttribute('src', item.thumbnail_url);
+        }}
+        floatingPlayerEmpty.hidden = true;
+      }} else {{
+        if (floatingPlayerVideo.getAttribute('src')) {{
+          floatingPlayerVideo.pause();
+          floatingPlayerVideo.removeAttribute('src');
+          floatingPlayerVideo.load();
+        }}
+        floatingPlayerVideo.hidden = true;
+        floatingPlayerPoster.hidden = true;
+        floatingPlayerEmpty.hidden = false;
+      }}
+      queuePlayerPaint();
+    }}
+
+    function openFloatingPlayer(item) {{
+      if (!item) return;
+      ensureMiniAnchor(playerUi.mode === 'compact' ? 'compact' : 'mini');
+      playerUi.active = true;
+      syncPlayerMedia(item);
+      showPlayerControls(1400);
+      queuePlayerPaint();
+    }}
+
+    function hideFloatingPlayer() {{
+      playerUi.active = false;
+      playerUi.dragging = false;
+      playerUi.dockedSide = null;
+      playerUi.controlsVisible = false;
+      clearPlayerControlsTimer();
+      stopPlayerAnimation();
+      floatingPlayerVideo.pause();
+      queuePlayerPaint();
+    }}
+
+    function expandFloatingPlayer() {{
+      if (!playerUi.active) return;
+      if (playerUi.mode !== 'expanded') {{
+        if (!playerUi.dockedSide) {{
+          playerUi.restoreX = playerUi.x;
+          playerUi.restoreY = playerUi.y;
+          playerUi.restoreMode = playerUi.mode === 'compact' ? 'compact' : 'mini';
+        }}
+      }}
+      showPlayerControls();
+      animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.18, damping: 0.82, sizeLerp: 0.26 }});
+    }}
+
+    function collapseFloatingPlayer() {{
+      if (!playerUi.active) return;
+      const mode = playerUi.restoreMode === 'compact' ? 'compact' : 'mini';
+      ensureMiniAnchor(mode);
+      const bounds = playerBoundsForMode(mode);
+      const target = {{
+        mode,
+        x: clamp(playerUi.restoreX || playerUi.x, bounds.minX, bounds.maxX),
+        y: clamp(playerUi.restoreY || playerUi.y, bounds.minY, bounds.maxY),
+        width: playerSizeForMode(mode).width,
+        height: playerSizeForMode(mode).height,
+        dockedSide: null,
+      }};
+      showPlayerControls(1100);
+      animatePlayerTo(target, {{ stiffness: 0.16, damping: 0.82 }});
+    }}
+
+    function restoreDockedPlayer(startDrag = false) {{
+      if (!playerUi.dockedSide) return;
+      const mode = playerUi.restoreMode === 'compact' ? 'compact' : 'mini';
+      const bounds = playerBoundsForMode(mode);
+      const size = playerSizeForMode(mode);
+      playerUi.mode = mode;
+      playerUi.dockedSide = null;
+      playerUi.width = size.width;
+      playerUi.height = size.height;
+      playerUi.x = clamp(playerUi.restoreX || playerUi.x, bounds.minX, bounds.maxX);
+      playerUi.y = clamp(playerUi.restoreY || playerUi.y, bounds.minY, bounds.maxY);
+      if (!startDrag) {{
+        showPlayerControls(1200);
+        animatePlayerTo({{
+          mode,
+          x: playerUi.x,
+          y: playerUi.y,
+          width: size.width,
+          height: size.height,
+          dockedSide: null,
+        }}, {{ stiffness: 0.17, damping: 0.82 }});
+      }} else {{
+        queuePlayerPaint();
+      }}
+    }}
+
+    function releaseTargetForMiniPlayer() {{
+      const mode = playerUi.mode === 'compact' ? 'compact' : 'mini';
+      const size = playerSizeForMode(mode);
+      const snapBounds = playerBoundsForMode(mode);
+      const projectedX = playerUi.x + (playerUi.vx * 180);
+      const projectedY = playerUi.y + (playerUi.vy * 180);
+      const shouldDockLeft = (projectedX < snapBounds.minX + 18 && playerUi.vx < -0.12)
+        || playerUi.x < (snapBounds.minX - (size.width * 0.28));
+      const shouldDockRight = (projectedX > snapBounds.maxX - 18 && playerUi.vx > 0.12)
+        || playerUi.x > (snapBounds.maxX + (size.width * 0.28));
+      if (shouldDockLeft) {{
+        const fallback = nearestCornerTarget(playerUi.x, playerUi.y, mode, playerUi.vx, playerUi.vy);
+        playerUi.restoreX = fallback.x;
+        playerUi.restoreY = fallback.y;
+        playerUi.restoreMode = mode;
+        return dockTarget('left', projectedY, mode);
+      }}
+      if (shouldDockRight) {{
+        const fallback = nearestCornerTarget(playerUi.x, playerUi.y, mode, playerUi.vx, playerUi.vy);
+        playerUi.restoreX = fallback.x;
+        playerUi.restoreY = fallback.y;
+        playerUi.restoreMode = mode;
+        return dockTarget('right', projectedY, mode);
+      }}
+      const snap = nearestCornerTarget(playerUi.x, playerUi.y, mode, playerUi.vx, playerUi.vy);
+      playerUi.restoreX = snap.x;
+      playerUi.restoreY = snap.y;
+      playerUi.restoreMode = mode;
+      return {{
+        mode,
+        x: snap.x,
+        y: snap.y,
+        width: size.width,
+        height: size.height,
+        dockedSide: null,
+      }};
+    }}
+
+    function beginPlayerGesture(event, gesture) {{
+      stopPlayerAnimation();
+      clearPlayerControlsTimer();
+      playerUi.pointerId = event.pointerId;
+      playerUi.dragging = true;
+      playerUi.gesture = gesture;
+      playerUi.dragMoved = false;
+      playerUi.startPointerX = event.clientX;
+      playerUi.startPointerY = event.clientY;
+      playerUi.dragOriginX = playerUi.x;
+      playerUi.dragOriginY = playerUi.y;
+      playerUi.lastMoveX = event.clientX;
+      playerUi.lastMoveY = event.clientY;
+      playerUi.lastMoveTs = performance.now();
+      showPlayerControls(900);
+      queuePlayerPaint();
+      window.addEventListener('pointermove', onPlayerPointerMove);
+      window.addEventListener('pointerup', onPlayerPointerUp);
+      window.addEventListener('pointercancel', onPlayerPointerUp);
+    }}
+
+    function onPlayerPointerMove(event) {{
+      if (!playerUi.dragging || event.pointerId !== playerUi.pointerId) return;
+      const now = performance.now();
+      const dx = event.clientX - playerUi.startPointerX;
+      const dy = event.clientY - playerUi.startPointerY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) playerUi.dragMoved = true;
+      const dt = Math.max(8, now - playerUi.lastMoveTs);
+      const instantVx = (event.clientX - playerUi.lastMoveX) / dt;
+      const instantVy = (event.clientY - playerUi.lastMoveY) / dt;
+      playerUi.vx = (playerUi.vx * 0.65) + (instantVx * 0.35);
+      playerUi.vy = (playerUi.vy * 0.65) + (instantVy * 0.35);
+      playerUi.lastMoveX = event.clientX;
+      playerUi.lastMoveY = event.clientY;
+      playerUi.lastMoveTs = now;
+
+      if (playerUi.gesture === 'expanded-pan') {{
+        const expanded = centerTargetForExpanded();
+        const lift = Math.max(0, dy);
+        const friction = lift * 0.92;
+        playerUi.mode = 'expanded';
+        playerUi.width = expanded.width;
+        playerUi.height = expanded.height;
+        playerUi.x = expanded.x;
+        playerUi.y = expanded.y + friction;
+        queuePlayerPaint();
+        return;
+      }}
+
+      const mode = playerUi.mode === 'compact' ? 'compact' : 'mini';
+      const bounds = playerDragBoundsForMode(mode);
+      playerUi.mode = mode;
+      playerUi.width = playerSizeForMode(mode).width;
+      playerUi.height = playerSizeForMode(mode).height;
+      playerUi.dockedSide = null;
+      playerUi.x = clamp(playerUi.dragOriginX + dx, bounds.minX, bounds.maxX);
+      playerUi.y = clamp(playerUi.dragOriginY + dy, bounds.minY, bounds.maxY);
+      queuePlayerPaint();
+    }}
+
+    function onPlayerPointerUp(event) {{
+      if (event.pointerId !== playerUi.pointerId) return;
+      window.removeEventListener('pointermove', onPlayerPointerMove);
+      window.removeEventListener('pointerup', onPlayerPointerUp);
+      window.removeEventListener('pointercancel', onPlayerPointerUp);
+      const gesture = playerUi.gesture;
+      const moved = playerUi.dragMoved;
+      const vx = playerUi.vx;
+      const vy = playerUi.vy;
+      playerUi.dragging = false;
+      playerUi.pointerId = null;
+      playerUi.gesture = null;
+      if (gesture === 'expanded-pan') {{
+        const releaseDy = event.clientY - playerUi.startPointerY;
+        if (releaseDy > 120 || vy > 0.32) {{
+          collapseFloatingPlayer();
+        }} else {{
+          animatePlayerTo(centerTargetForExpanded(), {{ stiffness: 0.18, damping: 0.82, sizeLerp: 0.26 }});
+        }}
+        return;
+      }}
+      if (!moved) {{
+        showPlayerControls();
+        queuePlayerPaint();
+        return;
+      }}
+      if (Math.abs(vy) > Math.abs(vx) * 1.35 && vy > 0.55 && playerUi.mode === 'mini') {{
+        const size = playerSizeForMode('compact');
+        const target = nearestCornerTarget(playerUi.x, playerUi.y, 'compact', vx, vy);
+        playerUi.restoreX = target.x;
+        playerUi.restoreY = target.y;
+        playerUi.restoreMode = 'compact';
+        animatePlayerTo({{
+          mode: 'compact',
+          x: target.x,
+          y: target.y,
+          width: size.width,
+          height: size.height,
+          dockedSide: null,
+        }}, {{ stiffness: 0.16, damping: 0.82 }});
+        return;
+      }}
+      if (Math.abs(vy) > Math.abs(vx) * 1.35 && vy < -0.55) {{
+        expandFloatingPlayer();
+        return;
+      }}
+      animatePlayerTo(releaseTargetForMiniPlayer(), {{ stiffness: 0.16, damping: 0.82 }});
+    }}
+
+    function bindFloatingPlayer() {{
+      const isControl = (target) => Boolean(target.closest('.player-control') || target.closest('.player-play'));
+
+      floatingPlayerFrame.addEventListener('pointerdown', (event) => {{
+        if (!playerUi.active || isControl(event.target)) return;
+        if (playerUi.mode === 'expanded') beginPlayerGesture(event, 'expanded-pan');
+        else beginPlayerGesture(event, 'drag');
+      }});
+
+      floatingPlayerFrame.addEventListener('click', (event) => {{
+        if (!playerUi.active || playerUi.dragMoved || isControl(event.target)) return;
+        showPlayerControls();
+      }});
+
+      floatingPlayerFrame.addEventListener('dblclick', (event) => {{
+        if (!playerUi.active || isControl(event.target)) return;
+        if (playerUi.mode === 'expanded') collapseFloatingPlayer();
+        else expandFloatingPlayer();
+      }});
+
+      floatingPlayerPeek.addEventListener('pointerdown', (event) => {{
+        if (!playerUi.dockedSide) return;
+        restoreDockedPlayer(true);
+        beginPlayerGesture(event, 'drag');
+      }});
+
+      floatingPlayerPeek.addEventListener('click', () => {{
+        if (!playerUi.dockedSide) return;
+        restoreDockedPlayer(false);
+      }});
+
+      floatingPlayerBackdrop.addEventListener('click', () => {{
+        if (playerUi.mode === 'expanded') collapseFloatingPlayer();
+      }});
+
+      playerExpandButton.addEventListener('click', (event) => {{
+        event.stopPropagation();
+        if (playerUi.mode === 'expanded') collapseFloatingPlayer();
+        else expandFloatingPlayer();
+      }});
+
+      playerCloseButton.addEventListener('click', (event) => {{
+        event.stopPropagation();
+        hideFloatingPlayer();
+      }});
+
+      playerMuteButton.addEventListener('click', (event) => {{
+        event.stopPropagation();
+        playerUi.muted = !floatingPlayerVideo.muted;
+        floatingPlayerVideo.muted = playerUi.muted;
+        showPlayerControls(1200);
+        queuePlayerPaint();
+      }});
+
+      playerPlayButton.addEventListener('click', (event) => {{
+        event.stopPropagation();
+        if (!floatingPlayerVideo.getAttribute('src')) return;
+        if (floatingPlayerVideo.paused) {{
+          floatingPlayerVideo.play().catch(() => {{
+            queuePlayerPaint();
+          }});
+        }} else {{
+          floatingPlayerVideo.pause();
+        }}
+        showPlayerControls(1200);
+        queuePlayerPaint();
+      }});
+
+      floatingPlayerVideo.addEventListener('play', () => queuePlayerPaint());
+      floatingPlayerVideo.addEventListener('pause', () => queuePlayerPaint());
+      floatingPlayerVideo.addEventListener('volumechange', () => {{
+        playerUi.muted = floatingPlayerVideo.muted;
+        queuePlayerPaint();
+      }});
+
+      window.addEventListener('resize', () => {{
+        if (!playerUi.active) return;
+        if (playerUi.mode === 'expanded') {{
+          commitPlayerTarget(centerTargetForExpanded());
+          return;
+        }}
+        ensureMiniAnchor(playerUi.mode === 'compact' ? 'compact' : 'mini');
+        queuePlayerPaint();
+      }});
+    }}
+
     function renderHome() {{
       if (state.loading) {{
         content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Refreshing your library…</h2><p style="margin:0;">Pulling your latest reels, items, and status.</p></div></div>`;
         return;
       }}
-      const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
+      const collections = visibleCollections();
       header.classList.remove('compact');
       backButton.classList.add('hidden');
       screenTitle.textContent = 'Your Reel Library';
       screenSubtitle.textContent = '';
+      hideFloatingPlayer();
       if (!collections.length) {{
         content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No collections yet</h2><p style="margin:0;">Send reels to the bot and they’ll appear here.</p></div></div>`;
         return;
@@ -1344,9 +2094,9 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     async function deleteCurrentReel() {{
-      const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
+      const collections = visibleCollections();
       const collection = collections[state.currentList];
-      const items = collection ? collection.items.filter((entry) => matchesItem(entry, state.query)) : [];
+      const items = visibleItemsForCurrentList();
       const item = items[state.currentItem];
       if (!item?.reel_id) {{
         window.alert('This reel is missing its backend id, so it cannot be deleted yet.');
@@ -1365,9 +2115,9 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     async function retryCurrentReel() {{
-      const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
+      const collections = visibleCollections();
       const collection = collections[state.currentList];
-      const items = collection ? collection.items.filter((entry) => matchesItem(entry, state.query)) : [];
+      const items = visibleItemsForCurrentList();
       const item = items[state.currentItem];
       if (!item?.reel_id) {{
         window.alert('This reel is missing its backend id, so it cannot be retried yet.');
@@ -1396,31 +2146,29 @@ def build_web_app_html(user_id: str) -> str:
         content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Refreshing this list…</h2><p style="margin:0;">Updating the reel player and item cards.</p></div></div>`;
         return;
       }}
-      const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
+      const collections = visibleCollections();
       const collection = collections[state.currentList];
       if (!collection) {{
         state.currentList = null;
+        hideFloatingPlayer();
         renderHome();
         return;
       }}
-      const items = collection.items.filter((item) => matchesItem(item, state.query));
+      const items = visibleItemsForCurrentList();
       const item = items[state.currentItem] || items[0];
+      if (!item) {{
+        hideFloatingPlayer();
+        content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No matching items</h2><p style="margin:0;">Try a different search or wait for this reel to finish processing.</p></div></div>`;
+        return;
+      }}
+      state.currentItem = Math.max(0, items.indexOf(item));
       header.classList.add('compact');
       backButton.classList.remove('hidden');
       screenTitle.textContent = collection.list_title;
       screenSubtitle.textContent = '';
       content.innerHTML = `
         <section class="detail">
-          <article class="video-panel">
-            <div class="video-wrap">
-              ${{
-                item?.local_video_url
-                  ? `<video src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} controls playsinline preload="metadata"></video>`
-                  : item?.thumbnail_url
-                    ? `<img src="${{escapeHtml(item.thumbnail_url)}}" alt="" />`
-                    : `<div class="video-empty">This reel is still waiting for local playback or media extraction.</div>`
-              }}
-            </div>
+          <article class="detail-card">
             <div class="video-meta">
               <h2 class="detail-title">${{escapeHtml(item?.name || '')}}</h2>
               <div class="detail-meta">
@@ -1462,6 +2210,7 @@ def build_web_app_html(user_id: str) -> str:
       if (retryButton) {{
         retryButton.addEventListener('click', retryCurrentReel);
       }}
+      openFloatingPlayer(item);
     }}
 
     function renderStatus() {{
@@ -1503,10 +2252,12 @@ def build_web_app_html(user_id: str) -> str:
       renderStatus();
       if (state.currentList === null) renderHome();
       else renderDetail();
+      scheduleNextRefresh();
     }}
     backButton.addEventListener('click', () => {{
       state.currentList = null;
       state.currentItem = 0;
+      hideFloatingPlayer();
       render();
     }});
     statusButton.addEventListener('click', () => statusSheet.classList.add('open'));
@@ -1518,9 +2269,11 @@ def build_web_app_html(user_id: str) -> str:
     searchInput.addEventListener('input', (event) => {{
       state.query = event.target.value.trim().toLowerCase();
       state.currentList = null;
+      hideFloatingPlayer();
       render();
     }});
 
+    bindFloatingPlayer();
     loadData();
   </script>
 </body>
