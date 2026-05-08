@@ -7,9 +7,27 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.config import settings
+from app.db.database import get_connection
 from app.db.init_db import initialize_database
 from app.services.jobs import claim_next_job, complete_job, create_worker_lock, fail_job, release_worker_lock
 from app.services.reel_ingest import get_reel_by_id
+
+
+def failure_summary_for_reel(reel_id: str) -> str:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT summary
+            FROM reel_items
+            WHERE reel_id = ? AND item_name = 'Processing Failed'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (reel_id,),
+        ).fetchone()
+    if row and row["summary"]:
+        return row["summary"]
+    return "Reel processor returned failed output"
 
 
 def process_job(job: dict):
@@ -59,6 +77,15 @@ def process_job(job: dict):
         message = result.stderr.strip() or result.stdout.strip() or "Processor failed"
         fail_job(job["id"], message)
         return
+
+    if job["job_type"] == "process_reel":
+        reel = get_reel_by_id(job["reel_id"])
+        if not reel:
+            fail_job(job["id"], "Missing reel after processing")
+            return
+        if reel.get("status") != "completed":
+            fail_job(job["id"], failure_summary_for_reel(job["reel_id"]))
+            return
 
     complete_job(job["id"])
 
