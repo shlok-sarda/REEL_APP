@@ -1097,35 +1097,39 @@ def build_web_app_html(user_id: str) -> str:
       background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); padding:20px;
     }}
     .mini-player-card {{
-      position:relative; height:min(35vh, 280px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
+      position:relative; height:min(46vh, 360px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
       border:1px solid var(--line); background:#050607; box-shadow:var(--shadow);
       touch-action:none;
     }}
     .mini-player-shell.expanded .mini-player-card {{
-      height:min(78vh, 680px);
+      height:min(82vh, 760px);
       max-width:min(92vw, 420px);
     }}
     .video-wrap {{
       position:relative; width:100%; height:100%; background:#050607;
     }}
     .mini-player-video {{
-      width:100%; height:100%; display:block; object-fit:cover; background:#050607;
+      width:100%; height:100%; display:block; object-fit:cover; background:#050607; pointer-events:none;
     }}
     .mini-player-overlay {{
-      position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity .18s ease;
+      position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity .18s ease; z-index:2;
       background:linear-gradient(180deg, rgba(5,7,10,0.34), rgba(5,7,10,0.02) 34%, rgba(5,7,10,0.42));
     }}
     .mini-player-card.show-ui .mini-player-overlay {{
-      opacity:1; pointer-events:none;
+      opacity:1;
     }}
     .mini-player-btn {{
-      position:absolute; width:32px; height:32px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
+      position:absolute; width:34px; height:34px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:.9rem; pointer-events:auto;
+      cursor:pointer; font-size:.82rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease;
     }}
     .mini-player-btn.expand {{ top:8px; left:8px; }}
     .mini-player-btn.close {{ top:8px; right:8px; }}
     .mini-player-btn.mute {{ right:8px; bottom:8px; }}
+    .mini-player-card.show-ui .mini-player-btn,
+    .mini-player-card.show-ui .mini-player-play {{
+      opacity:1; pointer-events:auto;
+    }}
     .mini-player-peek {{
       position:absolute; top:50%; left:-14px; transform:translateY(-50%);
       width:28px; height:48px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
@@ -1143,7 +1147,7 @@ def build_web_app_html(user_id: str) -> str:
     .mini-player-play {{
       width:56px; height:56px; border-radius:999px; border:1px solid rgba(255,255,255,0.2);
       background:rgba(7,9,12,0.56); color:#ffffff; display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:1.2rem; pointer-events:auto;
+      cursor:pointer; font-size:1.2rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease;
     }}
     .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
@@ -1453,7 +1457,7 @@ def build_web_app_html(user_id: str) -> str:
 
     function clampPlayerOffset(x, y) {{
       const maxLeft = Math.max(0, Math.floor(window.innerWidth * 0.58));
-      const maxRight = Math.max(0, Math.floor(window.innerWidth * 0.42));
+      const maxRight = Math.max(0, Math.floor(window.innerWidth * 0.72));
       const maxY = Math.max(0, Math.floor(window.innerHeight * 0.48));
       return {{
         x: Math.max(-maxLeft, Math.min(maxRight, x)),
@@ -1547,7 +1551,7 @@ def build_web_app_html(user_id: str) -> str:
       const muteButton = document.getElementById('miniPlayerMuteButton');
       const fullscreenButton = document.getElementById('miniPlayerExpandButton');
       if (video && playButton) playButton.textContent = video.paused ? '▶' : '❚❚';
-      if (video && muteButton) muteButton.textContent = video.muted ? '🔇' : '🔈';
+      if (video && muteButton) muteButton.textContent = video.muted ? 'M' : 'S';
       if (fullscreenButton) fullscreenButton.textContent = state.playerExpanded ? '🗗' : '⤢';
       syncMiniPlayerShell();
     }}
@@ -1667,13 +1671,13 @@ def build_web_app_html(user_id: str) -> str:
                       <div class="mini-player-dragzone"></div>
                       <video id="miniPlayerVideo" class="mini-player-video" src="${{escapeHtml(item.local_video_url)}}" ${{item.thumbnail_url ? `poster="${{escapeHtml(item.thumbnail_url)}}"` : ''}} playsinline preload="metadata" muted></video>
                       <div class="mini-player-overlay">
-                        <button id="miniPlayerExpandButton" class="mini-player-btn expand" type="button" aria-label="Expand reel">⤢</button>
-                        <button id="miniPlayerCloseButton" class="mini-player-btn close" type="button" aria-label="Close reel">✕</button>
-                        <div class="mini-player-center">
-                          <button id="miniPlayerPlayButton" class="mini-player-play" type="button" aria-label="Play or pause">❚❚</button>
-                        </div>
-                        <button id="miniPlayerMuteButton" class="mini-player-btn mute" type="button" aria-label="Mute or unmute">🔇</button>
                       </div>
+                      <button id="miniPlayerExpandButton" class="mini-player-btn expand" type="button" aria-label="Expand reel">⤢</button>
+                      <button id="miniPlayerCloseButton" class="mini-player-btn close" type="button" aria-label="Close reel">✕</button>
+                      <div class="mini-player-center">
+                        <button id="miniPlayerPlayButton" class="mini-player-play" type="button" aria-label="Play or pause">❚❚</button>
+                      </div>
+                      <button id="miniPlayerMuteButton" class="mini-player-btn mute" type="button" aria-label="Mute or unmute">M</button>
                       <button id="miniPlayerPeek" class="mini-player-peek" type="button" aria-label="Bring reel back">‹</button>
                     </div>
                   </article>
@@ -1695,23 +1699,38 @@ def build_web_app_html(user_id: str) -> str:
       }});
       const miniPlayerCloseButton = document.getElementById('miniPlayerCloseButton');
       if (miniPlayerCloseButton) {{
-        miniPlayerCloseButton.addEventListener('click', closeMiniPlayer);
+        miniPlayerCloseButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          closeMiniPlayer();
+        }});
       }}
       const miniPlayerPlayButton = document.getElementById('miniPlayerPlayButton');
       if (miniPlayerPlayButton) {{
-        miniPlayerPlayButton.addEventListener('click', toggleMiniPlayerPlayback);
+        miniPlayerPlayButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          toggleMiniPlayerPlayback();
+        }});
       }}
       const miniPlayerMuteButton = document.getElementById('miniPlayerMuteButton');
       if (miniPlayerMuteButton) {{
-        miniPlayerMuteButton.addEventListener('click', toggleMiniPlayerMute);
+        miniPlayerMuteButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          toggleMiniPlayerMute();
+        }});
       }}
       const miniPlayerExpandButton = document.getElementById('miniPlayerExpandButton');
       if (miniPlayerExpandButton) {{
-        miniPlayerExpandButton.addEventListener('click', toggleMiniPlayerExpanded);
+        miniPlayerExpandButton.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          toggleMiniPlayerExpanded();
+        }});
       }}
       const miniPlayerPeek = document.getElementById('miniPlayerPeek');
       if (miniPlayerPeek) {{
-        miniPlayerPeek.addEventListener('click', dockMiniPlayerBack);
+        miniPlayerPeek.addEventListener('click', (event) => {{
+          event.stopPropagation();
+          dockMiniPlayerBack();
+        }});
       }}
       const miniPlayerShell = document.getElementById('miniPlayerShell');
       if (miniPlayerShell) {{
@@ -1724,7 +1743,6 @@ def build_web_app_html(user_id: str) -> str:
       }}
       const miniPlayerVideo = document.getElementById('miniPlayerVideo');
       if (miniPlayerVideo) {{
-        miniPlayerVideo.addEventListener('click', () => setMiniPlayerControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible));
         miniPlayerVideo.addEventListener('play', syncMiniPlayerButtons);
         miniPlayerVideo.addEventListener('pause', syncMiniPlayerButtons);
         miniPlayerVideo.addEventListener('volumechange', syncMiniPlayerButtons);
