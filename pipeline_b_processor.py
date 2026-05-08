@@ -20,16 +20,33 @@ from finale import (
 
 client = get_openai_client()
 BASE_DIR = Path(__file__).resolve().parent
-PROMPTS_DIR = BASE_DIR / "experiments_archive"
 MODEL = "gpt-4.1"
 
-ROUTER_PROMPT = PROMPTS_DIR / "branch_router_prompt.txt"
-JUDGE_PROMPT = PROMPTS_DIR / "judge_branch_outputs_prompt.txt"
+
+def resolve_prompt_path(filename: str) -> Path:
+    candidates = [
+        BASE_DIR / "experiments_archive" / filename,
+        BASE_DIR.parent / "final_pipeline" / "experiments_archive" / filename,
+        BASE_DIR / "final_pipeline" / "experiments_archive" / filename,
+        Path.cwd() / "experiments_archive" / filename,
+        Path.cwd() / "final_pipeline" / "experiments_archive" / filename,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"Could not find prompt file '{filename}'. Checked: "
+        + ", ".join(str(path) for path in candidates)
+    )
+
+
+ROUTER_PROMPT = resolve_prompt_path("branch_router_prompt.txt")
+JUDGE_PROMPT = resolve_prompt_path("judge_branch_outputs_prompt.txt")
 BRANCH_PROMPTS = {
-    "Travel / Food": PROMPTS_DIR / "travel_food_branch_prompt.txt",
-    "Products / Shopping": PROMPTS_DIR / "product_shopping_branch_prompt.txt",
-    "Fitness / Health": PROMPTS_DIR / "fitness_health_branch_prompt.txt",
-    "Generic": PROMPTS_DIR / "generic_branch_prompt.txt",
+    "Travel / Food": resolve_prompt_path("travel_food_branch_prompt.txt"),
+    "Products / Shopping": resolve_prompt_path("product_shopping_branch_prompt.txt"),
+    "Fitness / Health": resolve_prompt_path("fitness_health_branch_prompt.txt"),
+    "Generic": resolve_prompt_path("generic_branch_prompt.txt"),
 }
 
 
