@@ -16,6 +16,7 @@ from finale import (
     normalize_label,
     summarize_error,
 )
+from pipeline_b_prompts import BRANCH_PROMPTS, JUDGE_PROMPT, ROUTER_PROMPT
 
 
 client = get_openai_client()
@@ -23,35 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL = "gpt-4.1"
 
 
-def resolve_prompt_path(filename: str) -> Path:
-    candidates = [
-        BASE_DIR / "experiments_archive" / filename,
-        BASE_DIR.parent / "final_pipeline" / "experiments_archive" / filename,
-        BASE_DIR / "final_pipeline" / "experiments_archive" / filename,
-        Path.cwd() / "experiments_archive" / filename,
-        Path.cwd() / "final_pipeline" / "experiments_archive" / filename,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        f"Could not find prompt file '{filename}'. Checked: "
-        + ", ".join(str(path) for path in candidates)
-    )
-
-
-ROUTER_PROMPT = resolve_prompt_path("branch_router_prompt.txt")
-JUDGE_PROMPT = resolve_prompt_path("judge_branch_outputs_prompt.txt")
-BRANCH_PROMPTS = {
-    "Travel / Food": resolve_prompt_path("travel_food_branch_prompt.txt"),
-    "Products / Shopping": resolve_prompt_path("product_shopping_branch_prompt.txt"),
-    "Fitness / Health": resolve_prompt_path("fitness_health_branch_prompt.txt"),
-    "Generic": resolve_prompt_path("generic_branch_prompt.txt"),
-}
-
-
-def fill_template(path: Path, result: dict, visual_data: dict) -> str:
-    template = path.read_text(encoding="utf-8")
+def fill_template(template: str, result: dict, visual_data: dict) -> str:
     replacements = {
         "{caption}": result.get("caption", ""),
         "{transcript}": result.get("transcript", ""),
@@ -99,10 +72,10 @@ def router_call(result: dict, visual_data: dict) -> dict:
 
 
 def branch_call(branch: str, result: dict, visual_data: dict) -> dict:
-    prompt_path = BRANCH_PROMPTS.get(branch)
-    if not prompt_path:
+    template = BRANCH_PROMPTS.get(branch)
+    if not template:
         raise ValueError(f"Unknown branch: {branch}")
-    payload = call_json_prompt(fill_template(prompt_path, result, visual_data))
+    payload = call_json_prompt(fill_template(template, result, visual_data))
     primary = normalize_label(payload.get("primary_category"))
     secondary = normalize_label(payload.get("secondary_category")) or primary or branch
     items = payload.get("items", [])
@@ -125,7 +98,7 @@ def branch_call(branch: str, result: dict, visual_data: dict) -> dict:
 
 
 def build_judge_prompt(result: dict, visual_data: dict, branch_a: str, candidate_a: dict, branch_b: str, candidate_b: dict) -> str:
-    template = JUDGE_PROMPT.read_text(encoding="utf-8")
+    template = JUDGE_PROMPT
     replacements = {
         "{caption}": result.get("caption", ""),
         "{transcript}": result.get("transcript", ""),
