@@ -1088,22 +1088,19 @@ def build_web_app_html(user_id: str) -> str:
       box-shadow: var(--shadow); padding:16px;
     }}
     .mini-player-shell {{
-      position:fixed; right:12px; bottom:calc(12px + var(--safe-bottom)); z-index:38;
-      display:none;
+      position:fixed; inset:0; z-index:38; display:none; pointer-events:none;
     }}
     .mini-player-shell.open {{ display:block; }}
     .mini-player-shell.expanded {{
-      inset:0; right:0; bottom:0; display:grid; place-items:center;
-      background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); padding:20px;
+      background:rgba(5,7,10,0.72); backdrop-filter:blur(10px); pointer-events:auto;
     }}
     .mini-player-card {{
-      position:relative; height:min(46vh, 360px); aspect-ratio:9 / 16; border-radius:22px; overflow:hidden;
+      position:absolute; top:0; left:0; width:202px; height:360px; border-radius:22px; overflow:hidden;
       border:1px solid var(--line); background:#050607; box-shadow:var(--shadow);
-      touch-action:none;
+      touch-action:none; will-change:transform,width,height,box-shadow,opacity; pointer-events:auto;
     }}
     .mini-player-shell.expanded .mini-player-card {{
-      height:min(82vh, 760px);
-      max-width:min(92vw, 420px);
+      max-width:none;
     }}
     .video-wrap {{
       position:relative; width:100%; height:100%; background:#050607;
@@ -1121,7 +1118,7 @@ def build_web_app_html(user_id: str) -> str:
     .mini-player-btn {{
       position:absolute; width:34px; height:34px; border-radius:999px; border:1px solid rgba(255,255,255,0.18);
       background:rgba(7,9,12,0.55); color:var(--text); display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:.82rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease;
+      cursor:pointer; font-size:.82rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease;
     }}
     .mini-player-btn.expand {{ top:8px; left:8px; }}
     .mini-player-btn.close {{ top:8px; right:8px; }}
@@ -1136,6 +1133,7 @@ def build_web_app_html(user_id: str) -> str:
       background:rgba(7,9,12,0.76); color:var(--text); display:none; align-items:center; justify-content:center;
       cursor:pointer; z-index:3;
     }}
+    .mini-player-peek.right {{ left:auto; right:-14px; }}
     .mini-player-peek.visible {{ display:inline-flex; }}
     .mini-player-dragzone {{
       position:absolute; inset:0; cursor:grab; z-index:1;
@@ -1147,7 +1145,7 @@ def build_web_app_html(user_id: str) -> str:
     .mini-player-play {{
       width:56px; height:56px; border-radius:999px; border:1px solid rgba(255,255,255,0.2);
       background:rgba(7,9,12,0.56); color:#ffffff; display:inline-flex; align-items:center; justify-content:center;
-      cursor:pointer; font-size:1.2rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease;
+      cursor:pointer; font-size:1.2rem; z-index:3; opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease;
     }}
     .video-meta {{ display:grid; gap:10px; }}
     .detail-title {{ margin:0; font-size:1.2rem; line-height:1.05; letter-spacing:-.03em; }}
@@ -1259,9 +1257,11 @@ def build_web_app_html(user_id: str) -> str:
       currentList: null,
       currentItem: 0,
       playerOpen: false,
+      playerMode: 'mini',
       playerExpanded: false,
       playerControlsVisible: true,
       playerOffset: {{ x: 0, y: 0 }},
+      playerDockSide: null,
       playerMuted: true,
       jobs: [],
       dashboard: null,
@@ -1383,7 +1383,9 @@ def build_web_app_html(user_id: str) -> str:
           state.currentList = Number(node.dataset.collection);
           state.currentItem = 0;
           state.playerOpen = false;
+          state.playerMode = 'mini';
           state.playerExpanded = false;
+          state.playerDockSide = null;
           state.playerControlsVisible = true;
           state.playerOffset = {{ x: 0, y: 0 }};
           render();
@@ -1455,81 +1457,128 @@ def build_web_app_html(user_id: str) -> str:
       await loadData();
     }}
 
-    function clampPlayerOffset(x, y) {{
-      const maxLeft = Math.max(0, Math.floor(window.innerWidth * 0.58));
-      const maxRight = Math.max(0, Math.floor(window.innerWidth * 0.72));
-      const maxY = Math.max(0, Math.floor(window.innerHeight * 0.48));
-      return {{
-        x: Math.max(-maxLeft, Math.min(maxRight, x)),
-        y: Math.max(-maxY, Math.min(maxY, y)),
-      }};
-    }}
-
-    function attachMiniPlayerDrag(shell) {{
-      const handle = shell.querySelector('.mini-player-dragzone');
-      const card = shell.querySelector('.mini-player-card');
-      if (!handle || !card) return;
-
-      let dragging = false;
-      let originX = 0;
-      let originY = 0;
-      let startX = 0;
-      let startY = 0;
-      let moved = false;
-
-      const onPointerMove = (event) => {{
-        if (!dragging || shell.classList.contains('expanded')) return;
-        moved = true;
-        const next = clampPlayerOffset(
-          originX + (event.clientX - startX),
-          originY + (event.clientY - startY),
-        );
-        state.playerOffset = next;
-        card.style.transform = `translate(${{next.x}}px, ${{next.y}}px)`;
-        syncMiniPlayerShell();
-      }};
-
-      const onPointerUp = () => {{
-        if (!dragging) return;
-        dragging = false;
-        if (!moved) {{
-          setMiniPlayerControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible);
-        }}
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
-      }};
-
-      handle.addEventListener('pointerdown', (event) => {{
-        if (event.target.closest('button')) return;
-        if (shell.classList.contains('expanded')) return;
-        dragging = true;
-        moved = false;
-        startX = event.clientX;
-        startY = event.clientY;
-        originX = Number(state.playerOffset.x || 0);
-        originY = Number(state.playerOffset.y || 0);
-        event.preventDefault();
-        window.addEventListener('pointermove', onPointerMove);
-        window.addEventListener('pointerup', onPointerUp);
-      }});
-    }}
+    const PLAYER_TUNING = {{
+      spring: 0.16,
+      damping: 0.8,
+      dockVisible: 26,
+      edgeMargin: 12,
+      velocityExpand: 1100,
+      velocityCompact: 950,
+      velocityDock: 850,
+    }};
 
     let playerUiTimer = null;
+    let playerSpringFrame = null;
+    let playerSpringState = null;
+
+    function safeInsets() {{
+      const styles = getComputedStyle(document.documentElement);
+      const safeTop = parseFloat(styles.getPropertyValue('--safe-top')) || 0;
+      const safeBottom = parseFloat(styles.getPropertyValue('--safe-bottom')) || 0;
+      return {{ top: safeTop, bottom: safeBottom }};
+    }}
+
+    function playerMetrics(mode = state.playerMode) {{
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      if (mode === 'expanded') {{
+        const height = Math.min(vh * 0.82, 760);
+        return {{ width: Math.min(height * (9 / 16), vw * 0.92), height }};
+      }}
+      if (mode === 'compact') {{
+        const height = Math.min(vh * 0.34, 280);
+        return {{ width: height * (9 / 16), height }};
+      }}
+      const height = Math.min(vh * 0.46, 360);
+      return {{ width: height * (9 / 16), height }};
+    }}
+
+    function playerBounds(mode = state.playerMode) {{
+      const metrics = playerMetrics(mode);
+      const insets = safeInsets();
+      const margin = PLAYER_TUNING.edgeMargin;
+      return {{
+        minX: margin,
+        maxX: window.innerWidth - metrics.width - margin,
+        minY: insets.top + margin,
+        maxY: window.innerHeight - metrics.height - margin - insets.bottom,
+        metrics,
+      }};
+    }}
+
+    function cornerTarget(anchor, mode = state.playerMode) {{
+      const bounds = playerBounds(mode);
+      const isTop = anchor.startsWith('t');
+      const isLeft = anchor.endsWith('l');
+      return {{
+        x: isLeft ? bounds.minX : bounds.maxX,
+        y: isTop ? bounds.minY : bounds.maxY,
+      }};
+    }}
+
+    function dockTarget(side = 'right', y = state.playerOffset.y, mode = state.playerMode) {{
+      const bounds = playerBounds(mode);
+      const clampedY = Math.max(bounds.minY, Math.min(bounds.maxY, y));
+      return {{
+        x: side === 'left'
+          ? -bounds.metrics.width + PLAYER_TUNING.dockVisible
+          : window.innerWidth - PLAYER_TUNING.dockVisible,
+        y: clampedY,
+      }};
+    }}
+
+    function nearestAnchor(x, y, mode = state.playerMode) {{
+      const anchors = ['tl', 'tr', 'bl', 'br'];
+      const centerX = x + playerMetrics(mode).width / 2;
+      const centerY = y + playerMetrics(mode).height / 2;
+      let best = 'br';
+      let bestDistance = Number.POSITIVE_INFINITY;
+      anchors.forEach((anchor) => {{
+        const point = cornerTarget(anchor, mode);
+        const targetCenterX = point.x + playerMetrics(mode).width / 2;
+        const targetCenterY = point.y + playerMetrics(mode).height / 2;
+        const distance = Math.hypot(centerX - targetCenterX, centerY - targetCenterY);
+        if (distance < bestDistance) {{
+          bestDistance = distance;
+          best = anchor;
+        }}
+      }});
+      return best;
+    }}
+
+    function softHaptic() {{
+      if (navigator.vibrate) navigator.vibrate(8);
+    }}
+
+    function stopPlayerSpring() {{
+      if (playerSpringFrame) cancelAnimationFrame(playerSpringFrame);
+      playerSpringFrame = null;
+      playerSpringState = null;
+    }}
+
     function syncMiniPlayerShell() {{
       const shell = document.getElementById('miniPlayerShell');
       const card = document.querySelector('.mini-player-card');
       const peek = document.getElementById('miniPlayerPeek');
       if (!shell || !card) return;
+      const mode = state.playerMode;
+      const metrics = playerMetrics(mode);
+      const docked = mode === 'docked-left' || mode === 'docked-right';
       shell.classList.toggle('open', state.playerOpen);
-      shell.classList.toggle('expanded', state.playerExpanded);
-      card.classList.toggle('show-ui', state.playerControlsVisible);
-      if (state.playerExpanded) {{
-        card.style.transform = '';
-      }} else {{
-        card.style.transform = `translate(${{state.playerOffset.x}}px, ${{state.playerOffset.y}}px)`;
-      }}
+      shell.classList.toggle('expanded', mode === 'expanded');
+      card.classList.toggle('show-ui', state.playerControlsVisible && mode !== 'docked-left' && mode !== 'docked-right');
+      card.style.width = `${metrics.width}px`;
+      card.style.height = `${metrics.height}px`;
+      card.style.borderRadius = mode === 'compact' ? '20px' : '22px';
+      const scale = mode === 'compact' ? 0.94 : 1;
+      const shadowLift = Math.max(12, Math.min(34, 18 + Math.abs(state.playerOffset.y - playerBounds(mode).maxY) * 0.05));
+      card.style.boxShadow = `0 ${shadowLift}px ${shadowLift * 2.2}px rgba(0,0,0,0.34)`;
+      card.style.opacity = docked ? '0.92' : '1';
+      card.style.transform = `translate3d(${state.playerOffset.x}px, ${state.playerOffset.y}px, 0) scale(${scale})`;
       if (peek) {{
-        peek.classList.toggle('visible', !state.playerExpanded && state.playerOffset.x > 56);
+        peek.classList.toggle('visible', docked);
+        peek.classList.toggle('right', mode === 'docked-right');
+        peek.textContent = mode === 'docked-left' ? '›' : '‹';
       }}
     }}
 
@@ -1537,12 +1586,172 @@ def build_web_app_html(user_id: str) -> str:
       state.playerControlsVisible = visible;
       if (playerUiTimer) clearTimeout(playerUiTimer);
       syncMiniPlayerShell();
-      if (visible && autoHide) {{
+      if (visible && autoHide && state.playerMode !== 'docked-left' && state.playerMode !== 'docked-right') {{
         playerUiTimer = setTimeout(() => {{
           state.playerControlsVisible = false;
           syncMiniPlayerShell();
         }}, 1500);
       }}
+    }}
+
+    function animateMiniPlayerTo(target, options = {{}}) {{
+      stopPlayerSpring();
+      const mode = options.mode ?? state.playerMode;
+      const onComplete = options.onComplete || null;
+      playerSpringState = {{
+        x: state.playerOffset.x,
+        y: state.playerOffset.y,
+        vx: options.vx || 0,
+        vy: options.vy || 0,
+        targetX: target.x,
+        targetY: target.y,
+        mode,
+        onComplete,
+      }};
+      const step = () => {{
+        if (!playerSpringState) return;
+        const s = playerSpringState;
+        s.vx += (s.targetX - s.x) * PLAYER_TUNING.spring;
+        s.vy += (s.targetY - s.y) * PLAYER_TUNING.spring;
+        s.vx *= PLAYER_TUNING.damping;
+        s.vy *= PLAYER_TUNING.damping;
+        s.x += s.vx;
+        s.y += s.vy;
+        state.playerOffset = {{ x: s.x, y: s.y }};
+        state.playerMode = s.mode;
+        state.playerExpanded = s.mode === 'expanded';
+        state.playerDockSide = s.mode === 'docked-left' ? 'left' : s.mode === 'docked-right' ? 'right' : null;
+        syncMiniPlayerShell();
+        const settled = Math.abs(s.targetX - s.x) < 0.6 && Math.abs(s.targetY - s.y) < 0.6 && Math.abs(s.vx) < 0.4 && Math.abs(s.vy) < 0.4;
+        if (settled) {{
+          state.playerOffset = {{ x: s.targetX, y: s.targetY }};
+          state.playerMode = s.mode;
+          state.playerExpanded = s.mode === 'expanded';
+          state.playerDockSide = s.mode === 'docked-left' ? 'left' : s.mode === 'docked-right' ? 'right' : null;
+          syncMiniPlayerShell();
+          const complete = s.onComplete;
+          stopPlayerSpring();
+          if (complete) complete();
+          return;
+        }}
+        playerSpringFrame = requestAnimationFrame(step);
+      }};
+      playerSpringFrame = requestAnimationFrame(step);
+    }}
+
+    function ensureMiniPlayerStartPosition() {{
+      if (state.playerOffset.x || state.playerOffset.y) return;
+      const start = cornerTarget('br', 'mini');
+      state.playerOffset = {{ x: start.x, y: start.y }};
+      state.playerMode = 'mini';
+      state.playerExpanded = false;
+      state.playerDockSide = null;
+    }}
+
+    function attachMiniPlayerDrag(shell) {{
+      const handle = shell.querySelector('.mini-player-dragzone');
+      if (!handle) return;
+
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let originX = 0;
+      let originY = 0;
+      let lastX = 0;
+      let lastY = 0;
+      let lastT = 0;
+      let velocityX = 0;
+      let velocityY = 0;
+      let moved = false;
+
+      const onPointerMove = (event) => {{
+        if (!dragging || state.playerMode === 'expanded') return;
+        moved = true;
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        const nextBounds = playerBounds(state.playerMode === 'compact' ? 'compact' : 'mini');
+        let nextX = originX + dx;
+        let nextY = originY + dy;
+        if (nextX < nextBounds.minX) nextX = nextBounds.minX - (nextBounds.minX - nextX) * 0.28;
+        if (nextX > nextBounds.maxX) nextX = nextBounds.maxX + (nextX - nextBounds.maxX) * 0.28;
+        if (nextY < nextBounds.minY) nextY = nextBounds.minY - (nextBounds.minY - nextY) * 0.28;
+        if (nextY > nextBounds.maxY) nextY = nextBounds.maxY + (nextY - nextBounds.maxY) * 0.28;
+        const now = performance.now();
+        const dt = Math.max(16, now - lastT);
+        velocityX = ((event.clientX - lastX) / dt) * 1000;
+        velocityY = ((event.clientY - lastY) / dt) * 1000;
+        lastX = event.clientX;
+        lastY = event.clientY;
+        lastT = now;
+        state.playerOffset = {{ x: nextX, y: nextY }};
+        syncMiniPlayerShell();
+      }};
+
+      const onPointerUp = () => {{
+        if (!dragging) return;
+        dragging = false;
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        if (!moved) {{
+          setMiniPlayerControlsVisible(!state.playerControlsVisible, !state.playerControlsVisible);
+          return;
+        }}
+        const current = {{ ...state.playerOffset }};
+        const predicted = {{
+          x: current.x + velocityX * 0.18,
+          y: current.y + velocityY * 0.18,
+        }};
+        const miniBounds = playerBounds('mini');
+        const compactBounds = playerBounds('compact');
+        if (velocityY < -PLAYER_TUNING.velocityExpand) {{
+          state.playerMode = 'expanded';
+          state.playerExpanded = true;
+          const expandedTarget = {{
+            x: (window.innerWidth - playerMetrics('expanded').width) / 2,
+            y: (window.innerHeight - playerMetrics('expanded').height) / 2,
+          }};
+          softHaptic();
+          animateMiniPlayerTo(expandedTarget, {{ mode: 'expanded', vx: velocityX * 0.03, vy: velocityY * 0.03 }});
+          return;
+        }}
+        if (predicted.x > miniBounds.maxX + playerMetrics('mini').width * 0.24 || velocityX > PLAYER_TUNING.velocityDock) {{
+          softHaptic();
+          animateMiniPlayerTo(dockTarget('right', current.y, state.playerMode), {{ mode: 'docked-right', vx: velocityX * 0.05 }});
+          return;
+        }}
+        if (predicted.x < miniBounds.minX - playerMetrics('mini').width * 0.24 || velocityX < -PLAYER_TUNING.velocityDock) {{
+          softHaptic();
+          animateMiniPlayerTo(dockTarget('left', current.y, state.playerMode), {{ mode: 'docked-left', vx: velocityX * 0.05 }});
+          return;
+        }}
+        if (velocityY > PLAYER_TUNING.velocityCompact) {{
+          const compactAnchor = nearestAnchor(current.x, current.y, 'compact');
+          softHaptic();
+          animateMiniPlayerTo(cornerTarget(compactAnchor, 'compact'), {{ mode: 'compact', vy: velocityY * 0.04 }});
+          return;
+        }}
+        const nextMode = state.playerMode === 'compact' ? 'compact' : 'mini';
+        const anchor = nearestAnchor(predicted.x, predicted.y, nextMode);
+        animateMiniPlayerTo(cornerTarget(anchor, nextMode), {{ mode: nextMode, vx: velocityX * 0.05, vy: velocityY * 0.05 }});
+      }};
+
+      handle.addEventListener('pointerdown', (event) => {{
+        if (state.playerMode === 'expanded') return;
+        stopPlayerSpring();
+        dragging = true;
+        moved = false;
+        startX = event.clientX;
+        startY = event.clientY;
+        originX = state.playerOffset.x;
+        originY = state.playerOffset.y;
+        lastX = event.clientX;
+        lastY = event.clientY;
+        lastT = performance.now();
+        setMiniPlayerControlsVisible(true, true);
+        event.preventDefault();
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+      }});
     }}
 
     function syncMiniPlayerButtons() {{
@@ -1552,14 +1761,19 @@ def build_web_app_html(user_id: str) -> str:
       const fullscreenButton = document.getElementById('miniPlayerExpandButton');
       if (video && playButton) playButton.textContent = video.paused ? '▶' : '❚❚';
       if (video && muteButton) muteButton.textContent = video.muted ? 'M' : 'S';
-      if (fullscreenButton) fullscreenButton.textContent = state.playerExpanded ? '🗗' : '⤢';
+      if (fullscreenButton) fullscreenButton.textContent = state.playerMode === 'expanded' ? '🗗' : '⤢';
       syncMiniPlayerShell();
     }}
 
     async function openMiniPlayer() {{
       const video = document.getElementById('miniPlayerVideo');
       if (!video) return;
+      ensureMiniPlayerStartPosition();
       state.playerOpen = true;
+      if (state.playerMode === 'docked-left' || state.playerMode === 'docked-right') {{
+        state.playerMode = 'mini';
+        state.playerDockSide = null;
+      }}
       video.muted = state.playerMuted;
       setMiniPlayerControlsVisible(true, true);
       try {{
@@ -1574,8 +1788,11 @@ def build_web_app_html(user_id: str) -> str:
       const video = document.getElementById('miniPlayerVideo');
       if (video) video.pause();
       state.playerOpen = false;
+      state.playerMode = 'mini';
       state.playerExpanded = false;
+      state.playerDockSide = null;
       state.playerControlsVisible = false;
+      stopPlayerSpring();
       syncMiniPlayerButtons();
     }}
 
@@ -1605,14 +1822,30 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     function toggleMiniPlayerExpanded() {{
-      state.playerExpanded = !state.playerExpanded;
-      setMiniPlayerControlsVisible(true, true);
-      syncMiniPlayerButtons();
+      if (state.playerMode === 'expanded') {{
+        state.playerMode = 'mini';
+        state.playerExpanded = false;
+        animateMiniPlayerTo(cornerTarget('br', 'mini'), {{ mode: 'mini' }});
+        return;
+      }}
+      state.playerMode = 'expanded';
+      state.playerExpanded = true;
+      const expandedTarget = {{
+        x: (window.innerWidth - playerMetrics('expanded').width) / 2,
+        y: (window.innerHeight - playerMetrics('expanded').height) / 2,
+      }};
+      softHaptic();
+      animateMiniPlayerTo(expandedTarget, {{ mode: 'expanded' }});
+      setMiniPlayerControlsVisible(true, false);
     }}
 
     function dockMiniPlayerBack() {{
-      state.playerOffset = {{ x: 0, y: 0 }};
-      syncMiniPlayerShell();
+      const anchor = state.playerDockSide === 'left' ? 'bl' : 'br';
+      state.playerMode = 'mini';
+      state.playerDockSide = null;
+      softHaptic();
+      animateMiniPlayerTo(cornerTarget(anchor, 'mini'), {{ mode: 'mini' }});
+      setMiniPlayerControlsVisible(true, true);
     }}
 
     function renderDetail() {{
@@ -1692,7 +1925,9 @@ def build_web_app_html(user_id: str) -> str:
           if (event.target.closest('button') || event.target.closest('a')) return;
           state.currentItem = Number(node.dataset.item);
           state.playerOpen = Boolean(items[state.currentItem]?.local_video_url);
+          state.playerMode = 'mini';
           state.playerExpanded = false;
+          state.playerDockSide = null;
           state.playerControlsVisible = true;
           renderDetail();
         }});
@@ -1810,7 +2045,9 @@ def build_web_app_html(user_id: str) -> str:
       state.currentList = null;
       state.currentItem = 0;
       state.playerOpen = false;
+      state.playerMode = 'mini';
       state.playerExpanded = false;
+      state.playerDockSide = null;
       state.playerControlsVisible = true;
       state.playerOffset = {{ x: 0, y: 0 }};
       render();
@@ -1825,6 +2062,22 @@ def build_web_app_html(user_id: str) -> str:
       state.query = event.target.value.trim().toLowerCase();
       state.currentList = null;
       render();
+    }});
+
+    window.addEventListener('resize', () => {{
+      if (!state.playerOpen) return;
+      if (state.playerMode === 'docked-left' || state.playerMode === 'docked-right') {{
+        state.playerOffset = dockTarget(state.playerMode === 'docked-left' ? 'left' : 'right', state.playerOffset.y, state.playerMode);
+      }} else if (state.playerMode === 'expanded') {{
+        state.playerOffset = {{
+          x: (window.innerWidth - playerMetrics('expanded').width) / 2,
+          y: (window.innerHeight - playerMetrics('expanded').height) / 2,
+        }};
+      }} else {{
+        const anchor = nearestAnchor(state.playerOffset.x, state.playerOffset.y, state.playerMode);
+        state.playerOffset = cornerTarget(anchor, state.playerMode);
+      }}
+      syncMiniPlayerButtons();
     }});
 
     loadData();
