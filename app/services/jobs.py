@@ -6,6 +6,9 @@ from datetime import datetime
 from app.config import settings
 from app.db.database import get_connection
 
+MAX_PROCESS_REEL_ATTEMPTS = 2
+MAX_REBUILD_ATTEMPTS = 2
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -106,6 +109,36 @@ def job_counts(user_id: str | None = None) -> dict:
 
 def claim_next_job() -> dict | None:
     with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE processing_jobs
+            SET status = 'failed',
+                error_message = CASE
+                    WHEN error_message = '' THEN 'Reel processing interrupted repeatedly'
+                    ELSE error_message
+                END,
+                finished_at = ?
+            WHERE status = 'pending'
+              AND job_type = 'process_reel'
+              AND attempts >= ?
+            """,
+            (_now(), MAX_PROCESS_REEL_ATTEMPTS),
+        )
+        connection.execute(
+            """
+            UPDATE processing_jobs
+            SET status = 'failed',
+                error_message = CASE
+                    WHEN error_message = '' THEN 'Library rebuild interrupted repeatedly'
+                    ELSE error_message
+                END,
+                finished_at = ?
+            WHERE status = 'pending'
+              AND job_type = 'rebuild_library'
+              AND attempts >= ?
+            """,
+            (_now(), MAX_REBUILD_ATTEMPTS),
+        )
         row = connection.execute(
             """
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
@@ -206,15 +239,30 @@ def recover_orphaned_jobs() -> int:
             UPDATE processing_jobs
             SET status = 'failed',
                 error_message = CASE
+                    WHEN error_message = '' THEN 'Reel processing interrupted repeatedly'
+                    ELSE error_message
+                END,
+                finished_at = ?
+            WHERE status = 'running'
+              AND job_type = 'process_reel'
+              AND attempts >= ?
+            """,
+            (_now(), MAX_PROCESS_REEL_ATTEMPTS),
+        )
+        connection.execute(
+            """
+            UPDATE processing_jobs
+            SET status = 'failed',
+                error_message = CASE
                     WHEN error_message = '' THEN 'Library rebuild interrupted repeatedly'
                     ELSE error_message
                 END,
                 finished_at = ?
             WHERE status = 'running'
               AND job_type = 'rebuild_library'
-              AND attempts >= 3
+              AND attempts >= ?
             """,
-            (_now(),),
+            (_now(), MAX_REBUILD_ATTEMPTS),
         )
         cursor = connection.execute(
             """
@@ -224,8 +272,11 @@ def recover_orphaned_jobs() -> int:
                 ELSE error_message
             END
             WHERE status = 'running'
-              AND NOT (job_type = 'rebuild_library' AND attempts >= 3)
+              AND NOT (job_type = 'process_reel' AND attempts >= ?)
+              AND NOT (job_type = 'rebuild_library' AND attempts >= ?)
             """
+            ,
+            (MAX_PROCESS_REEL_ATTEMPTS, MAX_REBUILD_ATTEMPTS),
         )
         return cursor.rowcount
 
