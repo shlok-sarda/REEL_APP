@@ -2,6 +2,7 @@ fastapi
 uvicorn
 requests
 google-auth
+itsdangerous
 python-telegram-bot
 openai
 boto3
