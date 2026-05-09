@@ -891,13 +891,13 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         {disabled_note}
       </div>
         """
-    return f"""<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Reel Organizer</title>
-  {google_script}
+  __GOOGLE_SCRIPT__
   <style>
     :root {
       color-scheme: dark;
@@ -1069,7 +1069,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       <p class="kicker">Live Reel Library</p>
       <h1>Sign in once. Connect Telegram once. Your reels stay yours.</h1>
       <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets them send reels to the bot without ever typing a Telegram user ID.</p>
-      {auth_section}
+      __AUTH_SECTION__
       <div class="form">
         <a class="secondary-link" href="/app/demo">View Demo Library</a>
       </div>
@@ -1084,7 +1084,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     </section>
   </main>
   <script>
-    const LOGIN_CSRF = {csrf_token!r};
+    const LOGIN_CSRF = __CSRF_TOKEN__;
     async function postJson(url, payload) {{
       const response = await fetch(url, {{
         method: 'POST',
@@ -1100,7 +1100,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 
     if (window.google && document.getElementById('googleButton')) {{
       window.google.accounts.id.initialize({{
-        client_id: {google_client_id!r},
+        client_id: __GOOGLE_CLIENT_ID__,
         callback: async (response) => {{
           try {{
             await postJson('/auth/google', {{
@@ -1128,7 +1128,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }}
   </script>
 </body>
-</html>"""
+</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id))
 
 
 def build_web_app_html(user_id: str) -> str:
