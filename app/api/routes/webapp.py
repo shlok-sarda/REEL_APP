@@ -1097,72 +1097,72 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
   </main>
   <script>
     const LOGIN_CSRF = __CSRF_TOKEN__;
-    async function postJson(url, payload) {{
-      const response = await fetch(url, {{
+    async function postJson(url, payload) {
+      const response = await fetch(url, {
         method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }});
-      const data = await response.json().catch(() => ({{}}));
-      if (!response.ok) {{
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
         throw new Error(data.detail || 'Request failed');
-      }}
+      }
       return data;
-    }}
+    }
 
-    function mountGoogleButton() {{
+    function mountGoogleButton() {
       const target = document.getElementById('googleButton');
-      if (!target || !window.google || !window.google.accounts || !window.google.accounts.id) {{
+      if (!target || !window.google || !window.google.accounts || !window.google.accounts.id) {
         return false;
-      }}
-      if (target.dataset.mounted === '1') {{
+      }
+      if (target.dataset.mounted === '1') {
         return true;
-      }}
+      }
       target.dataset.mounted = '1';
-      window.google.accounts.id.initialize({{
+      window.google.accounts.id.initialize({
         client_id: __GOOGLE_CLIENT_ID__,
-        callback: async (response) => {{
-          try {{
-            await postJson('/auth/google', {{
+        callback: async (response) => {
+          try {
+            await postJson('/auth/google', {
               credential: response.credential,
               csrf_token: LOGIN_CSRF
-            }});
+            });
             window.location.reload();
-          }} catch (error) {{
+          } catch (error) {
             alert(error.message || 'Google login failed');
-          }}
-        }}
-      }});
+          }
+        }
+      });
       window.google.accounts.id.renderButton(
         target,
-        {{ theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }}
+        { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
       );
       return true;
-    }}
+    }
 
-    if (document.getElementById('googleButton')) {{
-      if (!mountGoogleButton()) {{
+    if (document.getElementById('googleButton')) {
+      if (!mountGoogleButton()) {
         let attempts = 0;
-        const googleMountTimer = setInterval(() => {{
+        const googleMountTimer = setInterval(() => {
           attempts += 1;
-          if (mountGoogleButton() || attempts > 40) {{
+          if (mountGoogleButton() || attempts > 40) {
             clearInterval(googleMountTimer);
-            if (attempts > 40 && !document.getElementById('googleButton').dataset.mounted) {{
+            if (attempts > 40 && !document.getElementById('googleButton').dataset.mounted) {
               document.getElementById('googleButton').innerHTML =
                 '<div class="google-fallback">Google Sign-In is being blocked in this browser. Open this page in Incognito or disable extensions for this site, then refresh.</div>';
-            }}
-          }}
-        }}, 250);
-      }}
-    }}
+            }
+          }
+        }, 250);
+      }
+    }
 
     const logoutButton = document.getElementById('logoutButton');
-    if (logoutButton) {{
-      logoutButton.addEventListener('click', async () => {{
-        await postJson('/auth/logout', {{}});
+    if (logoutButton) {
+      logoutButton.addEventListener('click', async () => {
+        await postJson('/auth/logout', {});
         window.location.href = '/';
-      }});
-    }}
+      });
+    }
   </script>
 </body>
 </html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id))
