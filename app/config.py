@@ -17,7 +17,7 @@ class Settings:
     session_secret: str = os.getenv("SESSION_SECRET", "change-me-before-launch")
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").strip()
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-    telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "").strip()
+    telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
     telegram_ingest_secret: str = os.getenv("TELEGRAM_INGEST_SECRET", "").strip()
     storage_dir: Path = Path(os.getenv("STORAGE_DIR", PROJECT_ROOT / "Shlok_reels"))
     media_dir: Path = Path(os.getenv("MEDIA_DIR", PROJECT_ROOT / "media" / "Shlok_reels"))
