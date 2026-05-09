@@ -1098,7 +1098,15 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       return data;
     }}
 
-    if (window.google && document.getElementById('googleButton')) {{
+    function mountGoogleButton() {{
+      const target = document.getElementById('googleButton');
+      if (!target || !window.google || !window.google.accounts || !window.google.accounts.id) {{
+        return false;
+      }}
+      if (target.dataset.mounted === '1') {{
+        return true;
+      }}
+      target.dataset.mounted = '1';
       window.google.accounts.id.initialize({{
         client_id: __GOOGLE_CLIENT_ID__,
         callback: async (response) => {{
@@ -1114,9 +1122,22 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         }}
       }});
       window.google.accounts.id.renderButton(
-        document.getElementById('googleButton'),
-        {{ theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with' }}
+        target,
+        {{ theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }}
       );
+      return true;
+    }}
+
+    if (document.getElementById('googleButton')) {{
+      if (!mountGoogleButton()) {{
+        let attempts = 0;
+        const googleMountTimer = setInterval(() => {{
+          attempts += 1;
+          if (mountGoogleButton() || attempts > 40) {{
+            clearInterval(googleMountTimer);
+          }}
+        }}, 250);
+      }}
     }}
 
     const logoutButton = document.getElementById('logoutButton');
