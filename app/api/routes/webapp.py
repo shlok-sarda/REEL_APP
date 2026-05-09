@@ -999,6 +999,18 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       min-height:46px;
       display:flex;
       align-items:center;
+      justify-content:flex-start;
+    }
+    .google-fallback {
+      min-height:46px;
+      display:flex;
+      align-items:center;
+      padding:0 14px;
+      border-radius:16px;
+      border:1px dashed rgba(255,255,255,0.14);
+      color:#b5bcc7;
+      font-size:.88rem;
+      line-height:1.35;
     }
     .primary-link,
     .secondary-link {
@@ -1135,6 +1147,10 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           attempts += 1;
           if (mountGoogleButton() || attempts > 40) {{
             clearInterval(googleMountTimer);
+            if (attempts > 40 && !document.getElementById('googleButton').dataset.mounted) {{
+              document.getElementById('googleButton').innerHTML =
+                '<div class="google-fallback">Google Sign-In is being blocked in this browser. Open this page in Incognito or disable extensions for this site, then refresh.</div>';
+            }}
           }}
         }}, 250);
       }}
