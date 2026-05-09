@@ -18,7 +18,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 def extraction_script() -> Path:
-    mode = os.getenv("PROCESSOR_MODE", "legacy").strip().lower()
+    # Pipeline B is now the primary default, but the env switch stays available.
+    mode = os.getenv("PROCESSOR_MODE", "pipeline_b").strip().lower()
     if mode == "pipeline_b":
         return BASE_DIR / "pipeline_b_processor.py"
     return BASE_DIR / "finale.py"
