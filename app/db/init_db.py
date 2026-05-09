@@ -19,6 +19,17 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+        code TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT NOT NULL DEFAULT '',
+        telegram_user_id TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS reels (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -81,19 +92,39 @@ SCHEMA_STATEMENTS = [
     """,
 ]
 
+USER_EXTRA_COLUMNS = {
+    "google_sub": "TEXT",
+    "email": "TEXT NOT NULL DEFAULT ''",
+    "picture_url": "TEXT NOT NULL DEFAULT ''",
+    "telegram_username": "TEXT NOT NULL DEFAULT ''",
+    "last_login_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def create_tables():
     with get_connection() as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
+        for column_name, column_type in USER_EXTRA_COLUMNS.items():
+            if column_name not in existing_columns:
+                connection.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
 
 
 def ensure_default_user():
     with get_connection() as connection:
         connection.execute(
             """
-            INSERT OR IGNORE INTO users (id, telegram_user_id, display_name, created_at)
-            VALUES (?, ?, ?, datetime('now'))
+            INSERT OR IGNORE INTO users (
+                id, telegram_user_id, display_name, created_at, google_sub, email,
+                picture_url, telegram_username, last_login_at, updated_at
+            )
+            VALUES (?, ?, ?, datetime('now'), NULL, '', '', '', '', datetime('now'))
             """,
             ("default", "default", "Default User"),
         )

@@ -6,7 +6,37 @@ from pydantic import BaseModel, Field
 class TelegramIngestRequest(BaseModel):
     url: str = Field(..., min_length=1)
     user_id: Optional[str] = None
+    telegram_user_id: Optional[str] = None
+    telegram_username: str = ""
+    telegram_display_name: str = ""
     source: str = "telegram"
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(..., min_length=1)
+    csrf_token: str = Field(..., min_length=1)
+
+
+class UserProfile(BaseModel):
+    id: str
+    display_name: str = ""
+    email: str = ""
+    picture_url: str = ""
+    telegram_user_id: str = ""
+    telegram_username: str = ""
+
+
+class SessionResponse(BaseModel):
+    authenticated: bool = False
+    user: Optional[UserProfile] = None
+    telegram_connected: bool = False
+
+
+class TelegramLinkCompleteRequest(BaseModel):
+    code: str = Field(..., min_length=1)
+    telegram_user_id: str = Field(..., min_length=1)
+    telegram_username: str = ""
+    telegram_display_name: str = ""
 
 
 class ReelRecord(BaseModel):

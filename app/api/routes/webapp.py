@@ -1,5 +1,9 @@
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from app.config import settings
+from app.services.auth import create_login_csrf, current_user
+from app.services.library import is_demo_user
 
 
 router = APIRouter(tags=["webapp"])
@@ -846,13 +850,54 @@ def build_demo_library_review_html() -> str:
 </html>"""
 
 
-def build_landing_html() -> str:
-    return """<!DOCTYPE html>
+def build_landing_html(csrf_token: str, user: dict | None) -> str:
+    google_client_id = settings.google_client_id
+    telegram_bot_username = settings.telegram_bot_username
+    google_script = (
+        '<script src="https://accounts.google.com/gsi/client" async defer></script>'
+        if google_client_id
+        else ""
+    )
+    auth_section = ""
+    if user:
+        telegram_connected = bool(user.get("telegram_user_id"))
+        telegram_label = "Telegram connected" if telegram_connected else "Connect Telegram"
+        telegram_href = "/auth/telegram/connect" if not telegram_connected else f"https://t.me/{telegram_bot_username}" if telegram_bot_username else "#"
+        auth_section = f"""
+      <div class="user-card">
+        <div class="user-row">
+          <div>
+            <p class="tiny-label">Signed in as</p>
+            <h2>{user.get("display_name", "User")}</h2>
+            <p class="tiny">{user.get("email", "")}</p>
+          </div>
+          {f'<img class="avatar" src="{user.get("picture_url", "")}" alt="Profile" />' if user.get("picture_url") else ""}
+        </div>
+        <div class="action-grid">
+          <a class="primary-link" href="/app">Open My Library</a>
+          <a class="secondary-link" href="{telegram_href}">{telegram_label}</a>
+        </div>
+        <button id="logoutButton" type="button" class="ghost-button">Sign out</button>
+      </div>
+        """
+    else:
+        disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
+        auth_section = f"""
+      <div class="auth-card">
+        <p class="kicker">Step 1</p>
+        <h2>Continue with Google</h2>
+        <p>Use your Google account once. After that, your library stays attached to you instead of a shared Telegram ID.</p>
+        <div id="googleButton" class="google-button-shell"></div>
+        {disabled_note}
+      </div>
+        """
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Reel Organizer</title>
+  {google_script}
   <style>
     :root {
       color-scheme: dark;
@@ -915,6 +960,47 @@ def build_landing_html() -> str:
       gap:12px;
       margin-top:18px;
     }
+    .auth-card, .user-card {
+      display:grid;
+      gap:14px;
+      margin-top:18px;
+    }
+    .user-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+    .user-row h2 {
+      margin:2px 0 0;
+      font-size:1.3rem;
+      letter-spacing:-.03em;
+    }
+    .tiny-label {
+      margin:0;
+      color:var(--accent-2);
+      font-size:.72rem;
+      font-weight:900;
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .avatar {
+      width:58px;
+      height:58px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      object-fit:cover;
+    }
+    .action-grid {
+      display:grid;
+      gap:10px;
+    }
+    .google-button-shell {
+      min-height:46px;
+      display:flex;
+      align-items:center;
+    }
+    .primary-link,
     .secondary-link {
       display:inline-flex;
       align-items:center;
@@ -928,6 +1014,26 @@ def build_landing_html() -> str:
       text-decoration:none;
       font-size:.98rem;
       font-weight:800;
+    }
+    .primary-link {
+      min-height:56px;
+      border-radius:18px;
+      background:rgba(238,215,166,0.14);
+      border:1px solid rgba(238,215,166,0.35);
+      color:var(--text);
+      text-decoration:none;
+      font-size:.98rem;
+      font-weight:900;
+    }
+    .ghost-button {
+      min-height:44px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:transparent;
+      color:var(--muted);
+      font-size:.92rem;
+      font-weight:800;
+      cursor:pointer;
     }
     input, button {
       width:100%;
@@ -961,31 +1067,65 @@ def build_landing_html() -> str:
   <main class="shell">
     <section class="hero">
       <p class="kicker">Live Reel Library</p>
-      <h1>Send reels to Telegram. Browse them here.</h1>
-      <p>Your app organizes saved Instagram reels into clean lists, lets you preview local copies, and keeps failed reels recoverable instead of disappearing.</p>
-      <form id="openForm" class="form">
-        <input id="userIdInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Enter your Telegram user ID" />
-        <button type="submit">Open My Library</button>
+      <h1>Sign in once. Connect Telegram once. Your reels stay yours.</h1>
+      <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets them send reels to the bot without ever typing a Telegram user ID.</p>
+      {auth_section}
+      <div class="form">
         <a class="secondary-link" href="/app/demo">View Demo Library</a>
-      </form>
-      <p class="tiny">For the current local build, the Telegram user ID is the account key used to separate one person’s library from another’s.</p>
+      </div>
     </section>
     <section class="card">
       <p class="kicker">How It Works</p>
       <ol>
-        <li>Send a reel URL to the Telegram bot.</li>
-        <li>Wait for the processing center to finish the reel.</li>
-        <li>Open your library with the same Telegram user ID.</li>
+        <li>Continue with Google.</li>
+        <li>Tap Connect Telegram once and press Start in the bot.</li>
+        <li>From then on, send reels to the bot and they appear in your own library.</li>
       </ol>
     </section>
   </main>
   <script>
-    document.getElementById('openForm').addEventListener('submit', (event) => {
-      event.preventDefault();
-      const value = document.getElementById('userIdInput').value.trim();
-      if (!value) return;
-      window.location.href = `/app/${encodeURIComponent(value)}`;
-    });
+    const LOGIN_CSRF = {csrf_token!r};
+    async function postJson(url, payload) {{
+      const response = await fetch(url, {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }});
+      const data = await response.json().catch(() => ({{}}));
+      if (!response.ok) {{
+        throw new Error(data.detail || 'Request failed');
+      }}
+      return data;
+    }}
+
+    if (window.google && document.getElementById('googleButton')) {{
+      window.google.accounts.id.initialize({{
+        client_id: {google_client_id!r},
+        callback: async (response) => {{
+          try {{
+            await postJson('/auth/google', {{
+              credential: response.credential,
+              csrf_token: LOGIN_CSRF
+            }});
+            window.location.reload();
+          }} catch (error) {{
+            alert(error.message || 'Google login failed');
+          }}
+        }}
+      }});
+      window.google.accounts.id.renderButton(
+        document.getElementById('googleButton'),
+        {{ theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with' }}
+      );
+    }}
+
+    const logoutButton = document.getElementById('logoutButton');
+    if (logoutButton) {{
+      logoutButton.addEventListener('click', async () => {{
+        await postJson('/auth/logout', {{}});
+        window.location.href = '/';
+      }});
+    }}
   </script>
 </body>
 </html>"""
@@ -2284,8 +2424,9 @@ def build_web_app_html(user_id: str) -> str:
 
 
 @router.get("/", response_class=HTMLResponse)
-def root_app():
-    return HTMLResponse(build_landing_html())
+def root_app(request: Request):
+    csrf_token = create_login_csrf(request)
+    return HTMLResponse(build_landing_html(csrf_token, current_user(request)))
 
 
 @router.get("/demo/ui-review", response_class=HTMLResponse)
@@ -2293,6 +2434,21 @@ def demo_ui_review():
     return HTMLResponse(build_demo_library_review_html())
 
 
+@router.get("/app", response_class=HTMLResponse)
+def my_app(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+    return HTMLResponse(build_web_app_html(user["id"]))
+
+
 @router.get("/app/{user_id}", response_class=HTMLResponse)
-def user_app(user_id: str):
+def user_app(user_id: str, request: Request):
+    if is_demo_user(user_id):
+        return HTMLResponse(build_web_app_html(user_id))
+    user = current_user(request)
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+    if user["id"] != user_id:
+        return RedirectResponse(url="/app", status_code=303)
     return HTMLResponse(build_web_app_html(user_id))

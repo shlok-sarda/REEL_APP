@@ -1,8 +1,9 @@
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from app.schemas import DashboardResponse
+from app.services.auth import ensure_user_access
 from app.services.reel_ingest import load_dashboard_status, load_reels, user_dashboard_paths
 from app.services.library import is_demo_user, load_demo_dashboard_payload
 
@@ -11,7 +12,9 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("", response_model=DashboardResponse)
-def get_dashboard(user_id: Optional[str] = Query(default=None)):
+def get_dashboard(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "", allow_demo=True)
+    user_id = resolved_user_id
     if is_demo_user(user_id):
         return DashboardResponse(**load_demo_dashboard_payload())
     try:

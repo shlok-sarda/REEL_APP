@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
@@ -18,6 +20,14 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    https_only=settings.session_https_only,
+    same_site="lax",
+    session_cookie="reel_app_session",
+)
+
 
 @app.on_event("startup")
 def startup_event():
@@ -31,6 +41,7 @@ def startup_event():
 app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(webapp_router)
 app.include_router(telegram_router)
 app.include_router(reels_router)
