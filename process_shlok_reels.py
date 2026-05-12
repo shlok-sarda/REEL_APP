@@ -25,6 +25,10 @@ def extraction_script() -> Path:
     return BASE_DIR / "finale.py"
 
 
+def personalization_mode() -> str:
+    return os.getenv("PERSONALIZATION_MODE", "ambitious").strip().lower()
+
+
 def normalize(value):
     return " ".join((value or "").strip().split())
 
@@ -423,31 +427,49 @@ def main(user_id="default", only_urls=None):
                 ]
             )
 
-        run_step(
-            [
-                sys.executable,
-                BASE_DIR / "build_topic_graph.py",
-                "--input",
-                paths.accumulated,
-                "--output",
-                paths.graph_json,
-                "--user-id",
-                user_id,
-            ]
-        )
+        if personalization_mode() == "ambitious":
+            run_step(
+                [
+                    sys.executable,
+                    BASE_DIR / "ambitious_personalization.py",
+                    "--input",
+                    paths.accumulated,
+                    "--graph-output",
+                    paths.graph_json,
+                    "--view-output",
+                    paths.personalized_json,
+                    "--user-id",
+                    user_id,
+                    "--db",
+                    BASE_DIR / "app.db",
+                ]
+            )
+        else:
+            run_step(
+                [
+                    sys.executable,
+                    BASE_DIR / "build_topic_graph.py",
+                    "--input",
+                    paths.accumulated,
+                    "--output",
+                    paths.graph_json,
+                    "--user-id",
+                    user_id,
+                ]
+            )
 
-        run_step(
-            [
-                sys.executable,
-                BASE_DIR / "personalised.py",
-                "--graph",
-                paths.graph_json,
-                "--output",
-                paths.personalized_json,
-                "--min-topic-reels",
-                "3",
-            ]
-        )
+            run_step(
+                [
+                    sys.executable,
+                    BASE_DIR / "personalised.py",
+                    "--graph",
+                    paths.graph_json,
+                    "--output",
+                    paths.personalized_json,
+                    "--min-topic-reels",
+                    "3",
+                ]
+            )
 
         title_root = "Shlok Reels" if user_id == "default" else f"Reels · {user_id}"
         build_standard_page(paths, app_title=title_root)
