@@ -1,6 +1,9 @@
+import csv
+import io
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse, Response
 
 from app.schemas import ReelRecord
 from app.services.auth import ensure_user_access, require_user
@@ -15,6 +18,51 @@ router = APIRouter(prefix="/reels", tags=["reels"])
 def list_reels(request: Request, user_id: Optional[str] = Query(default=None)):
     resolved_user_id = ensure_user_access(request, user_id or "")
     return load_reels(user_id=resolved_user_id)
+
+
+@router.get("/export/urls.txt", response_class=PlainTextResponse)
+def export_reel_urls_text(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    rows = load_reels(user_id=resolved_user_id)
+    body = "\n".join(row["url"] for row in rows if row.get("url")).strip()
+    if body:
+        body += "\n"
+    return PlainTextResponse(
+        body,
+        headers={
+            "Content-Disposition": f'attachment; filename="{resolved_user_id}_reel_urls.txt"',
+        },
+    )
+
+
+@router.get("/export/reels.csv")
+def export_reels_csv(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    rows = load_reels(user_id=resolved_user_id)
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "id",
+            "user_id",
+            "url",
+            "shortcode",
+            "received_at",
+            "status",
+            "media_status",
+            "local_video_path",
+            "thumbnail_path",
+        ],
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{resolved_user_id}_reels.csv"',
+        },
+    )
 
 
 @router.delete("/{reel_id}")
