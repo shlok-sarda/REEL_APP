@@ -1,14 +1,15 @@
 import csv
 import io
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from app.schemas import ReelRecord
 from app.services.auth import ensure_user_access, require_user
 from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, start_worker_if_needed
-from app.services.reel_ingest import delete_reel, get_reel_by_id, load_reels, reset_reel_for_retry
+from app.services.reel_ingest import delete_reel, get_reel_by_id, load_reels, reset_reel_for_retry, user_dashboard_paths
 
 
 router = APIRouter(prefix="/reels", tags=["reels"])
@@ -62,6 +63,32 @@ def export_reels_csv(request: Request, user_id: Optional[str] = Query(default=No
         headers={
             "Content-Disposition": f'attachment; filename="{resolved_user_id}_reels.csv"',
         },
+    )
+
+
+@router.get("/export/raw-output.csv")
+def export_raw_output_csv(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    raw_output_path = Path(user_dashboard_paths(resolved_user_id)["raw_output"])
+    if not raw_output_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Raw output CSV not found for this user")
+    return FileResponse(
+        path=str(raw_output_path),
+        media_type="text/csv",
+        filename=f"{resolved_user_id}_raw_output.csv",
+    )
+
+
+@router.get("/export/accumulated.csv")
+def export_accumulated_csv(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    accumulated_path = Path(user_dashboard_paths(resolved_user_id)["accumulated_output"])
+    if not accumulated_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Accumulated CSV not found for this user")
+    return FileResponse(
+        path=str(accumulated_path),
+        media_type="text/csv",
+        filename=f"{resolved_user_id}_accumulated.csv",
     )
 
 
