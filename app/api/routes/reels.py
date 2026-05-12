@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from app.schemas import ReelRecord
 from app.services.auth import ensure_user_access, require_user
@@ -13,6 +13,11 @@ from app.services.reel_ingest import delete_reel, get_reel_by_id, load_reels, re
 
 
 router = APIRouter(prefix="/reels", tags=["reels"])
+
+
+def _read_csv_rows(path: Path) -> list[dict]:
+    with path.open(newline="", encoding="utf-8") as infile:
+        return [dict(row) for row in csv.DictReader(infile)]
 
 
 @router.get("", response_model=list[ReelRecord])
@@ -89,6 +94,40 @@ def export_accumulated_csv(request: Request, user_id: Optional[str] = Query(defa
         path=str(accumulated_path),
         media_type="text/csv",
         filename=f"{resolved_user_id}_accumulated.csv",
+    )
+
+
+@router.get("/export/raw-output.json")
+def export_raw_output_json(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    raw_output_path = Path(user_dashboard_paths(resolved_user_id)["raw_output"])
+    if not raw_output_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Raw output CSV not found for this user")
+    rows = _read_csv_rows(raw_output_path)
+    return JSONResponse(
+        {
+            "user_id": resolved_user_id,
+            "kind": "raw_output",
+            "row_count": len(rows),
+            "rows": rows,
+        }
+    )
+
+
+@router.get("/export/accumulated.json")
+def export_accumulated_json(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    accumulated_path = Path(user_dashboard_paths(resolved_user_id)["accumulated_output"])
+    if not accumulated_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Accumulated CSV not found for this user")
+    rows = _read_csv_rows(accumulated_path)
+    return JSONResponse(
+        {
+            "user_id": resolved_user_id,
+            "kind": "accumulated",
+            "row_count": len(rows),
+            "rows": rows,
+        }
     )
 
 
