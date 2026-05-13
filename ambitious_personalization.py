@@ -2,6 +2,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 import sqlite3
 from collections import Counter, defaultdict
@@ -11,9 +12,34 @@ from pathlib import Path
 from statistics import mean
 from urllib.parse import urlparse
 
+from api_config import get_openai_client
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "app.db"
+EMBEDDING_MODEL = "text-embedding-3-small"
+FALLBACK_EMBEDDING_DIM = 96
+AGGREGATION_SIMILARITY_THRESHOLDS = {
+    "Travel": 0.73,
+    "Products & Apps": 0.77,
+    "Food": 0.76,
+    "Technology": 0.78,
+    "Entertainment": 0.79,
+    "Health & Lifestyle": 0.76,
+    "Finance & Business": 0.78,
+    "Miscellaneous": 0.84,
+}
+TRAVEL_LOCATION_ALIASES = {
+    "north goa": "Goa",
+    "south goa": "Goa",
+    "goa": "Goa",
+    "agonda": "Goa",
+    "mandrem": "Goa",
+    "banaras": "Varanasi",
+    "banarasi": "Varanasi",
+    "varanasi": "Varanasi",
+    "kashi": "Varanasi",
+}
 
 
 def normalize(value: str) -> str:
@@ -267,6 +293,8 @@ class ReelProfile:
     anchor_label: str = ""
     anchor_type: str = ""
     anchor_confidence: float = 0.0
+    intent_summary: str = ""
+    intent_embedding: list[float] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
 
     @property
@@ -377,6 +405,11 @@ class Cluster:
             and self.avg_confidence >= VERY_HIGH_CONFIDENCE_PROMOTION
         )
 
+    @property
+    def memory_embedding(self) -> list[float]:
+        vectors = [profile.intent_embedding for profile in self.profiles if profile.intent_embedding]
+        return mean_vector(vectors)
+
 
 def build_cluster(
     primary: str,
@@ -392,6 +425,178 @@ def build_cluster(
         anchor_type=anchor_type,
         profiles=sorted(profiles, key=lambda profile: (profile.received_at, profile.reel_id)),
     )
+
+
+class EmbeddingBackend:
+    def __init__(self):
+        self.cache: dict[str, list[float]] = {}
+        self.mode = "fallback"
+        self.last_error = ""
+        self.client = None
+        try:
+            self.client = get_openai_client()
+            self.mode = "openai"
+        except Exception as exc:
+            self.last_error = normalize(str(exc))
+
+    def embed(self, text: str) -> list[float]:
+        normalized = normalize(text)
+        if not normalized:
+            return []
+        cached = self.cache.get(normalized)
+        if cached is not None:
+            return cached
+
+        vector: list[float]
+        if self.client is not None:
+            try:
+                response = self.client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    input=normalized,
+                    timeout=4.0,
+                )
+                vector = list(response.data[0].embedding)
+            except Exception as exc:
+                self.mode = "fallback"
+                self.last_error = normalize(str(exc))
+                vector = self._hashed_embedding(normalized)
+        else:
+            vector = self._hashed_embedding(normalized)
+
+        self.cache[normalized] = vector
+        return vector
+
+    def _hashed_embedding(self, text: str) -> list[float]:
+        vector = [0.0] * FALLBACK_EMBEDDING_DIM
+        tokens = tokenize(text)
+        if not tokens:
+            return vector
+        for token in tokens:
+            digest = hashlib.sha1(token.encode("utf-8")).hexdigest()
+            bucket = int(digest[:8], 16) % FALLBACK_EMBEDDING_DIM
+            sign = -1.0 if int(digest[8:10], 16) % 2 else 1.0
+            vector[bucket] += sign
+        return normalize_vector(vector)
+
+
+def normalize_vector(vector: list[float]) -> list[float]:
+    if not vector:
+        return []
+    magnitude = math.sqrt(sum(value * value for value in vector))
+    if magnitude == 0:
+        return vector
+    return [value / magnitude for value in vector]
+
+
+def mean_vector(vectors: list[list[float]]) -> list[float]:
+    vectors = [vector for vector in vectors if vector]
+    if not vectors:
+        return []
+    size = len(vectors[0])
+    accumulator = [0.0] * size
+    for vector in vectors:
+        for index, value in enumerate(vector):
+            accumulator[index] += value
+    count = float(len(vectors))
+    return normalize_vector([value / count for value in accumulator])
+
+
+def cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
+    if not vector_a or not vector_b or len(vector_a) != len(vector_b):
+        return 0.0
+    return sum(a * b for a, b in zip(vector_a, vector_b))
+
+
+def canonicalize_location(value: str) -> str:
+    normalized = normalize_key(value)
+    if not normalized:
+        return ""
+    if normalized in TRAVEL_LOCATION_ALIASES:
+        return TRAVEL_LOCATION_ALIASES[normalized]
+    return " ".join(part.capitalize() for part in normalized.split())
+
+
+def extract_location_entity(text: str) -> str:
+    raw_text = normalize(text)
+    lowered = normalize_key(raw_text)
+    for source, target in sorted(TRAVEL_LOCATION_ALIASES.items(), key=lambda item: -len(item[0])):
+        if re.search(rf"\b{re.escape(source)}\b", lowered):
+            return target
+
+    patterns = [
+        r"\b(?:in|at|from|near)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b",
+        r"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\s+(?:beaches|beach|villas|villa|resorts|resort|restaurants|restaurant|cafes|cafe|itinerary)\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw_text)
+        if match:
+            return canonicalize_location(match.group(1))
+    return ""
+
+
+def derive_memory_label(profile: ReelProfile) -> str:
+    text = profile.combined_text
+    if profile.primary == "Travel":
+        location = extract_location_entity(text)
+        if location:
+            return location
+    return profile.anchor_label or profile.primary
+
+
+def build_intent_summary(profile: ReelProfile) -> str:
+    text = normalize_key(profile.combined_text)
+    location = extract_location_entity(profile.combined_text)
+
+    if profile.primary == "Travel":
+        if re.search(r"\b(?:airline|travel hack|travel savings|packing|budget travel)\b", text):
+            return f"{location} travel hacks" if location else "travel hacks and planning"
+        if location:
+            return f"{location} trip planning"
+        if re.search(r"\b(?:restaurant|cafe|coffee|burger|beach|villa|resort|stay|itinerary)\b", text):
+            return "trip planning and places to visit"
+        return "travel planning and local discovery"
+
+    if profile.primary == "Food":
+        if re.search(r"\b(?:recipe|meal prep|how to make|ingredients|lemonade|drink)\b", text):
+            return "recipes and drinks to make"
+        if location:
+            return f"{location} food places to try"
+        return "food and drink places to try"
+
+    if profile.primary == "Products & Apps":
+        if re.search(r"\b(?:app|assistant|tool|navigation|productivity|styling)\b", text):
+            return "useful apps and tools"
+        if re.search(r"\b(?:earphones|headphones|audio|powerbeats)\b", text):
+            return "audio gear to buy"
+        if re.search(r"\b(?:perfume|fragrance)\b", text):
+            return "personal care products to buy"
+        return "useful products and gadgets"
+
+    if profile.primary == "Technology":
+        if re.search(r"\b(?:chatgpt|ai|cloud agent|seo)\b", text):
+            return "ai and future tech ideas"
+        return "technology ideas and tools"
+
+    if profile.primary == "Entertainment":
+        if re.search(r"\b(?:movie|film|series|show|thriller|drama|detective)\b", text):
+            return "films and shows to watch"
+        if re.search(r"\b(?:music|song|rap|ringtone)\b", text):
+            return "music to listen to"
+        return "entertainment ideas to explore"
+
+    if profile.primary == "Health & Lifestyle":
+        if re.search(r"\b(?:duo photo|trio photo|pose|photo trend)\b", text):
+            return "photo ideas to copy"
+        if re.search(r"\b(?:calisthenics|workout|fitness|strength challenge)\b", text):
+            return "fitness routines to try"
+        return "lifestyle advice and wellness"
+
+    if profile.primary == "Finance & Business":
+        if re.search(r"\b(?:marketing|open rates|gmail)\b", text):
+            return "marketing ideas to use"
+        return "business and money ideas"
+
+    return "saved ideas to explore"
 
 
 def _build_item_rows(raw_rows: list[dict]) -> list[ItemRow]:
@@ -577,17 +782,88 @@ def infer_anchor(profile: ReelProfile) -> None:
     profile.evidence = [profile.primary]
 
 
-def cluster_profiles(profiles: list[ReelProfile]) -> list[Cluster]:
-    grouped = defaultdict(list)
-    for profile in profiles:
+def find_best_semantic_cluster(profile: ReelProfile, clusters: list[Cluster]) -> tuple[Cluster | None, float]:
+    threshold = AGGREGATION_SIMILARITY_THRESHOLDS.get(profile.primary, 0.8)
+    best_cluster = None
+    best_score = 0.0
+    for cluster in clusters:
+        similarity = cosine_similarity(profile.intent_embedding, cluster.memory_embedding)
+        if similarity > best_score:
+            best_score = similarity
+            best_cluster = cluster
+    if best_cluster and best_score >= threshold:
+        return best_cluster, round(best_score, 4)
+    return None, round(best_score, 4)
+
+
+def cluster_profiles(profiles: list[ReelProfile], embedding_backend: EmbeddingBackend) -> tuple[list[Cluster], list[dict]]:
+    clusters_by_primary = defaultdict(list)
+    debug_logs = []
+
+    ordered_profiles = sorted(profiles, key=lambda profile: (profile.received_at, profile.reel_id, profile.url))
+    for profile in ordered_profiles:
         infer_anchor(profile)
-        grouped[(profile.primary, profile.anchor_key)].append(profile)
+        profile.intent_summary = build_intent_summary(profile)
+        profile.intent_embedding = embedding_backend.embed(profile.intent_summary)
+        memory_label = derive_memory_label(profile)
+
+        primary_clusters = clusters_by_primary[profile.primary]
+        matched_cluster = None
+        similarity = 0.0
+        strategy = "new_memory"
+
+        exact_anchor_match = None
+        if profile.anchor_key and profile.anchor_confidence >= 0.9:
+            for cluster in primary_clusters:
+                if cluster.key == profile.anchor_key:
+                    exact_anchor_match = cluster
+                    break
+
+        if exact_anchor_match is not None:
+            matched_cluster = exact_anchor_match
+            similarity = 1.0
+            strategy = "exact_anchor"
+        elif primary_clusters:
+            matched_cluster, similarity = find_best_semantic_cluster(profile, primary_clusters)
+            if matched_cluster is not None:
+                strategy = "semantic_memory"
+
+        if matched_cluster is not None:
+            matched_cluster.profiles.append(profile)
+            created = False
+            matched_memory_key = matched_cluster.label
+        else:
+            new_cluster = build_cluster(
+                profile.primary,
+                memory_label,
+                profile.anchor_type,
+                [profile],
+                key=normalize_key(memory_label),
+            )
+            primary_clusters.append(new_cluster)
+            created = True
+            matched_memory_key = new_cluster.label
+
+        debug_logs.append(
+            {
+                "reel_id": profile.reel_id,
+                "url": profile.url,
+                "primary": profile.primary,
+                "intent_summary": profile.intent_summary,
+                "matched_memory_key": matched_memory_key,
+                "similarity_score": round(similarity, 4),
+                "created_new_memory": created,
+                "strategy": strategy,
+                "anchor_label": profile.anchor_label,
+                "anchor_type": profile.anchor_type,
+                "embedding_backend": embedding_backend.mode,
+                "embedding_error": embedding_backend.last_error,
+            }
+        )
 
     clusters = []
-    for (primary, anchor_key), members in grouped.items():
-        members = sorted(members, key=lambda profile: (profile.received_at, profile.reel_id))
-        label = max((profile.anchor_label for profile in members), key=len)
-        clusters.append(build_cluster(primary, label, members[0].anchor_type, members, key=anchor_key))
+    for primary in sorted(clusters_by_primary):
+        clusters.extend(clusters_by_primary[primary])
 
     return sorted(
         clusters,
@@ -597,7 +873,7 @@ def cluster_profiles(profiles: list[ReelProfile]) -> list[Cluster]:
             -cluster.avg_confidence,
             cluster.label.lower(),
         ),
-    )
+    ), debug_logs
 
 
 def infer_fallback_intent(profile: ReelProfile, primary: str) -> tuple[str, float]:
@@ -973,12 +1249,13 @@ def build_graph_and_view(visible_clusters: list[Cluster], source_name: str, user
     return graph, view
 
 
-def build_outputs(input_path: Path, user_id: str, db_path: Path | None = None) -> tuple[dict, dict, list[Cluster], list[Cluster]]:
+def build_outputs(input_path: Path, user_id: str, db_path: Path | None = None) -> tuple[dict, dict, list[Cluster], list[Cluster], list[dict]]:
     rows, payload = load_rows(input_path)
     user_id = user_id or normalize(payload.get("user_id")) or "default"
     reel_meta = load_reel_metadata(db_path or DEFAULT_DB, user_id)
     profiles = build_profiles(rows, reel_meta, user_id)
-    leaf_clusters = cluster_profiles(profiles)
+    embedding_backend = EmbeddingBackend()
+    leaf_clusters, debug_logs = cluster_profiles(profiles, embedding_backend)
     visible_clusters = compact_visible_clusters(build_visible_clusters(leaf_clusters))
     graph, view = build_graph_and_view(
         visible_clusters,
@@ -986,7 +1263,14 @@ def build_outputs(input_path: Path, user_id: str, db_path: Path | None = None) -
         user_id=user_id,
         row_count=len(rows),
     )
-    return graph, view, leaf_clusters, visible_clusters
+    return graph, view, leaf_clusters, visible_clusters, debug_logs
+
+
+def write_debug_logs(output_path: Path, logs: list[dict]) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as outfile:
+        for log in logs:
+            outfile.write(json.dumps(log, ensure_ascii=True) + "\n")
 
 
 def main():
@@ -994,18 +1278,22 @@ def main():
     parser.add_argument("--input", required=True, type=Path, help="Accumulated CSV or JSON.")
     parser.add_argument("--graph-output", required=True, type=Path, help="Output topic graph JSON.")
     parser.add_argument("--view-output", required=True, type=Path, help="Output personalized view JSON.")
+    parser.add_argument("--debug-log-output", type=Path, default=None, help="Optional aggregation debug log output (JSONL).")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="Optional SQLite DB for reel metadata.")
     parser.add_argument("--user-id", default="", help="User id override.")
     args = parser.parse_args()
 
-    graph, view, leaf_clusters, visible_clusters = build_outputs(args.input, args.user_id, args.db)
+    graph, view, leaf_clusters, visible_clusters, debug_logs = build_outputs(args.input, args.user_id, args.db)
     args.graph_output.write_text(json.dumps(graph, indent=2), encoding="utf-8")
     args.view_output.write_text(json.dumps(view, indent=2), encoding="utf-8")
+    debug_log_output = args.debug_log_output or args.view_output.with_name("aggregation_debug.jsonl")
+    write_debug_logs(debug_log_output, debug_logs)
 
     promoted = [cluster for cluster in leaf_clusters if cluster.promoted]
     print(f"Leaf clusters: {len(leaf_clusters)}")
     print(f"Visible lists: {len(visible_clusters)}")
     print(f"Promoted lists: {len(promoted)}")
+    print(f"Aggregation debug log: {debug_log_output}")
     for cluster in promoted:
         print(f"- {cluster.primary} -> {cluster.label} ({cluster.unique_reel_count} reels)")
 

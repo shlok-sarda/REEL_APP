@@ -162,6 +162,21 @@ def reset_library(request: Request, user_id: Optional[str] = Query(default=None)
     }
 
 
+@router.post("/rebuild")
+def rebuild_library(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    require_user(request)
+    job = enqueue_library_rebuild_job(resolved_user_id)
+    start_worker_if_needed()
+    return {
+        "ok": True,
+        "user_id": resolved_user_id,
+        "job_id": job["id"],
+        "job_status": job["status"],
+        "job_type": job["job_type"],
+    }
+
+
 @router.post("/{reel_id}/retry")
 def retry_reel(reel_id: str, request: Request):
     require_user(request)
