@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+import shutil
 from urllib.parse import urlparse
 
 from app.config import settings
@@ -261,6 +262,75 @@ def delete_reel(reel_id: str) -> bool:
                 path.unlink(missing_ok=True)
         sync_csv_from_db()
     return deleted
+
+
+def _clear_user_storage_outputs(user_id: str) -> None:
+    storage_dir = user_storage_dir(user_id)
+    if not storage_dir.exists():
+        return
+    for child in storage_dir.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+def reset_user_library(user_id: str) -> dict:
+    normalized_user = normalize(user_id) or "default"
+    reels = load_reels(user_id=normalized_user)
+    deleted_media_files = 0
+
+    with get_connection() as connection:
+        reel_ids = [row["id"] for row in reels]
+        media_paths = []
+        for reel in reels:
+            for path_value in (reel.get("local_video_path"), reel.get("thumbnail_path")):
+                normalized_path = normalize(path_value)
+                if normalized_path:
+                    media_paths.append(Path(normalized_path))
+
+        if reel_ids:
+            placeholders = ",".join("?" for _ in reel_ids)
+            item_ids = [
+                row["id"]
+                for row in connection.execute(
+                    f"SELECT id FROM reel_items WHERE reel_id IN ({placeholders})",
+                    reel_ids,
+                ).fetchall()
+            ]
+            if item_ids:
+                item_placeholders = ",".join("?" for _ in item_ids)
+                connection.execute(
+                    f"DELETE FROM product_links WHERE reel_item_id IN ({item_placeholders})",
+                    item_ids,
+                )
+            connection.execute(
+                f"DELETE FROM reel_items WHERE reel_id IN ({placeholders})",
+                reel_ids,
+            )
+            connection.execute(
+                f"DELETE FROM reels WHERE id IN ({placeholders})",
+                reel_ids,
+            )
+
+        connection.execute(
+            "DELETE FROM processing_jobs WHERE user_id = ?",
+            (normalized_user,),
+        )
+
+    for path in media_paths:
+        if path.exists() and path.is_file():
+            path.unlink(missing_ok=True)
+            deleted_media_files += 1
+
+    _clear_user_storage_outputs(normalized_user)
+    sync_csv_from_db()
+
+    return {
+        "user_id": normalized_user,
+        "deleted_reel_count": len(reels),
+        "deleted_media_file_count": deleted_media_files,
+    }
 
 
 def reset_reel_for_retry(reel_id: str) -> dict | None:

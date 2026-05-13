@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from app.schemas import ReelRecord
 from app.services.auth import ensure_user_access, require_user
 from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, start_worker_if_needed
-from app.services.reel_ingest import delete_reel, get_reel_by_id, load_reels, reset_reel_for_retry, user_dashboard_paths
+from app.services.reel_ingest import delete_reel, get_reel_by_id, load_reels, reset_reel_for_retry, reset_user_library, user_dashboard_paths
 
 
 router = APIRouter(prefix="/reels", tags=["reels"])
@@ -148,6 +148,17 @@ def remove_reel(reel_id: str, request: Request):
         "deleted": reel_id,
         "user_id": reel["user_id"],
         "rebuild_job_status": job["status"] if job else "",
+    }
+
+
+@router.post("/reset")
+def reset_library(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    require_user(request)
+    result = reset_user_library(resolved_user_id)
+    return {
+        "ok": True,
+        **result,
     }
 
 
