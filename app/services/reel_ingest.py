@@ -275,6 +275,33 @@ def _clear_user_storage_outputs(user_id: str) -> None:
             child.unlink(missing_ok=True)
 
 
+def invalidate_user_library_outputs(user_id: str) -> dict:
+    storage_dir = user_storage_dir(user_id)
+    if not storage_dir.exists():
+        return {"deleted_output_file_count": 0}
+
+    removable_names = {
+        "shlok_reels_list_titles_with_items.csv",
+        "shlok_reels_list_title_accumulation.csv",
+        "shlok_reels_accumulated.csv",
+        "shlok_reels_cleaned.csv",
+        "shlok_reels_topic_merge_mapping.csv",
+        "shlok_reels_topic_graph.json",
+        "shlok_reels_personalized_view.json",
+        "shlok_reels_aggregation_debug.jsonl",
+        "shlok_reels_app.html",
+        "shlok_reels_personalized_app.html",
+        "pipeline_status.json",
+    }
+
+    deleted = 0
+    for path in storage_dir.iterdir():
+        if path.is_file() and path.name in removable_names:
+            path.unlink(missing_ok=True)
+            deleted += 1
+    return {"deleted_output_file_count": deleted}
+
+
 def reset_user_library(user_id: str) -> dict:
     normalized_user = normalize(user_id) or "default"
     reels = load_reels(user_id=normalized_user)
