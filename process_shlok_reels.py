@@ -434,7 +434,7 @@ def main(user_id="default", only_urls=None):
                     sys.executable,
                     BASE_DIR / "semantic_personalization.py",
                     "--input",
-                    paths.accumulated,
+                    paths.raw_output,
                     "--graph-output",
                     paths.graph_json,
                     "--view-output",
