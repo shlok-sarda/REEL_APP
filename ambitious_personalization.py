@@ -163,6 +163,14 @@ GENERIC_EARLY_PROMOTION_LABELS = {
     "useful products",
 }
 
+SPECIFIC_MEMORY_SEED_TYPES = {
+    "location",
+    "product_type",
+    "activity_type",
+    "fitness_type",
+    "secondary_category",
+}
+
 
 DOMAIN_ALIASES = {
     "technology": "technology",
@@ -233,10 +241,10 @@ FALLBACK_INTENT_RULES = {
 
 DISPLAY_COMPACTION_FAMILIES = {
     "Travel": [
-        ("Travel Ideas", {"Places & Perspectives", "Travel Ideas", "Travel Hacks", "Culture & Comparison", "Destinations & Experiences"}),
+        ("Travel Ideas", {"Places & Perspectives", "Travel Ideas", "Culture & Comparison", "Destinations & Experiences"}),
     ],
     "Products & Apps": [
-        ("Personal & Utility Products", {"Utility Products", "Useful Products", "Audio Devices", "Fragrances"}),
+        ("Personal & Utility Products", {"Utility Products", "Useful Products"}),
     ],
     "Health & Lifestyle": [
         ("Lifestyle & Advice", {"Advice & Wellness", "Lifestyle & Advice", "Fitness", "Luxury Lifestyle"}),
@@ -540,6 +548,15 @@ def derive_memory_label(profile: ReelProfile) -> str:
         location = extract_location_entity(text)
         if location:
             return location
+    if profile.primary == "Food":
+        lowered = normalize_key(text)
+        location = extract_location_entity(text)
+        if re.search(r"\b(?:recipe|meal prep|how to make|ingredients|lemonade|drink)\b", lowered):
+            return "Recipes & Drinks"
+        if location and re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", lowered):
+            return f"{location} Food Spots"
+        if re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", lowered):
+            return "Restaurants & Cafes"
     return profile.anchor_label or profile.primary
 
 
@@ -796,6 +813,23 @@ def find_best_semantic_cluster(profile: ReelProfile, clusters: list[Cluster]) ->
     return None, round(best_score, 4)
 
 
+def should_seed_specific_memory(profile: ReelProfile, memory_label: str) -> bool:
+    label_key = normalize_key(memory_label)
+    if not label_key:
+        return False
+    if label_key == normalize_key(profile.primary):
+        return False
+    if label_key == normalize_key(VISIBLE_FALLBACK_TITLES.get(profile.primary, "")):
+        return False
+    if label_key in GENERIC_EARLY_PROMOTION_LABELS:
+        return False
+    if profile.anchor_type in SPECIFIC_MEMORY_SEED_TYPES and profile.anchor_confidence >= 0.58:
+        return True
+    if profile.primary == "Travel" and extract_location_entity(profile.combined_text):
+        return True
+    return False
+
+
 def cluster_profiles(profiles: list[ReelProfile], embedding_backend: EmbeddingBackend) -> tuple[list[Cluster], list[dict]]:
     clusters_by_primary = defaultdict(list)
     debug_logs = []
@@ -819,10 +853,24 @@ def cluster_profiles(profiles: list[ReelProfile], embedding_backend: EmbeddingBa
                     exact_anchor_match = cluster
                     break
 
+        exact_memory_match = None
+        memory_key = normalize_key(memory_label)
+        if memory_key:
+            for cluster in primary_clusters:
+                if cluster.key == memory_key:
+                    exact_memory_match = cluster
+                    break
+
         if exact_anchor_match is not None:
             matched_cluster = exact_anchor_match
             similarity = 1.0
             strategy = "exact_anchor"
+        elif exact_memory_match is not None:
+            matched_cluster = exact_memory_match
+            similarity = 1.0
+            strategy = "exact_memory"
+        elif should_seed_specific_memory(profile, memory_label):
+            strategy = "seed_memory"
         elif primary_clusters:
             matched_cluster, similarity = find_best_semantic_cluster(profile, primary_clusters)
             if matched_cluster is not None:
@@ -878,10 +926,35 @@ def cluster_profiles(profiles: list[ReelProfile], embedding_backend: EmbeddingBa
 
 def infer_fallback_intent(profile: ReelProfile, primary: str) -> tuple[str, float]:
     text = normalize_key(profile.combined_text)
+    location = extract_location_entity(profile.combined_text)
+    if primary == "Travel" and location:
+        return location, 0.9
+    if primary == "Food":
+        if re.search(r"\b(?:recipe|meal prep|how to make|ingredients|lemonade|drink)\b", text):
+            return "Recipes & Drinks", 0.92
+        if location and re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", text):
+            return f"{location} Food Spots", 0.9
+        if re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", text):
+            return "Restaurants & Cafes", 0.86
     for pattern, label, confidence in FALLBACK_INTENT_RULES.get(primary, []):
         if re.search(pattern, text):
             return label, confidence
     return VISIBLE_FALLBACK_TITLES.get(primary, f"{primary} Picks"), 0.5
+
+
+def should_surface_existing_weak_cluster(cluster: Cluster) -> bool:
+    label_key = normalize_key(cluster.label)
+    if not label_key:
+        return False
+    if label_key == normalize_key(cluster.primary):
+        return False
+    if label_key == normalize_key(VISIBLE_FALLBACK_TITLES.get(cluster.primary, "")):
+        return False
+    if label_key in GENERIC_EARLY_PROMOTION_LABELS:
+        return False
+    if cluster.unique_reel_count >= 2:
+        return True
+    return cluster.avg_confidence >= 0.84 and cluster.anchor_type in SPECIFIC_MEMORY_SEED_TYPES
 
 
 def should_surface_fallback_intent(primary: str, label: str, members: list[ReelProfile], confidence: float) -> bool:
@@ -894,16 +967,22 @@ def should_surface_fallback_intent(primary: str, label: str, members: list[ReelP
 
 
 def build_fallback_clusters(primary: str, weak_clusters: list[Cluster]) -> list[Cluster]:
+    surfaced_clusters = [
+        build_cluster(primary, cluster.label, "weak_cluster", cluster.profiles, key=cluster.key)
+        for cluster in weak_clusters
+        if should_surface_existing_weak_cluster(cluster)
+    ]
+    remaining_clusters = [cluster for cluster in weak_clusters if not should_surface_existing_weak_cluster(cluster)]
+
     intent_profiles = defaultdict(list)
     intent_confidences = defaultdict(list)
 
-    for cluster in weak_clusters:
+    for cluster in remaining_clusters:
         for profile in cluster.profiles:
             label, confidence = infer_fallback_intent(profile, primary)
             intent_profiles[label].append(profile)
             intent_confidences[label].append(confidence)
 
-    surfaced_clusters = []
     catch_all_profiles = []
     catch_all_label = VISIBLE_FALLBACK_TITLES.get(primary, f"{primary} Picks")
 
@@ -929,19 +1008,6 @@ def build_fallback_clusters(primary: str, weak_clusters: list[Cluster]) -> list[
 
     elif primary == "Health & Lifestyle":
         keep_labels = {"Photo Ideas", "Advice & Wellness"}
-        kept_clusters = []
-        merged_profiles = []
-        for cluster in surfaced_clusters:
-            if cluster.label in keep_labels:
-                kept_clusters.append(cluster)
-            else:
-                merged_profiles.extend(cluster.profiles)
-        if merged_profiles:
-            catch_all_profiles.extend(merged_profiles)
-        surfaced_clusters = kept_clusters
-
-    elif primary == "Products & Apps":
-        keep_labels = {"Utility Products"}
         kept_clusters = []
         merged_profiles = []
         for cluster in surfaced_clusters:
