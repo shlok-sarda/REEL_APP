@@ -371,11 +371,14 @@ class Cluster:
 
 
 class EmbeddingBackend:
-    def __init__(self):
+    def __init__(self, force_fallback: bool = False):
         self.cache: dict[str, list[float]] = {}
         self.mode = "fallback"
         self.last_error = ""
         self.client = None
+        if force_fallback:
+            self.last_error = "fallback_forced"
+            return
         try:
             self.client = get_openai_client()
             self.mode = "openai"
@@ -1180,10 +1183,15 @@ def write_debug_logs(output_path: Path, logs: list[dict]) -> None:
             outfile.write(json.dumps(log, ensure_ascii=True) + "\n")
 
 
-def build_outputs(input_path: Path, user_id: str, db_path: Path | None = None) -> tuple[dict, dict, list[Cluster], list[dict], str]:
+def build_outputs(
+    input_path: Path,
+    user_id: str,
+    db_path: Path | None = None,
+    force_fallback_embeddings: bool = False,
+) -> tuple[dict, dict, list[Cluster], list[dict], str]:
     rows, payload = load_rows(input_path)
     resolved_user_id = user_id or normalize(payload.get("user_id")) or "default"
-    embedding_backend = EmbeddingBackend()
+    embedding_backend = EmbeddingBackend(force_fallback=force_fallback_embeddings)
     reel_meta = load_reel_metadata(db_path or DEFAULT_DB, resolved_user_id)
     profiles = build_profiles(rows, reel_meta, resolved_user_id, embedding_backend)
     semantic_clusters, noise_profiles, debug_logs, engine = build_density_clusters(profiles)
