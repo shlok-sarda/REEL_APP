@@ -133,6 +133,22 @@ def write_csv_rows(rows, output_path, preferred_fieldnames=None):
         writer.writerows(rows)
 
 
+def write_semantic_support_files(rows, paths):
+    preferred = list(rows[0].keys()) if rows else [
+        "URL",
+        "Primary Category",
+        "Secondary Category",
+        "Folder",
+        "Item Name",
+        "Summary",
+    ]
+    write_csv_rows(rows, paths.accumulated, preferred)
+    write_csv_rows(rows, paths.cleaned_raw, preferred)
+    write_csv_rows(rows, paths.folder_items, preferred)
+    paths.mapping.write_text("folder,umbrella_folder\n", encoding="utf-8")
+    paths.merge_mapping.write_text("topic,canonical_topic\n", encoding="utf-8")
+
+
 def normalize_failed_rows(rows):
     normalized = []
     for row in rows:
@@ -373,6 +389,9 @@ def main(user_id="default", only_urls=None):
                 _render_html([], f"{title_root} Personalized", "No repeated interests yet."),
                 encoding="utf-8",
             )
+            sync_reel_items_from_accumulated(user_id, paths.accumulated)
+        elif personalization_mode() == "semantic":
+            write_semantic_support_files(current_rows, paths)
             sync_reel_items_from_accumulated(user_id, paths.accumulated)
         elif lightweight_rebuild and paths.accumulated.exists():
             filter_csv_by_active_urls(paths.accumulated, paths.accumulated, active_url_set)

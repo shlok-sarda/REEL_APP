@@ -541,6 +541,7 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
     rows = load_reels(user_id=user_id)
     counts = job_counts(user_id=user_id)
     paths = user_dashboard_paths(user_id or "default")
+    status_file = Path(paths["storage_dir"]) / "pipeline_status.json"
     raw_output_path = Path(paths["raw_output"])
     item_count = 0
     if raw_output_path.exists():
@@ -552,7 +553,7 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
     completed_count = len([row for row in rows if row.get("status") == "completed"])
     failed_count = len([row for row in rows if row.get("status") == "failed"])
     pending_count = len(rows) - completed_count - failed_count
-    if not settings.pipeline_status_json.exists():
+    if not status_file.exists():
         return {
             "url_count": len(rows),
             "processed_url_count": completed_count,
@@ -569,7 +570,6 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
             "storage_mode": "sqlite_with_csv_sync",
             "media_mode": "local_file_storage",
         }
-    status_file = Path(paths["storage_dir"]) / "pipeline_status.json"
     if status_file.exists():
         payload = json.loads(status_file.read_text(encoding="utf-8"))
     else:
