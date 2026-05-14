@@ -26,7 +26,7 @@ def extraction_script() -> Path:
 
 
 def personalization_mode() -> str:
-    return os.getenv("PERSONALIZATION_MODE", "semantic").strip().lower()
+    return os.getenv("PERSONALIZATION_MODE", "ambitious").strip().lower()
 
 
 def normalize(value):

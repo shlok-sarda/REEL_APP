@@ -8,11 +8,9 @@ from app.services.object_storage import infer_object_key, presigned_get_url, r2_
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
-from semantic_personalization import build_outputs as build_semantic_outputs
 
 
 DEMO_USER_ID = "demo"
-LIVE_DEBUG_TITLE_PREFIX = "LIVE CHECK · "
 
 DEMO_ROWS = [
     {
@@ -261,17 +259,6 @@ def _attach_reel_ids(collections: list[dict], user_id: str) -> list[dict]:
     return filtered_collections
 
 
-def _apply_live_debug_prefix(collections: list[dict]) -> list[dict]:
-    updated = []
-    for collection in collections:
-        clone = dict(collection)
-        title = (clone.get("list_title") or "").strip()
-        if title and not title.startswith(LIVE_DEBUG_TITLE_PREFIX):
-            clone["list_title"] = f"{LIVE_DEBUG_TITLE_PREFIX}{title}"
-        updated.append(clone)
-    return updated
-
-
 def _db_standard_rows(user_id: str) -> list[dict]:
     with get_connection() as connection:
         rows = connection.execute(
@@ -306,68 +293,6 @@ def _db_standard_rows(user_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _db_rows_to_semantic_payload(user_id: str, rows: list[dict]) -> dict:
-    semantic_rows = []
-    for row in rows:
-        semantic_rows.append(
-            {
-                "URL": row.get("url", ""),
-                "Primary Category": row.get("primary_category", ""),
-                "Secondary Category": row.get("secondary_category", ""),
-                "Umbrella Folder": row.get("primary_category", ""),
-                "Folder": row.get("secondary_category", ""),
-                "Item Name": row.get("item_name", ""),
-                "Summary": row.get("summary", ""),
-                "Contains Product": "yes" if any(
-                    [
-                        row.get("product_name"),
-                        row.get("product_brand"),
-                        row.get("product_model"),
-                        row.get("product_type"),
-                        row.get("best_buy_link"),
-                        row.get("amazon_link"),
-                        row.get("flipkart_link"),
-                        row.get("nykaa_link"),
-                    ]
-                ) else "no",
-                "Product Name": row.get("product_name", ""),
-                "Product Brand": row.get("product_brand", ""),
-                "Product Model": row.get("product_model", ""),
-                "Product Type": row.get("product_type", ""),
-                "Product Search Query": row.get("product_search_query", ""),
-                "Best Buy Link": row.get("best_buy_link", ""),
-                "Amazon Link": row.get("amazon_link", ""),
-                "Flipkart Link": row.get("flipkart_link", ""),
-                "Nykaa Link": row.get("nykaa_link", ""),
-                "Media Status": row.get("media_status", ""),
-                "Local Video Path": row.get("local_video_path", ""),
-                "Local Video URL": "",
-                "Thumbnail Path": row.get("thumbnail_path", ""),
-                "Thumbnail URL": "",
-            }
-        )
-    return {
-        "user_id": user_id,
-        "kind": "db_semantic_fallback",
-        "row_count": len(semantic_rows),
-        "rows": semantic_rows,
-    }
-
-
-def _build_semantic_collections(user_id: str, input_path: Path, storage_dir: Path) -> list[dict]:
-    graph, view, _clusters, _debug_logs, _engine = build_semantic_outputs(
-        input_path,
-        user_id=user_id,
-        db_path=settings.database_path,
-        force_fallback_embeddings=True,
-    )
-    graph_file = storage_dir / "shlok_reels_topic_graph.json"
-    view_file = storage_dir / "shlok_reels_personalized_view.json"
-    graph_file.write_text(json.dumps(graph, indent=2), encoding="utf-8")
-    view_file.write_text(json.dumps(view, indent=2), encoding="utf-8")
-    return _attach_reel_ids(build_personalized_collections(view, graph), user_id)
-
-
 def load_standard_collections(user_id: str) -> list[dict]:
     if is_demo_user(user_id):
         return build_collections_from_rows(_demo_rows_with_media())
@@ -375,13 +300,13 @@ def load_standard_collections(user_id: str) -> list[dict]:
     db_rows = _db_standard_rows(user_id)
     if db_rows:
         collections = build_collections_from_rows(db_rows)
-        return _apply_live_debug_prefix(_attach_reel_ids(collections, user_id))
+        return _attach_reel_ids(collections, user_id)
 
     paths = user_dashboard_paths(user_id)
     accumulated = _existing_path(paths["accumulated_output"])
     if not accumulated:
         return []
-    return _apply_live_debug_prefix(_attach_reel_ids(load_collections(accumulated), user_id))
+    return _attach_reel_ids(load_collections(accumulated), user_id)
 
 
 def load_personalized_collections(user_id: str) -> list[dict]:
@@ -396,27 +321,8 @@ def load_personalized_collections(user_id: str) -> list[dict]:
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
         collections = _attach_reel_ids(build_personalized_collections(view, graph), user_id)
         if collections:
-            return _apply_live_debug_prefix(collections)
-
-    storage_dir = Path(paths["storage_dir"])
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    raw_output_path = _existing_path(paths["raw_output"])
-    if not raw_output_path:
-        db_rows = _db_standard_rows(user_id)
-        if not db_rows:
-            return []
-        payload = _db_rows_to_semantic_payload(user_id, db_rows)
-        temp_input = storage_dir / "shlok_reels_semantic_input.json"
-        temp_input.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        try:
-            return _apply_live_debug_prefix(_build_semantic_collections(user_id, temp_input, storage_dir))
-        except Exception:
-            return []
-
-    try:
-        return _apply_live_debug_prefix(_build_semantic_collections(user_id, raw_output_path, storage_dir))
-    except Exception:
-        return []
+            return collections
+    return []
 
 
 def load_library_payload(user_id: str) -> dict:
