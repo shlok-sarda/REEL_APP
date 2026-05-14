@@ -542,6 +542,27 @@ def extract_location_entity(text: str) -> str:
     return ""
 
 
+def derive_food_location_label(profile: ReelProfile) -> str:
+    lowered = normalize_key(profile.combined_text)
+    location = extract_location_entity(profile.combined_text)
+    if not location:
+        return ""
+
+    for secondary in profile.secondary_categories:
+        secondary_key = normalize_key(secondary)
+        secondary_location = extract_location_entity(secondary)
+        if secondary_location and "street food" in secondary_key:
+            return f"Street Food in {secondary_location}"
+        if secondary_location and re.search(r"\b(?:restaurant|restaurants|cafe|cafes|coffee|burger|bakery)\b", secondary_key):
+            return f"Restaurants in {secondary_location}"
+
+    if re.search(r"\b(?:street food|stall|thali|dish|van)\b", lowered):
+        return f"Street Food in {location}"
+    if re.search(r"\b(?:restaurant|restaurants|cafe|cafes|coffee|burger|bakery|eatery|spot|non-veg)\b", lowered):
+        return f"Restaurants in {location}"
+    return f"{location} Food Spots"
+
+
 def derive_memory_label(profile: ReelProfile) -> str:
     text = profile.combined_text
     if profile.primary == "Travel":
@@ -550,11 +571,11 @@ def derive_memory_label(profile: ReelProfile) -> str:
             return location
     if profile.primary == "Food":
         lowered = normalize_key(text)
-        location = extract_location_entity(text)
+        food_location_label = derive_food_location_label(profile)
+        if food_location_label:
+            return food_location_label
         if re.search(r"\b(?:recipe|meal prep|how to make|ingredients|lemonade|drink)\b", lowered):
             return "Recipes & Drinks"
-        if location and re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", lowered):
-            return f"{location} Food Spots"
         if re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", lowered):
             return "Restaurants & Cafes"
     return profile.anchor_label or profile.primary
@@ -827,6 +848,11 @@ def should_seed_specific_memory(profile: ReelProfile, memory_label: str) -> bool
         return True
     if profile.primary == "Travel" and extract_location_entity(profile.combined_text):
         return True
+    if profile.primary == "Food":
+        if memory_label.startswith("Street Food in ") or memory_label.startswith("Restaurants in ") or memory_label.endswith(" Food Spots"):
+            return True
+        if memory_label == "Recipes & Drinks":
+            return True
     return False
 
 
@@ -930,10 +956,11 @@ def infer_fallback_intent(profile: ReelProfile, primary: str) -> tuple[str, floa
     if primary == "Travel" and location:
         return location, 0.9
     if primary == "Food":
+        food_location_label = derive_food_location_label(profile)
+        if food_location_label:
+            return food_location_label, 0.9
         if re.search(r"\b(?:recipe|meal prep|how to make|ingredients|lemonade|drink)\b", text):
             return "Recipes & Drinks", 0.92
-        if location and re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", text):
-            return f"{location} Food Spots", 0.9
         if re.search(r"\b(?:restaurant|cafe|coffee|burger|chocolate|gelato|bakery)\b", text):
             return "Restaurants & Cafes", 0.86
     for pattern, label, confidence in FALLBACK_INTENT_RULES.get(primary, []):
