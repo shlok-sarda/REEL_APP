@@ -13,4 +13,3 @@ joblib
 numpy
 scipy
 scikit-learn
-hdbscan
