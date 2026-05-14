@@ -12,6 +12,7 @@ from semantic_personalization import build_outputs as build_semantic_outputs
 
 
 DEMO_USER_ID = "demo"
+LIVE_DEBUG_TITLE_PREFIX = "LIVE CHECK · "
 
 DEMO_ROWS = [
     {
@@ -260,6 +261,17 @@ def _attach_reel_ids(collections: list[dict], user_id: str) -> list[dict]:
     return filtered_collections
 
 
+def _apply_live_debug_prefix(collections: list[dict]) -> list[dict]:
+    updated = []
+    for collection in collections:
+        clone = dict(collection)
+        title = (clone.get("list_title") or "").strip()
+        if title and not title.startswith(LIVE_DEBUG_TITLE_PREFIX):
+            clone["list_title"] = f"{LIVE_DEBUG_TITLE_PREFIX}{title}"
+        updated.append(clone)
+    return updated
+
+
 def _db_standard_rows(user_id: str) -> list[dict]:
     with get_connection() as connection:
         rows = connection.execute(
@@ -363,13 +375,13 @@ def load_standard_collections(user_id: str) -> list[dict]:
     db_rows = _db_standard_rows(user_id)
     if db_rows:
         collections = build_collections_from_rows(db_rows)
-        return _attach_reel_ids(collections, user_id)
+        return _apply_live_debug_prefix(_attach_reel_ids(collections, user_id))
 
     paths = user_dashboard_paths(user_id)
     accumulated = _existing_path(paths["accumulated_output"])
     if not accumulated:
         return []
-    return _attach_reel_ids(load_collections(accumulated), user_id)
+    return _apply_live_debug_prefix(_attach_reel_ids(load_collections(accumulated), user_id))
 
 
 def load_personalized_collections(user_id: str) -> list[dict]:
@@ -384,7 +396,7 @@ def load_personalized_collections(user_id: str) -> list[dict]:
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
         collections = _attach_reel_ids(build_personalized_collections(view, graph), user_id)
         if collections:
-            return collections
+            return _apply_live_debug_prefix(collections)
 
     storage_dir = Path(paths["storage_dir"])
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -397,12 +409,12 @@ def load_personalized_collections(user_id: str) -> list[dict]:
         temp_input = storage_dir / "shlok_reels_semantic_input.json"
         temp_input.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         try:
-            return _build_semantic_collections(user_id, temp_input, storage_dir)
+            return _apply_live_debug_prefix(_build_semantic_collections(user_id, temp_input, storage_dir))
         except Exception:
             return []
 
     try:
-        return _build_semantic_collections(user_id, raw_output_path, storage_dir)
+        return _apply_live_debug_prefix(_build_semantic_collections(user_id, raw_output_path, storage_dir))
     except Exception:
         return []
 
