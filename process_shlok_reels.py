@@ -26,7 +26,7 @@ def extraction_script() -> Path:
 
 
 def personalization_mode() -> str:
-    return os.getenv("PERSONALIZATION_MODE", "ambitious").strip().lower()
+    return os.getenv("PERSONALIZATION_MODE", "semantic").strip().lower()
 
 
 def normalize(value):
@@ -428,7 +428,26 @@ def main(user_id="default", only_urls=None):
                 ]
             )
 
-        if personalization_mode() == "ambitious":
+        if personalization_mode() == "semantic":
+            run_step(
+                [
+                    sys.executable,
+                    BASE_DIR / "semantic_personalization.py",
+                    "--input",
+                    paths.accumulated,
+                    "--graph-output",
+                    paths.graph_json,
+                    "--view-output",
+                    paths.personalized_json,
+                    "--debug-log-output",
+                    paths.aggregation_debug,
+                    "--user-id",
+                    user_id,
+                    "--db",
+                    BASE_DIR / "app.db",
+                ]
+            )
+        elif personalization_mode() == "ambitious":
             run_step(
                 [
                     sys.executable,
