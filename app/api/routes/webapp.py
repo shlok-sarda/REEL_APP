@@ -1474,7 +1474,7 @@ def build_web_app_html(user_id: str) -> str:
   <script>
     const USER_ID = '{safe_user_id}';
     const state = {{
-      mode: 'standard',
+      mode: 'personalized',
       query: '',
       library: {{ standard: [], personalized: [] }},
       currentList: null,
@@ -1584,6 +1584,7 @@ def build_web_app_html(user_id: str) -> str:
         fetch(`/jobs?user_id=${{encodeURIComponent(USER_ID)}}&limit=50`)
       ]);
       state.library = await libraryRes.json();
+      state.mode = state.library.personalized?.length ? 'personalized' : 'standard';
       state.dashboard = await dashboardRes.json();
       state.jobs = await jobsRes.json();
       state.loading = false;
