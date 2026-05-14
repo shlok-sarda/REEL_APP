@@ -4,9 +4,11 @@ from urllib.parse import quote
 
 from app.config import settings
 from app.db.database import get_connection
+from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
+from semantic_personalization import build_outputs as build_semantic_outputs
 
 
 DEMO_USER_ID = "demo"
@@ -210,7 +212,22 @@ def _existing_path(path_value: str) -> Path | None:
 
 
 def _media_url_from_path(path_value: str) -> str:
-    path = _existing_path(path_value)
+    value = (path_value or "").strip()
+    if not value:
+        return ""
+
+    if value.startswith(("http://", "https://")):
+        return value
+
+    if r2_is_enabled():
+        object_key = infer_object_key(value)
+        if object_key:
+            try:
+                return presigned_get_url(object_key)
+            except Exception:
+                pass
+
+    path = _existing_path(value)
     if not path:
         return ""
     try:
@@ -300,11 +317,32 @@ def load_personalized_collections(user_id: str) -> list[dict]:
     paths = user_dashboard_paths(user_id)
     view_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_personalized_view.json"))
     graph_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_topic_graph.json"))
-    if not view_path or not graph_path:
+    if view_path and graph_path:
+        view = json.loads(view_path.read_text(encoding="utf-8"))
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        collections = _attach_reel_ids(build_personalized_collections(view, graph), user_id)
+        if collections:
+            return collections
+
+    raw_output_path = _existing_path(paths["raw_output"])
+    if not raw_output_path:
         return []
-    view = json.loads(view_path.read_text(encoding="utf-8"))
-    graph = json.loads(graph_path.read_text(encoding="utf-8"))
-    return _attach_reel_ids(build_personalized_collections(view, graph), user_id)
+
+    try:
+        graph, view, _clusters, _debug_logs, _engine = build_semantic_outputs(
+            raw_output_path,
+            user_id=user_id,
+            db_path=settings.database_path,
+        )
+        storage_dir = Path(paths["storage_dir"])
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        graph_file = storage_dir / "shlok_reels_topic_graph.json"
+        view_file = storage_dir / "shlok_reels_personalized_view.json"
+        graph_file.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+        view_file.write_text(json.dumps(view, indent=2), encoding="utf-8")
+        return _attach_reel_ids(build_personalized_collections(view, graph), user_id)
+    except Exception:
+        return []
 
 
 def load_library_payload(user_id: str) -> dict:
