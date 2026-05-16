@@ -7,6 +7,7 @@ from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.library import router as library_router
+from app.api.routes.personalization_v2 import router as personalization_v2_router
 from app.api.routes.reels import router as reels_router
 from app.api.routes.telegram import router as telegram_router
 from app.api.routes.webapp import router as webapp_router
@@ -48,3 +49,4 @@ app.include_router(reels_router)
 app.include_router(jobs_router)
 app.include_router(library_router)
 app.include_router(dashboard_router)
+app.include_router(personalization_v2_router)

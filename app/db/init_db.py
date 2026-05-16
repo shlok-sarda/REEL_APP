@@ -90,6 +90,125 @@ SCHEMA_STATEMENTS = [
         UNIQUE(reel_id, job_type, status)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS embedding_store (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_type TEXT NOT NULL,
+        object_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        version TEXT NOT NULL DEFAULT '',
+        vector_json TEXT NOT NULL DEFAULT '[]',
+        source_text_hash TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(object_type, object_id, model, version)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reel_item_features (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        reel_id TEXT NOT NULL,
+        reel_item_id INTEGER NOT NULL UNIQUE,
+        primary_category TEXT NOT NULL DEFAULT '',
+        specific_category TEXT NOT NULL DEFAULT '',
+        item_name TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        item_type TEXT NOT NULL DEFAULT '',
+        canonical_domain TEXT NOT NULL DEFAULT '',
+        canonical_subdomains_json TEXT NOT NULL DEFAULT '[]',
+        canonical_entities_json TEXT NOT NULL DEFAULT '[]',
+        canonical_location TEXT NOT NULL DEFAULT '',
+        vibe_json TEXT NOT NULL DEFAULT '[]',
+        intent TEXT NOT NULL DEFAULT '',
+        audience_context TEXT NOT NULL DEFAULT '',
+        confidence_scores_json TEXT NOT NULL DEFAULT '{}',
+        embedding_id INTEGER,
+        interpretation_status TEXT NOT NULL DEFAULT 'pending',
+        interpretation_source TEXT NOT NULL DEFAULT '',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(reel_item_id) REFERENCES reel_items(id),
+        FOREIGN KEY(reel_id) REFERENCES reels(id),
+        FOREIGN KEY(embedding_id) REFERENCES embedding_store(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_interest_nodes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        node_type TEXT NOT NULL,
+        canonical_key TEXT NOT NULL,
+        display_hint TEXT NOT NULL DEFAULT '',
+        parent_node_id TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL DEFAULT 'active',
+        save_count INTEGER NOT NULL DEFAULT 0,
+        recent_save_count INTEGER NOT NULL DEFAULT 0,
+        growth_velocity REAL NOT NULL DEFAULT 0,
+        entropy REAL NOT NULL DEFAULT 0,
+        confidence REAL NOT NULL DEFAULT 0,
+        centroid_embedding_id INTEGER,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, node_type, canonical_key),
+        FOREIGN KEY(centroid_embedding_id) REFERENCES embedding_store(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_interest_edges (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        from_node_id TEXT NOT NULL,
+        to_node_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 0,
+        evidence_count INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, from_node_id, to_node_id, edge_type)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cluster_memberships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        reel_item_id INTEGER NOT NULL,
+        cluster_node_id TEXT NOT NULL,
+        assignment_score REAL NOT NULL DEFAULT 0,
+        assignment_reason_json TEXT NOT NULL DEFAULT '{}',
+        assignment_version TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(reel_item_id) REFERENCES reel_items(id),
+        UNIQUE(user_id, reel_item_id, cluster_node_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cluster_titles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cluster_node_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        title_confidence REAL NOT NULL DEFAULT 0,
+        generation_reason_json TEXT NOT NULL DEFAULT '{}',
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cluster_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        cluster_node_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        source_cluster_ids_json TEXT NOT NULL DEFAULT '[]',
+        target_cluster_ids_json TEXT NOT NULL DEFAULT '[]',
+        reason_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+    )
+    """,
 ]
 
 USER_EXTRA_COLUMNS = {
@@ -114,6 +233,12 @@ def create_tables():
             if column_name not in existing_columns:
                 connection.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_user_id ON reel_item_features(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_reel_item_id ON reel_item_features(reel_item_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_interest_nodes_user_node_type ON user_interest_nodes(user_id, node_type)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_interest_edges_user_id ON user_interest_edges(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_cluster_memberships_user_id ON cluster_memberships(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_cluster_titles_cluster_node_id ON cluster_titles(cluster_node_id)")
 
 
 def ensure_default_user():

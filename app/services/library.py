@@ -5,6 +5,8 @@ from urllib.parse import quote
 from app.config import settings
 from app.db.database import get_connection
 from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
+from app.services.personalization_v2.engine import PersonalizationV2Engine
+from app.services.personalization_v2.repository import PersonalizationV2Repository
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
@@ -293,6 +295,146 @@ def _db_standard_rows(user_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _db_v2_item_rows(user_id: str) -> dict[int, dict]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                reel_item_features.reel_item_id AS reel_item_id,
+                reels.id AS reel_id,
+                reels.url AS url,
+                reels.media_status AS media_status,
+                reels.local_video_path AS local_video_path,
+                reels.thumbnail_path AS thumbnail_path,
+                reel_item_features.item_name AS item_name,
+                reel_item_features.summary AS summary,
+                reel_item_features.specific_category AS specific_category,
+                COALESCE(product_links.product_name, '') AS product_name,
+                COALESCE(product_links.brand, '') AS product_brand,
+                COALESCE(product_links.model, '') AS product_model,
+                COALESCE(product_links.product_type, '') AS product_type,
+                COALESCE(product_links.search_query, '') AS product_search_query,
+                COALESCE(product_links.best_buy_link, '') AS best_buy_link,
+                COALESCE(product_links.amazon_link, '') AS amazon_link,
+                COALESCE(product_links.flipkart_link, '') AS flipkart_link,
+                COALESCE(product_links.nykaa_link, '') AS nykaa_link
+            FROM reel_item_features
+            JOIN reels ON reels.id = reel_item_features.reel_id
+            LEFT JOIN product_links ON product_links.reel_item_id = reel_item_features.reel_item_id
+            WHERE reel_item_features.user_id = ?
+            ORDER BY reel_item_features.reel_item_id ASC
+            """,
+            (user_id,),
+        ).fetchall()
+    return {int(row["reel_item_id"]): dict(row) for row in rows}
+
+
+def _current_reel_item_count(user_id: str) -> int:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM reel_items
+            JOIN reels ON reels.id = reel_items.reel_id
+            WHERE reels.user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    return int(row["count"] if row else 0)
+
+
+def _load_or_build_v2_snapshot(user_id: str) -> dict:
+    repo = PersonalizationV2Repository()
+    current_item_count = _current_reel_item_count(user_id)
+    snapshot = repo.load_debug_snapshot(user_id)
+    if snapshot.get("feature_count", 0) != current_item_count:
+        engine = PersonalizationV2Engine(repo=repo)
+        snapshot = engine.backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
+    return snapshot
+
+
+def _build_v2_collections(user_id: str) -> list[dict]:
+    snapshot = _load_or_build_v2_snapshot(user_id)
+    titles_by_cluster = {
+        row["cluster_node_id"]: row
+        for row in snapshot.get("titles", [])
+    }
+    features_by_id = {
+        int(row["reel_item_id"]): row
+        for row in snapshot.get("features", [])
+    }
+    item_rows_by_id = _db_v2_item_rows(user_id)
+
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    memberships_by_cluster: dict[str, list[dict]] = {}
+    for membership in snapshot.get("memberships", []):
+        memberships_by_cluster.setdefault(membership["cluster_node_id"], []).append(membership)
+
+    cluster_nodes = [
+        row
+        for row in snapshot.get("nodes", [])
+        if row.get("node_type") == "cluster" and int(row.get("save_count", 0) or 0) > 0
+    ]
+    cluster_nodes.sort(key=lambda row: (-int(row.get("save_count", 0) or 0), (row.get("canonical_key") or "")))
+
+    for cluster in cluster_nodes:
+        cluster_id = cluster["id"]
+        title = (titles_by_cluster.get(cluster_id, {}) or {}).get("title") or cluster.get("display_hint") or "Untitled"
+        metadata = cluster.get("metadata_json") or {}
+        parent_title = (metadata.get("canonical_domain") or cluster.get("display_hint") or "Personalized").strip()
+        key = (parent_title, title)
+        grouped.setdefault(key, [])
+        seen = {(row.get("reel_id"), row.get("name"), row.get("url")) for row in grouped[key]}
+
+        members = sorted(
+            memberships_by_cluster.get(cluster_id, []),
+            key=lambda row: float(row.get("assignment_score", 0.0) or 0.0),
+            reverse=True,
+        )
+        for membership in members:
+            reel_item_id = int(membership["reel_item_id"])
+            feature = features_by_id.get(reel_item_id, {})
+            item_row = item_rows_by_id.get(reel_item_id, {})
+            item = {
+                "reel_id": item_row.get("reel_id", ""),
+                "name": feature.get("item_name") or item_row.get("item_name") or "Untitled Reel",
+                "summary": feature.get("summary") or item_row.get("summary") or "",
+                "url": feature.get("url") or item_row.get("url") or "",
+                "contains_product": "Yes" if item_row.get("product_name") else "No",
+                "product_name": item_row.get("product_name", ""),
+                "product_brand": item_row.get("product_brand", ""),
+                "product_model": item_row.get("product_model", ""),
+                "product_type": item_row.get("product_type", ""),
+                "product_search_query": item_row.get("product_search_query", ""),
+                "best_buy_link": item_row.get("best_buy_link", ""),
+                "amazon_link": item_row.get("amazon_link", ""),
+                "flipkart_link": item_row.get("flipkart_link", ""),
+                "nykaa_link": item_row.get("nykaa_link", ""),
+                "media_status": item_row.get("media_status", ""),
+                "local_video_path": item_row.get("local_video_path", ""),
+                "local_video_url": _media_url_from_path(item_row.get("local_video_path", "")),
+                "thumbnail_path": item_row.get("thumbnail_path", ""),
+                "thumbnail_url": _media_url_from_path(item_row.get("thumbnail_path", "")),
+            }
+            dedupe_key = (item["reel_id"], item["name"], item["url"])
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            grouped[key].append(item)
+
+    collections = [
+        {
+            "parent_title": parent_title,
+            "list_title": list_title,
+            "items": items,
+        }
+        for (parent_title, list_title), items in grouped.items()
+        if items
+    ]
+    collections.sort(key=lambda row: (-len(row["items"]), row["parent_title"].lower(), row["list_title"].lower()))
+    return collections
+
+
 def load_standard_collections(user_id: str) -> list[dict]:
     if is_demo_user(user_id):
         return build_collections_from_rows(_demo_rows_with_media())
@@ -312,6 +454,13 @@ def load_standard_collections(user_id: str) -> list[dict]:
 def load_personalized_collections(user_id: str) -> list[dict]:
     if is_demo_user(user_id):
         return _demo_personalized_collections()
+
+    try:
+        collections = _build_v2_collections(user_id)
+        if collections:
+            return collections
+    except Exception:
+        pass
 
     paths = user_dashboard_paths(user_id)
     view_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_personalized_view.json"))
