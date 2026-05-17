@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 from app.config import settings
 from app.db.database import get_connection
+from app.services.media import ensure_reel_media
 from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
 from app.services.personalization_v2.engine import PersonalizationV2Engine
 from app.services.personalization_v2.repository import PersonalizationV2Repository
@@ -343,8 +344,39 @@ def _current_reel_item_count(user_id: str) -> int:
     return int(row["count"] if row else 0)
 
 
+def _ensure_v2_media_ready(user_id: str) -> None:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT reels.url, reels.media_status, reels.local_video_path
+            FROM reels
+            JOIN reel_items ON reel_items.reel_id = reels.id
+            WHERE reels.user_id = ?
+              AND reels.status = 'completed'
+            ORDER BY reels.received_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    for row in rows:
+        url = (row["url"] or "").strip()
+        media_status = (row["media_status"] or "").strip().lower()
+        local_video_path = (row["local_video_path"] or "").strip()
+        if not url:
+            continue
+        if media_status == "bootstrap":
+            continue
+        if media_status == "ready" and local_video_path:
+            continue
+        try:
+            ensure_reel_media(url)
+        except Exception:
+            continue
+
+
 def _load_or_build_v2_snapshot(user_id: str) -> dict:
     repo = PersonalizationV2Repository()
+    _ensure_v2_media_ready(user_id)
     current_item_count = _current_reel_item_count(user_id)
     snapshot = repo.load_debug_snapshot(user_id)
     if snapshot.get("feature_count", 0) != current_item_count:
