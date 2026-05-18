@@ -1541,6 +1541,7 @@ def build_web_app_html(user_id: str) -> str:
       controlsTimer: 0,
       muted: true,
       itemKey: '',
+      mediaReadyKey: '',
     }};
 
     function escapeHtml(value) {{
@@ -1873,11 +1874,18 @@ def build_web_app_html(user_id: str) -> str:
       playerUi.itemKey = itemKey;
       floatingPlayerVideo.loop = true;
       floatingPlayerVideo.muted = playerUi.muted;
+      floatingPlayerVideo.preload = 'auto';
       if (item?.local_video_url) {{
-        floatingPlayerVideo.hidden = false;
-        floatingPlayerPoster.hidden = true;
+        const hasThumb = Boolean(item.thumbnail_url);
+        const readyForThisItem = playerUi.mediaReadyKey === itemKey;
+        floatingPlayerVideo.hidden = hasThumb && !readyForThisItem;
+        floatingPlayerPoster.hidden = !hasThumb;
+        if (hasThumb && floatingPlayerPoster.getAttribute('src') !== item.thumbnail_url) {{
+          floatingPlayerPoster.setAttribute('src', item.thumbnail_url);
+        }}
         floatingPlayerEmpty.hidden = true;
         if (!sameItem || floatingPlayerVideo.getAttribute('src') !== item.local_video_url) {{
+          playerUi.mediaReadyKey = '';
           floatingPlayerVideo.pause();
           floatingPlayerVideo.setAttribute('src', item.local_video_url);
           if (item.thumbnail_url) floatingPlayerVideo.setAttribute('poster', item.thumbnail_url);
@@ -1888,6 +1896,7 @@ def build_web_app_html(user_id: str) -> str:
           queuePlayerPaint();
         }});
       }} else if (item?.thumbnail_url) {{
+        playerUi.mediaReadyKey = '';
         if (floatingPlayerVideo.getAttribute('src')) {{
           floatingPlayerVideo.pause();
           floatingPlayerVideo.removeAttribute('src');
@@ -1900,6 +1909,7 @@ def build_web_app_html(user_id: str) -> str:
         }}
         floatingPlayerEmpty.hidden = true;
       }} else {{
+        playerUi.mediaReadyKey = '';
         if (floatingPlayerVideo.getAttribute('src')) {{
           floatingPlayerVideo.pause();
           floatingPlayerVideo.removeAttribute('src');
@@ -2205,6 +2215,26 @@ def build_web_app_html(user_id: str) -> str:
 
       floatingPlayerVideo.addEventListener('play', () => queuePlayerPaint());
       floatingPlayerVideo.addEventListener('pause', () => queuePlayerPaint());
+      floatingPlayerVideo.addEventListener('loadeddata', () => {{
+        playerUi.mediaReadyKey = playerUi.itemKey || '';
+        floatingPlayerVideo.hidden = false;
+        floatingPlayerPoster.hidden = true;
+        floatingPlayerEmpty.hidden = true;
+        queuePlayerPaint();
+      }});
+      floatingPlayerVideo.addEventListener('error', () => {{
+        playerUi.mediaReadyKey = '';
+        if (floatingPlayerPoster.getAttribute('src')) {{
+          floatingPlayerVideo.hidden = true;
+          floatingPlayerPoster.hidden = false;
+          floatingPlayerEmpty.hidden = true;
+        }} else {{
+          floatingPlayerVideo.hidden = true;
+          floatingPlayerPoster.hidden = true;
+          floatingPlayerEmpty.hidden = false;
+        }}
+        queuePlayerPaint();
+      }});
       floatingPlayerVideo.addEventListener('volumechange', () => {{
         playerUi.muted = floatingPlayerVideo.muted;
         queuePlayerPaint();
