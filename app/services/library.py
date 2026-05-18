@@ -221,6 +221,14 @@ def _media_url_from_path(path_value: str) -> str:
     if value.startswith(("http://", "https://")):
         return value
 
+    path = _existing_path(value)
+    if path:
+        try:
+            relative = path.resolve().relative_to(settings.media_dir.resolve())
+            return "/media/" + "/".join(relative.parts)
+        except ValueError:
+            pass
+
     if r2_is_enabled():
         object_key = infer_object_key(value)
         if object_key:
@@ -229,14 +237,7 @@ def _media_url_from_path(path_value: str) -> str:
             except Exception:
                 pass
 
-    path = _existing_path(value)
-    if not path:
-        return ""
-    try:
-        relative = path.resolve().relative_to(settings.media_dir.resolve())
-    except ValueError:
-        return ""
-    return "/media/" + "/".join(relative.parts)
+    return ""
 
 
 def _path_value_is_remote(path_value: str) -> bool:

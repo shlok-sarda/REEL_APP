@@ -2317,30 +2317,6 @@ def build_web_app_html(user_id: str) -> str:
       `;
     }}
 
-    function detailMedia(item) {{
-      if (item?.local_video_url) {{
-        return `
-          <div class="video-wrap" style="border-radius:20px; overflow:hidden; min-height:320px;">
-            <video controls playsinline preload="metadata" poster="${{escapeHtml(item.thumbnail_url || '')}}" style="background:#050607;" muted>
-              <source src="${{escapeHtml(item.local_video_url)}}" type="video/mp4" />
-            </video>
-          </div>
-        `;
-      }}
-      if (item?.thumbnail_url) {{
-        return `
-          <div class="video-wrap" style="border-radius:20px; overflow:hidden; min-height:320px;">
-            <img src="${{escapeHtml(item.thumbnail_url)}}" alt="${{escapeHtml(item.name || 'Reel thumbnail')}}" />
-          </div>
-        `;
-      }}
-      return `
-        <div class="video-wrap" style="border-radius:20px; overflow:hidden; min-height:320px;">
-          <div class="video-empty">This reel is still waiting for local playback or media extraction.</div>
-        </div>
-      `;
-    }}
-
     async function deleteCurrentReel() {{
       const collections = visibleCollections();
       const collection = collections[state.currentList];
@@ -2418,7 +2394,6 @@ def build_web_app_html(user_id: str) -> str:
         <section class="detail">
           <article class="detail-card">
             <div class="video-meta">
-              ${{detailMedia(item)}}
               <h2 class="detail-title">${{escapeHtml(item?.name || '')}}</h2>
               <div class="detail-meta">
                 <span class="mini-chip">${{collection.parent_title ? escapeHtml(collection.parent_title) : 'Saved reel'}}</span>
