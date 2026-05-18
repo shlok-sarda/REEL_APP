@@ -155,23 +155,36 @@ def run_pipeline(url: str) -> dict:
     result = process_reel(url)
 
     visual_data = {}
+    visual_status = "not_attempted"
+    visual_error = ""
     try:
-        video_path = download_reel(url)
+        video_path = result.get("video_path_for_visual") or ""
+        if video_path:
+            video_download_status = result.get("video_download_status") or "reused_existing"
+        else:
+            video_path, video_download_status = download_reel(url)
     except Exception as exc:
         print(f"⚠️ Video download skipped: {summarize_error(exc)}")
         video_path = ""
+        video_download_status = "download_failed"
+        visual_error = summarize_error(exc)
 
     if video_path:
         try:
             visual_data = extract_visual_data(result, video_path)
+            visual_status = "success" if visual_data else "empty"
         except Exception as exc:
             print(f"⚠️ Visual extraction skipped: {summarize_error(exc)}")
+            visual_status = "failed"
+            visual_error = summarize_error(exc)
             video_path_path = Path(video_path)
             if video_path_path.exists():
                 try:
                     video_path_path.unlink()
                 except Exception:
                     pass
+    else:
+        visual_status = "download_missing"
 
     router = router_call(result, visual_data)
     branch_a = router["top_1_branch"]
@@ -196,6 +209,23 @@ def run_pipeline(url: str) -> dict:
         print(f"⚠️ Product extraction skipped: {summarize_error(exc)}")
         final_output["contains_products"] = False
         final_output["products"] = []
+
+    final_output["diagnostics"] = {
+        "caption_present": bool(result.get("caption_present")),
+        "hashtags_present": bool(result.get("hashtags_present")),
+        "creator_present": bool(result.get("creator_present")),
+        "transcript_present": bool(result.get("transcript_present")),
+        "transcript_status": result.get("transcript_status", ""),
+        "transcript_model": result.get("transcript_model", ""),
+        "transcript_attempts": result.get("transcript_attempts", 0),
+        "transcript_error": result.get("transcript_error", ""),
+        "audio_download_status": result.get("audio_download_status", ""),
+        "video_download_status": video_download_status or result.get("video_download_status", ""),
+        "visual_present": bool(visual_data),
+        "visual_status": visual_status,
+        "visual_error": visual_error,
+        "processing_version": "pipeline_b_v2_observable",
+    }
 
     return final_output
 
@@ -242,6 +272,20 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                             links.get("amazon", ""),
                             links.get("flipkart", ""),
                             links.get("nykaa", ""),
+                            "yes" if output.get("diagnostics", {}).get("caption_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("hashtags_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("creator_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("transcript_present") else "no",
+                            output.get("diagnostics", {}).get("transcript_status", ""),
+                            output.get("diagnostics", {}).get("transcript_model", ""),
+                            output.get("diagnostics", {}).get("transcript_attempts", 0),
+                            output.get("diagnostics", {}).get("transcript_error", ""),
+                            output.get("diagnostics", {}).get("audio_download_status", ""),
+                            output.get("diagnostics", {}).get("video_download_status", ""),
+                            "yes" if output.get("diagnostics", {}).get("visual_present") else "no",
+                            output.get("diagnostics", {}).get("visual_status", ""),
+                            output.get("diagnostics", {}).get("visual_error", ""),
+                            output.get("diagnostics", {}).get("processing_version", ""),
                         ]
                     )
 
@@ -266,6 +310,20 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                             links.get("amazon", ""),
                             links.get("flipkart", ""),
                             links.get("nykaa", ""),
+                            "yes" if output.get("diagnostics", {}).get("caption_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("hashtags_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("creator_present") else "no",
+                            "yes" if output.get("diagnostics", {}).get("transcript_present") else "no",
+                            output.get("diagnostics", {}).get("transcript_status", ""),
+                            output.get("diagnostics", {}).get("transcript_model", ""),
+                            output.get("diagnostics", {}).get("transcript_attempts", 0),
+                            output.get("diagnostics", {}).get("transcript_error", ""),
+                            output.get("diagnostics", {}).get("audio_download_status", ""),
+                            output.get("diagnostics", {}).get("video_download_status", ""),
+                            "yes" if output.get("diagnostics", {}).get("visual_present") else "no",
+                            output.get("diagnostics", {}).get("visual_status", ""),
+                            output.get("diagnostics", {}).get("visual_error", ""),
+                            output.get("diagnostics", {}).get("processing_version", ""),
                         ]
                     )
             except Exception as exc:
@@ -288,6 +346,20 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                         "",
                         "",
                         "",
+                        "no",
+                        "no",
+                        "no",
+                        "no",
+                        "failed",
+                        "",
+                        0,
+                        summarize_error(exc),
+                        "",
+                        "",
+                        "no",
+                        "failed",
+                        summarize_error(exc),
+                        "pipeline_b_v2_observable",
                     ]
                 )
 
@@ -311,6 +383,20 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                 "Amazon Link",
                 "Flipkart Link",
                 "Nykaa Link",
+                "Caption Present",
+                "Hashtags Present",
+                "Creator Present",
+                "Transcript Present",
+                "Transcript Status",
+                "Transcript Model",
+                "Transcript Attempts",
+                "Transcript Error",
+                "Audio Download Status",
+                "Video Download Status",
+                "Visual Present",
+                "Visual Status",
+                "Visual Error",
+                "Processing Version",
             ]
         )
         writer.writerows(results)

@@ -427,6 +427,92 @@ def update_reel_media(url: str, media_status: str, local_video_path: str = "", t
     sync_csv_from_db()
 
 
+def upsert_reel_processing_diagnostics(url: str, payload: dict | None) -> None:
+    normalized_url = normalize(url)
+    if not normalized_url or not isinstance(payload, dict):
+        return
+    reel = get_reel_by_url(normalized_url)
+    if not reel:
+        return
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    metadata = payload.get("metadata_json")
+    if not isinstance(metadata, str):
+        metadata = json.dumps(payload.get("metadata", {}), ensure_ascii=False)
+    with get_connection() as connection:
+        existing = connection.execute(
+            "SELECT * FROM reel_processing_diagnostics WHERE reel_id = ? LIMIT 1",
+            (reel["id"],),
+        ).fetchone()
+        existing = dict(existing) if existing else {}
+
+        def pick(key: str, default=""):
+            value = payload.get(key)
+            if value in {None, ""}:
+                return existing.get(key, default)
+            return value
+
+        connection.execute(
+            """
+            INSERT INTO reel_processing_diagnostics (
+                reel_id, user_id, url, caption_present, hashtags_present, creator_present,
+                transcript_present, transcript_status, transcript_model, transcript_attempts,
+                transcript_error, audio_download_status, video_download_status,
+                visual_present, visual_status, visual_error,
+                media_upload_status, r2_video_uploaded, r2_thumbnail_uploaded,
+                processing_version, metadata_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(reel_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                url = excluded.url,
+                caption_present = excluded.caption_present,
+                hashtags_present = excluded.hashtags_present,
+                creator_present = excluded.creator_present,
+                transcript_present = excluded.transcript_present,
+                transcript_status = excluded.transcript_status,
+                transcript_model = excluded.transcript_model,
+                transcript_attempts = excluded.transcript_attempts,
+                transcript_error = excluded.transcript_error,
+                audio_download_status = excluded.audio_download_status,
+                video_download_status = excluded.video_download_status,
+                visual_present = excluded.visual_present,
+                visual_status = excluded.visual_status,
+                visual_error = excluded.visual_error,
+                media_upload_status = excluded.media_upload_status,
+                r2_video_uploaded = excluded.r2_video_uploaded,
+                r2_thumbnail_uploaded = excluded.r2_thumbnail_uploaded,
+                processing_version = excluded.processing_version,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                reel["id"],
+                reel["user_id"],
+                normalized_url,
+                1 if str(pick("caption_present", existing.get("caption_present", 0))).lower() in {"1", "true", "yes"} else 0,
+                1 if str(pick("hashtags_present", existing.get("hashtags_present", 0))).lower() in {"1", "true", "yes"} else 0,
+                1 if str(pick("creator_present", existing.get("creator_present", 0))).lower() in {"1", "true", "yes"} else 0,
+                1 if str(pick("transcript_present", existing.get("transcript_present", 0))).lower() in {"1", "true", "yes"} else 0,
+                normalize(pick("transcript_status", existing.get("transcript_status", ""))),
+                normalize(pick("transcript_model", existing.get("transcript_model", ""))),
+                int(pick("transcript_attempts", existing.get("transcript_attempts", 0)) or 0),
+                normalize(pick("transcript_error", existing.get("transcript_error", ""))),
+                normalize(pick("audio_download_status", existing.get("audio_download_status", ""))),
+                normalize(pick("video_download_status", existing.get("video_download_status", ""))),
+                1 if str(pick("visual_present", existing.get("visual_present", 0))).lower() in {"1", "true", "yes"} else 0,
+                normalize(pick("visual_status", existing.get("visual_status", ""))),
+                normalize(pick("visual_error", existing.get("visual_error", ""))),
+                normalize(pick("media_upload_status", existing.get("media_upload_status", ""))),
+                1 if str(pick("r2_video_uploaded", existing.get("r2_video_uploaded", 0))).lower() in {"1", "true", "yes"} else 0,
+                1 if str(pick("r2_thumbnail_uploaded", existing.get("r2_thumbnail_uploaded", 0))).lower() in {"1", "true", "yes"} else 0,
+                normalize(pick("processing_version", existing.get("processing_version", ""))),
+                metadata if metadata != "{}" else existing.get("metadata_json", "{}"),
+                existing.get("created_at", timestamp),
+                timestamp,
+            ),
+        )
+
+
 def sync_reel_items_from_accumulated(user_id: str, accumulated_csv_path: str | Path) -> None:
     accumulated_path = Path(accumulated_csv_path)
     normalized_user = normalize(user_id) or "default"
@@ -523,6 +609,49 @@ def sync_reel_items_from_accumulated(user_id: str, accumulated_csv_path: str | P
                     )
 
 
+def sync_reel_diagnostics_from_accumulated(user_id: str, accumulated_csv_path: str | Path) -> None:
+    accumulated_path = Path(accumulated_csv_path)
+    if not accumulated_path.exists():
+        return
+    normalized_user = normalize(user_id) or "default"
+    reels_by_url = {
+        (row.get("url") or "").strip(): row
+        for row in load_reels(user_id=normalized_user)
+        if (row.get("url") or "").strip()
+    }
+    seen_urls = set()
+    with accumulated_path.open(newline="", encoding="utf-8") as infile:
+        reader = csv.DictReader(infile)
+        for row in reader:
+            url = normalize(row.get("URL"))
+            if not url or url in seen_urls or url not in reels_by_url:
+                continue
+            seen_urls.add(url)
+            upsert_reel_processing_diagnostics(
+                url,
+                {
+                    "caption_present": row.get("Caption Present", ""),
+                    "hashtags_present": row.get("Hashtags Present", ""),
+                    "creator_present": row.get("Creator Present", ""),
+                    "transcript_present": row.get("Transcript Present", ""),
+                    "transcript_status": row.get("Transcript Status", ""),
+                    "transcript_model": row.get("Transcript Model", ""),
+                    "transcript_attempts": row.get("Transcript Attempts", ""),
+                    "transcript_error": row.get("Transcript Error", ""),
+                    "audio_download_status": row.get("Audio Download Status", ""),
+                    "video_download_status": row.get("Video Download Status", ""),
+                    "visual_present": row.get("Visual Present", ""),
+                    "visual_status": row.get("Visual Status", ""),
+                    "visual_error": row.get("Visual Error", ""),
+                    "processing_version": row.get("Processing Version", ""),
+                    "metadata": {
+                        "secondary_category": normalize(row.get("Secondary Category")),
+                        "item_name": normalize(row.get("Item Name")),
+                    },
+                },
+            )
+
+
 def get_reel_by_id(reel_id: str) -> dict | None:
     with get_connection() as connection:
         row = connection.execute(
@@ -535,6 +664,21 @@ def get_reel_by_id(reel_id: str) -> dict | None:
             (normalize(reel_id),),
         ).fetchone()
     return _normalize_reel_row(dict(row)) if row else None
+
+
+def load_reel_processing_diagnostics(user_id: str | None = None) -> list[dict]:
+    query = """
+        SELECT *
+        FROM reel_processing_diagnostics
+    """
+    params = []
+    if user_id:
+        query += " WHERE user_id = ?"
+        params.append(normalize(user_id))
+    query += " ORDER BY updated_at DESC, reel_id DESC"
+    with get_connection() as connection:
+        rows = connection.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
 
 
 def load_dashboard_status(user_id: str | None = None) -> dict:
@@ -553,6 +697,10 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
     completed_count = len([row for row in rows if row.get("status") == "completed"])
     failed_count = len([row for row in rows if row.get("status") == "failed"])
     pending_count = len(rows) - completed_count - failed_count
+    diagnostics = load_reel_processing_diagnostics(user_id=user_id)
+    transcript_success_count = sum(1 for row in diagnostics if row.get("transcript_present"))
+    visual_success_count = sum(1 for row in diagnostics if row.get("visual_present"))
+    media_upload_success_count = sum(1 for row in diagnostics if normalize(row.get("media_upload_status")) == "uploaded")
     if not status_file.exists():
         return {
             "url_count": len(rows),
@@ -569,6 +717,10 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
             "accumulated_output": paths["accumulated_output"],
             "storage_mode": "sqlite_with_csv_sync",
             "media_mode": "local_file_storage",
+            "diagnostics_count": len(diagnostics),
+            "transcript_success_count": transcript_success_count,
+            "visual_success_count": visual_success_count,
+            "media_upload_success_count": media_upload_success_count,
         }
     if status_file.exists():
         payload = json.loads(status_file.read_text(encoding="utf-8"))
@@ -588,4 +740,8 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
     payload.setdefault("accumulated_output", paths["accumulated_output"])
     payload.setdefault("storage_mode", "sqlite_with_csv_sync")
     payload.setdefault("media_mode", "local_file_storage")
+    payload["diagnostics_count"] = len(diagnostics)
+    payload["transcript_success_count"] = transcript_success_count
+    payload["visual_success_count"] = visual_success_count
+    payload["media_upload_success_count"] = media_upload_success_count
     return payload

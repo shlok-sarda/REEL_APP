@@ -60,6 +60,34 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS reel_processing_diagnostics (
+        reel_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        url TEXT NOT NULL DEFAULT '',
+        caption_present INTEGER NOT NULL DEFAULT 0,
+        hashtags_present INTEGER NOT NULL DEFAULT 0,
+        creator_present INTEGER NOT NULL DEFAULT 0,
+        transcript_present INTEGER NOT NULL DEFAULT 0,
+        transcript_status TEXT NOT NULL DEFAULT '',
+        transcript_model TEXT NOT NULL DEFAULT '',
+        transcript_attempts INTEGER NOT NULL DEFAULT 0,
+        transcript_error TEXT NOT NULL DEFAULT '',
+        audio_download_status TEXT NOT NULL DEFAULT '',
+        video_download_status TEXT NOT NULL DEFAULT '',
+        visual_present INTEGER NOT NULL DEFAULT 0,
+        visual_status TEXT NOT NULL DEFAULT '',
+        visual_error TEXT NOT NULL DEFAULT '',
+        media_upload_status TEXT NOT NULL DEFAULT '',
+        r2_video_uploaded INTEGER NOT NULL DEFAULT 0,
+        r2_thumbnail_uploaded INTEGER NOT NULL DEFAULT 0,
+        processing_version TEXT NOT NULL DEFAULT '',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS product_links (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         reel_item_id INTEGER NOT NULL,

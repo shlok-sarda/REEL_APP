@@ -10,7 +10,14 @@ from types import SimpleNamespace
 from render_mobile_knowledge_app import render_html as render_standard_html, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
 from app.services.media import ensure_reel_media
-from app.services.reel_ingest import get_reel_by_url, load_reels, sync_csv_from_db, sync_reel_items_from_accumulated, update_reel_status
+from app.services.reel_ingest import (
+    get_reel_by_url,
+    load_reels,
+    sync_csv_from_db,
+    sync_reel_diagnostics_from_accumulated,
+    sync_reel_items_from_accumulated,
+    update_reel_status,
+)
 from app.storage import user_storage_dir
 
 
@@ -336,6 +343,20 @@ def main(user_id="default", only_urls=None):
                     "Local Video URL": "",
                     "Thumbnail Path": "",
                     "Thumbnail URL": "",
+                    "Caption Present": "no",
+                    "Hashtags Present": "no",
+                    "Creator Present": "no",
+                    "Transcript Present": "no",
+                    "Transcript Status": "failed",
+                    "Transcript Model": "",
+                    "Transcript Attempts": 0,
+                    "Transcript Error": processor_failure_message or "",
+                    "Audio Download Status": "",
+                    "Video Download Status": "",
+                    "Visual Present": "no",
+                    "Visual Status": "failed",
+                    "Visual Error": processor_failure_message or "",
+                    "Processing Version": "pipeline_b_v2_observable",
                 }
                 for url in pending_urls
             ]
@@ -390,9 +411,11 @@ def main(user_id="default", only_urls=None):
                 encoding="utf-8",
             )
             sync_reel_items_from_accumulated(user_id, paths.accumulated)
+            sync_reel_diagnostics_from_accumulated(user_id, paths.accumulated)
         elif personalization_mode() == "semantic":
             write_semantic_support_files(current_rows, paths)
             sync_reel_items_from_accumulated(user_id, paths.accumulated)
+            sync_reel_diagnostics_from_accumulated(user_id, paths.accumulated)
         elif lightweight_rebuild and paths.accumulated.exists():
             filter_csv_by_active_urls(paths.accumulated, paths.accumulated, active_url_set)
             if paths.cleaned_raw.exists():
@@ -447,7 +470,26 @@ def main(user_id="default", only_urls=None):
                 ]
             )
 
-        if personalization_mode() == "semantic":
+        if personalization_mode() == "hybrid":
+            run_step(
+                [
+                    sys.executable,
+                    BASE_DIR / "hybrid_personalization.py",
+                    "--input",
+                    paths.raw_output,
+                    "--graph-output",
+                    paths.graph_json,
+                    "--view-output",
+                    paths.personalized_json,
+                    "--debug-log-output",
+                    paths.aggregation_debug,
+                    "--user-id",
+                    user_id,
+                    "--db",
+                    BASE_DIR / "app.db",
+                ]
+            )
+        elif personalization_mode() == "semantic":
             run_step(
                 [
                     sys.executable,
@@ -516,6 +558,7 @@ def main(user_id="default", only_urls=None):
         build_standard_page(paths, app_title=title_root)
         build_personalized_page(paths, app_title=f"{title_root} Personalized")
         sync_reel_items_from_accumulated(user_id, paths.accumulated)
+        sync_reel_diagnostics_from_accumulated(user_id, paths.accumulated)
 
     refreshed_rows = load_raw_rows(paths)
     write_status(

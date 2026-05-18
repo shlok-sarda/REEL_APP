@@ -13,6 +13,7 @@ from app.services.reel_ingest import (
     delete_reel,
     get_reel_by_id,
     invalidate_user_library_outputs,
+    load_reel_processing_diagnostics,
     load_reels,
     reset_reel_for_retry,
     reset_user_library,
@@ -133,6 +134,20 @@ def export_accumulated_json(request: Request, user_id: Optional[str] = Query(def
         {
             "user_id": resolved_user_id,
             "kind": "accumulated",
+            "row_count": len(rows),
+            "rows": rows,
+        }
+    )
+
+
+@router.get("/export/diagnostics.json")
+def export_diagnostics_json(request: Request, user_id: Optional[str] = Query(default=None)):
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    rows = load_reel_processing_diagnostics(user_id=resolved_user_id)
+    return JSONResponse(
+        {
+            "user_id": resolved_user_id,
+            "kind": "diagnostics",
             "row_count": len(rows),
             "rows": rows,
         }
