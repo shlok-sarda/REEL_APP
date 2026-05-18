@@ -239,6 +239,21 @@ def _media_url_from_path(path_value: str) -> str:
     return "/media/" + "/".join(relative.parts)
 
 
+def _path_value_is_remote(path_value: str) -> bool:
+    value = (path_value or "").strip()
+    return value.startswith(("http://", "https://"))
+
+
+def _path_value_exists(path_value: str) -> bool:
+    value = (path_value or "").strip()
+    if not value:
+        return False
+    if _path_value_is_remote(value):
+        return True
+    path = _existing_path(value)
+    return bool(path)
+
+
 def _attach_reel_ids(collections: list[dict], user_id: str) -> list[dict]:
     reels_by_url = {
         (row.get("url") or "").strip(): row
@@ -348,7 +363,7 @@ def _ensure_v2_media_ready(user_id: str) -> None:
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT DISTINCT reels.url, reels.media_status, reels.local_video_path
+            SELECT DISTINCT reels.url, reels.media_status, reels.local_video_path, reels.thumbnail_path
             FROM reels
             JOIN reel_items ON reel_items.reel_id = reels.id
             WHERE reels.user_id = ?
@@ -362,11 +377,14 @@ def _ensure_v2_media_ready(user_id: str) -> None:
         url = (row["url"] or "").strip()
         media_status = (row["media_status"] or "").strip().lower()
         local_video_path = (row["local_video_path"] or "").strip()
+        thumbnail_path = (row["thumbnail_path"] or "").strip()
         if not url:
             continue
         if media_status == "bootstrap":
             continue
-        if media_status == "ready" and local_video_path:
+        video_ready = _path_value_exists(local_video_path)
+        thumbnail_ready = _path_value_exists(thumbnail_path)
+        if media_status == "ready" and video_ready and thumbnail_ready:
             continue
         try:
             ensure_reel_media(url)
