@@ -58,7 +58,9 @@ SUBDOMAIN_RULES = {
     "Food & Local Eats": [
         (r"\b(?:street food)\b", "street food"),
         (r"\b(?:seafood restaurants?|seafood spot)\b", "seafood restaurants"),
+        (r"\b(?:biryani|bbq|barbecue|kebab|mandi|chicken fry|cafe|cake|dessert)\b", "local food"),
         (r"\b(?:restaurants?)\b", "restaurants"),
+        (r"\b(?:spot|food place|place recommendation|dish recommendation|available from)\b", "restaurants"),
         (r"\b(?:cafes?)\b", "cafes"),
         (r"\b(?:late night non-veg|late night food)\b", "late-night food"),
         (r"\b(?:chocolate)\b", "dessert spots"),
@@ -363,6 +365,8 @@ VIBE_RULES = [
 
 
 INTENT_RULES = [
+    (r"\b(?:in\s+goa|in\s+varanasi|in\s+banaras|in\s+bangkok|in\s+meghalaya|in\s+bali|in\s+london)\b.*\b(?:restaurant|cafe|spot|place|biryani|bbq|barbecue|cake|dessert|seafood|food)\b", "place_to_visit"),
+    (r"\b(?:restaurant|cafe|stay|resort|villa|trip|itinerary|travel|spot|food place|place recommendation|available from)\b", "place_to_visit"),
     (r"\b(?:restaurant|cafe|stay|resort|villa|trip|itinerary|travel)\b", "place_to_visit"),
     (r"\b(?:recipe|drink|make|cook|meal prep)\b", "recipe_to_make"),
     (r"\b(?:app|tool|assistant|navigation)\b", "tool_to_use"),
@@ -373,6 +377,8 @@ INTENT_RULES = [
 
 
 ITEM_TYPE_RULES = [
+    (r"\b(?:in\s+goa|in\s+varanasi|in\s+banaras|in\s+bangkok|in\s+meghalaya|in\s+bali|in\s+london)\b.*\b(?:restaurant|cafe|spot|place|biryani|bbq|barbecue|cake|dessert|seafood|food)\b", "place"),
+    (r"\b(?:restaurant|cafe|coffee|burger|seafood|food spot|food place|place recommendation|dish recommendation|available from|outlet|bbq|barbecue|biryani|cake|dessert|hotel|resort|villa|stay)\b", "place"),
     (r"\b(?:restaurant|cafe|coffee|burger|seafood|food spot|hotel|resort|villa|stay)\b", "place"),
     (r"\b(?:recipe|drink|meal prep|dish)\b", "recipe"),
     (r"\b(?:app|assistant|navigation|radarbot)\b", "app"),
@@ -511,6 +517,8 @@ def refine_domain(domain: str, subdomains: list[str], item_type: str, location: 
         return "Health & Lifestyle"
     if subdomain_set & {"travel planning", "cultural experience"} and location and item_type == "place":
         return "Travel Destinations"
+    if location and item_type == "place" and subdomain_set & {"local food", "dessert spots"}:
+        return "Food & Local Eats"
     if subdomain_set & {"restaurant", "recipe", "stay", "travel planning", "cultural experience", "travel utility"}:
         return "Travel & Food"
     if location and domain == "Travel":

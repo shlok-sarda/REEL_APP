@@ -83,6 +83,8 @@ PLACE_FOOD_LABELS = {
     "local food",
 }
 
+BAD_VISIBLE_TITLES = {"General", "General Picks", "Idea", "Ideas", "Place", "Places"}
+
 
 def as_list(value) -> list[str]:
     if isinstance(value, list):
@@ -637,6 +639,30 @@ def absorb_singletons(cluster_records: dict, assignments: list[dict]) -> None:
             intent_bonus = 0.08 if feature.intent and feature.intent == candidate.metadata.get("intent_mode", "") else 0.0
             threshold = 0.56
             if (
+                feature.intent == "place_to_visit"
+                and feature.location
+                and feature.location == candidate.metadata.get("top_location", "")
+                and (
+                    set(as_list(feature.subdomains)) & PLACE_FOOD_LABELS
+                    or set(as_list(candidate.metadata.get("top_subdomains", []))) & PLACE_FOOD_LABELS
+                )
+            ):
+                family_bonus += 0.18
+                threshold = 0.44
+            if (
+                feature.intent == "media_to_watch_or_hear"
+                and "music" in set(as_list(feature.subdomains))
+                and "music" in set(as_list(candidate.metadata.get("top_subdomains", [])))
+            ):
+                family_bonus += 0.14
+                threshold = 0.42
+            if (
+                feature.location
+                and feature.location == candidate.metadata.get("top_location", "")
+                and "beauty and style" in set(as_list(feature.subdomains) + as_list(candidate.metadata.get("top_subdomains", [])))
+            ):
+                family_bonus += 0.1
+            if (
                 feature_bucket
                 and feature_bucket == candidate_bucket
                 and feature.item_type in {"app", "product"}
@@ -681,6 +707,8 @@ def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tup
     restaurant_labels = [value for value in subdomains if value in restaurant_family]
     if location and len(set(restaurant_labels)) >= 2 and save_count >= 3:
         return f"Restaurants in {location}", min(0.92, confidence + 0.06)
+    if location and save_count >= 1 and (set(subdomains) & PLACE_FOOD_LABELS):
+        return f"Restaurants in {location}", min(0.88, confidence + 0.05)
     if len(set(restaurant_labels)) >= 2 and save_count >= 2 and not location:
         return "Food Places", min(0.84, confidence + 0.04)
     if save_count >= 2 and "destinations" in subdomains and not location:
@@ -720,13 +748,18 @@ def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tup
         return title_override_for_subdomain(label), min(0.86, confidence + 0.05)
     if label and confidence >= 0.72:
         return title_override_for_subdomain(label), min(0.82, confidence + 0.04)
+    if label and label not in {"general", "general advice"}:
+        return title_override_for_subdomain(label), max(0.62, confidence)
     if item_type and save_count >= 2:
         if item_type == "product":
             return "Useful Products", min(0.80, confidence + 0.03)
         if item_type == "media":
             return "Entertainment", min(0.78, confidence + 0.02)
         return f"{item_type.title()} Picks", min(0.78, confidence + 0.02)
-    return metadata.get("canonical_domain", "General Picks"), max(0.45, confidence)
+    fallback = metadata.get("canonical_domain", "Saved Reels")
+    if fallback in BAD_VISIBLE_TITLES:
+        fallback = "Saved Reels"
+    return fallback, max(0.45, confidence)
 
 
 def rebuild_user_graph(repo: PersonalizationV2Repository, user_id: str) -> dict:
