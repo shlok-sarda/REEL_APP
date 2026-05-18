@@ -1,10 +1,15 @@
+import logging
 from pathlib import Path
 
 import cv2
 import yt_dlp
 
 from app.config import settings
+from app.services.object_storage import upload_file
 from app.services.reel_ingest import extract_shortcode, get_reel_by_url, update_reel_media
+
+
+logger = logging.getLogger(__name__)
 
 
 def _cleanup_existing_files(reel_id: str):
@@ -35,6 +40,21 @@ def _make_thumbnail(video_path: Path, reel_id: str) -> Path | None:
     return thumbnail_path if thumbnail_path.exists() else None
 
 
+def _upload_media_to_r2(video_path: Path, thumbnail_path: Path | None) -> None:
+    if not settings.r2_enabled:
+        logger.warning("R2 upload skipped because object storage is not enabled in the environment.")
+        return
+
+    try:
+        upload_file(video_path, f"videos/{video_path.name}", content_type="video/mp4")
+        if thumbnail_path and thumbnail_path.exists():
+            upload_file(thumbnail_path, f"thumbnails/{thumbnail_path.name}", content_type="image/jpeg")
+    except Exception:
+        logger.exception("R2 upload failed for video=%s thumbnail=%s", video_path, thumbnail_path)
+        # Keep the local media flow working even if object storage upload fails.
+        return
+
+
 def ensure_reel_media(url: str) -> dict:
     reel = get_reel_by_url(url)
     if not reel:
@@ -48,6 +68,7 @@ def ensure_reel_media(url: str) -> dict:
     if existing_video and existing_video.exists():
         if not existing_thumbnail or not existing_thumbnail.exists():
             thumbnail_path = _make_thumbnail(existing_video, reel_id)
+            _upload_media_to_r2(existing_video, thumbnail_path)
             update_reel_media(url, "ready", str(existing_video), str(thumbnail_path or ""))
             return {
                 "ok": True,
@@ -55,6 +76,7 @@ def ensure_reel_media(url: str) -> dict:
                 "local_video_path": str(existing_video),
                 "thumbnail_path": str(thumbnail_path or ""),
             }
+        _upload_media_to_r2(existing_video, existing_thumbnail)
         return {
             "ok": True,
             "media_status": "ready",
@@ -89,6 +111,7 @@ def ensure_reel_media(url: str) -> dict:
         return {"ok": False, "media_status": "failed", "local_video_path": "", "thumbnail_path": ""}
 
     thumbnail_path = _make_thumbnail(video_path, reel_id)
+    _upload_media_to_r2(video_path, thumbnail_path)
     update_reel_media(url, "ready", str(video_path), str(thumbnail_path or ""))
     return {
         "ok": True,

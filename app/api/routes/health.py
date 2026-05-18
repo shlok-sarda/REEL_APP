@@ -18,4 +18,6 @@ def health_check():
         storage_dir=str(settings.storage_dir),
         media_dir=str(settings.media_dir),
         csv_file=str(settings.reel_urls_csv),
+        media_storage_mode="r2+local_cache" if settings.r2_enabled else "local_only",
+        r2_enabled=settings.r2_enabled,
     )

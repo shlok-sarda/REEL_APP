@@ -118,6 +118,8 @@ class HealthResponse(BaseModel):
     storage_dir: str
     media_dir: str
     csv_file: str
+    media_storage_mode: str = "local_only"
+    r2_enabled: bool = False
 
 
 class DashboardResponse(BaseModel):
