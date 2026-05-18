@@ -21,6 +21,14 @@ IMPORTANT:
 - It is okay if Generic is the second-best branch.
 - Return two DISTINCT branches.
 
+EVIDENCE PRIORITY:
+- Prefer evidence in this order:
+  1. transcript
+  2. visible text
+  3. caption and hashtags
+  4. visual inference
+- Do NOT let a vague caption override a clear transcript or clear on-screen text.
+
 ----------------------------------------
 BRANCH DEFINITIONS
 ----------------------------------------
@@ -185,6 +193,11 @@ Choose the winner using these rules, in this order:
 - Prefer concrete, meaningful, human-usable items.
 - Do not reward fake precision or hallucinated names.
 - If one candidate preserves the right detail in summaries while keeping better item names, prefer it.
+- If one candidate uses abstract labels like "concept", "perspective", "metaphor", "idea", or "discussion"
+  while the other uses a concrete named place, product, app, exercise, recipe, media title, or venue
+  that is clearly supported by the evidence, prefer the concrete candidate.
+- If the evidence contains a clearly named app, product, place, dish, exercise, movie/show, or venue,
+  prefer candidates that use that literal named thing as the item.
 
 5. BRANCH NEUTRALITY
 - Do NOT automatically prefer a specialized candidate.
@@ -276,6 +289,22 @@ SECONDARY CATEGORY RULES:
 - Do not simply repeat the primary category unless the reel is too broad to narrow further.
 - Similar reels should produce the same secondary category whenever possible.
 
+EVIDENCE PRIORITY:
+- Prefer evidence in this order:
+  1. transcript
+  2. visible text
+  3. caption and hashtags
+  4. visual inference
+- Do NOT let a catchy or unrelated caption override clear transcript or on-screen product/app evidence.
+
+EVIDENCE PRIORITY:
+- Prefer evidence in this order:
+  1. transcript
+  2. visible text
+  3. caption and hashtags
+  4. visual inference
+- If higher-priority evidence clearly names the saved thing, use that name.
+
 ----------------------------------------
 FOOD RULES
 ----------------------------------------
@@ -359,6 +388,9 @@ If PRIMARY CATEGORY is Travel:
 ----------------------------------------
 GENERAL ITEM RULES
 ----------------------------------------
+- If a reel is place-led, the item should usually be the place or venue, not a vague "experience" label.
+- If a reel is recipe-led, the item should be the dish name.
+- If a reel is destination-led, the item should be the destination name.
 - Extract ONLY the main items that the reel is truly about.
 - Do not add background objects or accessories unless they are central.
 - Prefer fewer, better items.
@@ -367,6 +399,8 @@ GENERAL ITEM RULES
 - If the reel clearly showcases multiple distinct core items, include all of them.
 - Do NOT collapse a multi-item reel into one generic category item.
 - Do NOT use the secondary category itself as the only item unless the reel is genuinely about one single thing.
+- Do NOT use vague item names like "concept", "perspective", "metaphor", "idea", or "experience"
+  when a more literal place, venue, dish, app, destination, or named thing is available.
 
 TEXTUAL DATA:
 Caption: {caption}
@@ -486,6 +520,8 @@ GENERAL EXTRACTION RULES
 - If the reel clearly showcases multiple distinct core items, include all of them.
 - Do NOT hallucinate exact product names, brands, or models.
 - If the exact product name is uncertain, use the clearest faithful fallback family-level item.
+- Do NOT use vague item names like "product concept", "shopping idea", "tool discussion", or "app perspective"
+  when a literal product/app/tool name is available.
 
 TEXTUAL DATA:
 Caption: {caption}
@@ -533,6 +569,15 @@ SECONDARY CATEGORY RULES:
 - Use 2 to 4 words.
 - Keep wording clean, stable, and human-readable.
 - Similar reels should produce the same secondary category whenever possible.
+
+EVIDENCE PRIORITY:
+- Prefer evidence in this order:
+  1. transcript
+  2. visible text
+  3. caption and hashtags
+  4. visual inference
+- If a named exercise, workout type, or routine shape is clearly supported by higher-priority evidence,
+  use that literal thing instead of a motivational or abstract label.
 
 ----------------------------------------
 FIRST STAGE GRANULARITY RULE
@@ -663,6 +708,8 @@ GENERAL ITEM RULES
 - Do NOT use the secondary category itself as the only item unless the reel is genuinely about one broad thing.
 - Do NOT over-split internal components when they are part of one broader saved unit.
 - The summary should preserve the detail that is not promoted into item names.
+- Do NOT use motivational abstractions like "mindset", "discipline", or "perspective" as item names
+  when the reel is actually centered on a named exercise, routine, food, or training method.
 
 TEXTUAL DATA:
 Caption: {caption}
@@ -710,6 +757,14 @@ SECONDARY CATEGORY RULES:
 - Keep wording clean, stable, and human-readable.
 - Prefer broad but meaningful topical buckets over decorative phrasing.
 
+EVIDENCE PRIORITY:
+- Prefer evidence in this order:
+  1. transcript
+  2. visible text
+  3. caption and hashtags
+  4. visual inference
+- Do NOT let a funny, poetic, or misleading caption override a clearly named thing in the transcript or visible text.
+
 ----------------------------------------
 GENERIC BRANCH GOAL
 ----------------------------------------
@@ -738,6 +793,12 @@ ITEM RULES
 ----------------------------------------
 1. The item should usually be the main idea, concept, resource, event, perspective, or named thing the reel is centered on.
 
+1a. Prefer literal named things over abstractions.
+- If a named app, website, movie/show, resource, creator project, venue, or concrete topic is clearly present,
+  use that literal named thing as the item.
+- Only use abstract labels like "perspective", "concept", "metaphor", "discussion", or "reflection"
+  when the reel truly has no clearer concrete saved unit.
+
 2. Good item shapes:
    - "How to get over gym fear"
    - "Ground News app bias-checking concept"
@@ -750,7 +811,15 @@ ITEM RULES
    - it is okay for the item to be the app/site/tool name or the broader concept
    - choose the version that better matches the reel's true purpose
 
-4. Do NOT over-split:
+4. If the reel is about a named movie, show, series, documentary, trailer, creator project, or entertainment title:
+   - the item should be that literal title whenever the evidence supports it
+   - do NOT replace a title-led reel with a vague abstraction like:
+     - "metaphor"
+     - "perspective"
+     - "commentary"
+     - "reflection"
+
+5. Do NOT over-split:
    - many facts
    - many arguments
    - many websites
@@ -758,9 +827,17 @@ ITEM RULES
    - many talking points
    unless the reel is clearly a small recommendation list where those units are the real saved items
 
-5. Prefer fewer, better items.
+6. Prefer fewer, better items.
 
-6. Do NOT hallucinate names, events, resources, or concepts.
+7. Do NOT hallucinate names, events, resources, or concepts.
+
+8. Avoid weak generic item names such as:
+   - "concept"
+   - "perspective"
+   - "metaphor"
+   - "idea"
+   - "discussion"
+   unless that is genuinely the only faithful saved unit.
 
 ----------------------------------------
 SUMMARY RULES
