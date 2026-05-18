@@ -1801,6 +1801,20 @@ def build_web_app_html(user_id: str) -> str:
       queuePlayerPaint();
     }}
 
+    function syncFloatingPlayerSurface() {{
+      const hasSrc = Boolean(floatingPlayerVideo.getAttribute('src'));
+      const hasPoster = Boolean(floatingPlayerPoster.getAttribute('src'));
+      const showPoster = hasPoster && (
+        !hasSrc ||
+        playerUi.mediaReadyKey !== playerUi.itemKey ||
+        (floatingPlayerVideo.paused && floatingPlayerVideo.currentTime < 0.05)
+      );
+      const showVideo = hasSrc && !showPoster;
+      floatingPlayerPoster.hidden = !showPoster;
+      floatingPlayerVideo.hidden = !showVideo;
+      floatingPlayerEmpty.hidden = hasSrc || hasPoster;
+    }}
+
     function animatePlayerTo(target, options = {{}}) {{
       stopPlayerAnimation();
       clearPlayerControlsTimer();
@@ -1877,22 +1891,21 @@ def build_web_app_html(user_id: str) -> str:
       floatingPlayerVideo.preload = 'auto';
       if (item?.local_video_url) {{
         const hasThumb = Boolean(item.thumbnail_url);
-        const readyForThisItem = playerUi.mediaReadyKey === itemKey;
-        floatingPlayerVideo.hidden = hasThumb && !readyForThisItem;
-        floatingPlayerPoster.hidden = !hasThumb;
         if (hasThumb && floatingPlayerPoster.getAttribute('src') !== item.thumbnail_url) {{
           floatingPlayerPoster.setAttribute('src', item.thumbnail_url);
         }}
-        floatingPlayerEmpty.hidden = true;
         if (!sameItem || floatingPlayerVideo.getAttribute('src') !== item.local_video_url) {{
           playerUi.mediaReadyKey = '';
           floatingPlayerVideo.pause();
+          floatingPlayerVideo.currentTime = 0;
           floatingPlayerVideo.setAttribute('src', item.local_video_url);
           if (item.thumbnail_url) floatingPlayerVideo.setAttribute('poster', item.thumbnail_url);
           else floatingPlayerVideo.removeAttribute('poster');
           floatingPlayerVideo.load();
         }}
+        syncFloatingPlayerSurface();
         floatingPlayerVideo.play().catch(() => {{
+          syncFloatingPlayerSurface();
           queuePlayerPaint();
         }});
       }} else if (item?.thumbnail_url) {{
@@ -1902,12 +1915,10 @@ def build_web_app_html(user_id: str) -> str:
           floatingPlayerVideo.removeAttribute('src');
           floatingPlayerVideo.load();
         }}
-        floatingPlayerVideo.hidden = true;
-        floatingPlayerPoster.hidden = false;
         if (floatingPlayerPoster.getAttribute('src') !== item.thumbnail_url) {{
           floatingPlayerPoster.setAttribute('src', item.thumbnail_url);
         }}
-        floatingPlayerEmpty.hidden = true;
+        syncFloatingPlayerSurface();
       }} else {{
         playerUi.mediaReadyKey = '';
         if (floatingPlayerVideo.getAttribute('src')) {{
@@ -1915,9 +1926,8 @@ def build_web_app_html(user_id: str) -> str:
           floatingPlayerVideo.removeAttribute('src');
           floatingPlayerVideo.load();
         }}
-        floatingPlayerVideo.hidden = true;
-        floatingPlayerPoster.hidden = true;
-        floatingPlayerEmpty.hidden = false;
+        floatingPlayerPoster.removeAttribute('src');
+        syncFloatingPlayerSurface();
       }}
       queuePlayerPaint();
     }}
@@ -2213,26 +2223,29 @@ def build_web_app_html(user_id: str) -> str:
         queuePlayerPaint();
       }});
 
-      floatingPlayerVideo.addEventListener('play', () => queuePlayerPaint());
-      floatingPlayerVideo.addEventListener('pause', () => queuePlayerPaint());
-      floatingPlayerVideo.addEventListener('loadeddata', () => {{
+      floatingPlayerVideo.addEventListener('play', () => {{
         playerUi.mediaReadyKey = playerUi.itemKey || '';
-        floatingPlayerVideo.hidden = false;
-        floatingPlayerPoster.hidden = true;
-        floatingPlayerEmpty.hidden = true;
+        syncFloatingPlayerSurface();
         queuePlayerPaint();
+      }});
+      floatingPlayerVideo.addEventListener('pause', () => {{
+        syncFloatingPlayerSurface();
+        queuePlayerPaint();
+      }});
+      floatingPlayerVideo.addEventListener('loadeddata', () => {{
+        syncFloatingPlayerSurface();
+        queuePlayerPaint();
+      }});
+      floatingPlayerVideo.addEventListener('timeupdate', () => {{
+        if (floatingPlayerVideo.currentTime >= 0.05) {{
+          playerUi.mediaReadyKey = playerUi.itemKey || '';
+          syncFloatingPlayerSurface();
+          queuePlayerPaint();
+        }}
       }});
       floatingPlayerVideo.addEventListener('error', () => {{
         playerUi.mediaReadyKey = '';
-        if (floatingPlayerPoster.getAttribute('src')) {{
-          floatingPlayerVideo.hidden = true;
-          floatingPlayerPoster.hidden = false;
-          floatingPlayerEmpty.hidden = true;
-        }} else {{
-          floatingPlayerVideo.hidden = true;
-          floatingPlayerPoster.hidden = true;
-          floatingPlayerEmpty.hidden = false;
-        }}
+        syncFloatingPlayerSurface();
         queuePlayerPaint();
       }});
       floatingPlayerVideo.addEventListener('volumechange', () => {{
