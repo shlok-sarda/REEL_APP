@@ -277,6 +277,17 @@ def write_status(payload, paths):
     paths.status_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def sync_live_library_state(user_id: str, source_csv: Path) -> None:
+    if not source_csv.exists():
+        return
+    try:
+        sync_reel_items_from_accumulated(user_id, source_csv)
+        sync_reel_diagnostics_from_accumulated(user_id, source_csv)
+    except Exception:
+        # Keep the long-form rebuild resilient even if the fast DB sync fails.
+        pass
+
+
 def main(user_id="default", only_urls=None):
     sync_csv_from_db()
     paths = build_paths(user_storage_dir(user_id))
@@ -375,9 +386,11 @@ def main(user_id="default", only_urls=None):
         ]
         combined_rows = enrich_rows_with_media(kept_rows + pending_rows)
         write_raw_rows(combined_rows, paths)
+        sync_live_library_state(user_id, paths.raw_output)
     elif raw_rows:
         sync_existing_status_and_media(raw_rows)
         write_raw_rows(enrich_rows_with_media(raw_rows), paths)
+        sync_live_library_state(user_id, paths.raw_output)
         lightweight_rebuild = True
 
     if paths.raw_output.exists():
