@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.services.personalization_v2.embeddings import embed_text
 from app.services.personalization_v2.graph_engine import ASSIGNMENT_VERSION, feature_embedding_text, rebuild_user_graph
+from app.services.personalization_v2.hybrid_router import improve_snapshot_with_hybrid_router
 from app.services.personalization_v2.interpreter import interpret_item
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 
@@ -10,7 +11,13 @@ class PersonalizationV2Engine:
     def __init__(self, repo: PersonalizationV2Repository | None = None):
         self.repo = repo or PersonalizationV2Repository()
 
-    def backfill_user(self, user_id: str, use_llm: bool = True, use_remote_embeddings: bool = True) -> dict:
+    def backfill_user(
+        self,
+        user_id: str,
+        use_llm: bool = True,
+        use_remote_embeddings: bool = True,
+        use_hybrid_router: bool = True,
+    ) -> dict:
         self.repo.reset_user_state(user_id)
         reel_items = self.repo.load_reel_items(user_id)
         for reel_item in reel_items:
@@ -30,4 +37,11 @@ class PersonalizationV2Engine:
             feature.metadata["received_at"] = reel_item.received_at
             self.repo.upsert_feature(feature)
 
-        return rebuild_user_graph(self.repo, user_id)
+        seed_snapshot = rebuild_user_graph(self.repo, user_id)
+        if not use_hybrid_router:
+            return seed_snapshot
+        try:
+            return improve_snapshot_with_hybrid_router(self.repo, user_id, seed_snapshot)
+        except Exception as exc:
+            print(f"[personalization_v2] hybrid router fallback for {user_id}: {exc}")
+            return seed_snapshot

@@ -6,8 +6,13 @@ from api_config import get_openai_client
 from app.services.personalization_v2.models import ReelItemRecord, StructuredFeature
 from app.services.personalization_v2.normalization import (
     canonical_domain,
+    canonical_intent,
+    canonical_item_type,
     canonical_location,
+    canonical_subdomain_list,
     canonical_subdomains,
+    FOOD_PLACE_SUBDOMAINS,
+    PLACE_LIKE_SUBDOMAINS,
     refine_domain,
     has_physical_product_signal,
     infer_intent,
@@ -30,6 +35,90 @@ You are converting an already-extracted saved reel item into structured personal
 Do not re-extract the item itself.
 Do not invent new products or places.
 Normalize this reel item into stable concepts for later clustering.
+
+Allowed canonical domains:
+- Travel & Food
+- Food & Local Eats
+- Food & Recipes
+- Travel Destinations
+- Travel Accommodations
+- Technology
+- Entertainment
+- Health & Lifestyle
+- Lifestyle
+- Fitness & Health
+- Learning & Skills
+- Finance & Business
+- Career & Money
+- Personal Growth
+- Local Info
+- Miscellaneous
+
+Allowed item_type values:
+- place
+- recipe
+- app
+- product
+- media
+- idea
+- general
+
+Allowed intent values:
+- place_to_visit
+- recipe_to_make
+- tool_to_use
+- product_to_buy
+- media_to_watch_or_hear
+- idea_to_try
+- advice_to_remember
+- general_reference
+
+Preferred subdomain vocabulary:
+- restaurants
+- seafood restaurants
+- street food
+- cafes
+- late-night food
+- dessert spots
+- local food
+- stay
+- destinations
+- travel planning
+- travel utility
+- cultural experience
+- recipes
+- protein recipes
+- app
+- learning app
+- ai
+- device
+- audio device
+- kitchen device
+- consumer tech
+- fragrance
+- beauty and style
+- men's clothing brands
+- luxury outlet shopping
+- sneaker culture
+- lifestyle ideas
+- fitness
+- wellness
+- films and shows
+- music
+- internet culture
+- humor
+- commentary
+- photo ideas
+- job search tools
+- wealth education
+- money making ideas
+- startup advice
+- motivation and mindset
+- advice
+- local rentals
+- marketing
+- business and money
+- innovation
 
 Return JSON only:
 {
@@ -54,6 +143,22 @@ Rules:
 - Keep subdomains concise like "restaurant", "seafood", "cafe", "stay", "recipe", "app", "device".
 - If location is unclear, return an empty string.
 - If uncertain, lower the confidence instead of guessing.
+- Prefer transcript and item name over decorative summary wording.
+- Resolve synonyms into canonical concepts.
+- Examples:
+  - Banaras -> Varanasi
+  - restaurants / food place / biryani spot -> restaurants
+  - app / tool / website -> app
+  - movie / series / show -> films and shows
+  - perfume / fragrance -> fragrance
+- If the reel is about a place to eat in a city, favor:
+  - item_type = place
+  - intent = place_to_visit
+  - location = canonical city name
+- If the reel is about a buyable thing, favor:
+  - item_type = product or app
+  - intent = product_to_buy or tool_to_use
+- Do NOT return decorative broad placeholders like "general", "place", "idea" as subdomains.
 
 Input:
 {
@@ -138,6 +243,33 @@ def heuristic_interpret(item: ReelItemRecord) -> dict:
     domain = refine_domain(domain, subdomains, item_type, location)
     vibe = infer_vibes(item.specific_category, item.item_name, item.summary)
     intent = normalize(hint.get("intent")) or infer_intent(item.specific_category, item.item_name, item.summary, item.product_type)
+    text_blob = " ".join(
+        normalize(part).lower()
+        for part in [item.specific_category, item.item_name, item.summary]
+        if normalize(part)
+    )
+    if "fashion appearance tips" in text_blob or any(
+        marker in text_blob
+        for marker in ["color palette", "clothing color", "which colors suit", "colors you wear", "contrast clothing color"]
+    ):
+        subdomains = [sub for sub in subdomains if normalize(sub).lower() != "men's clothing brands"]
+        subdomains = merge_subdomains(subdomains, ["beauty and style"])
+        if item_type in {"product", "general"}:
+            item_type = "idea"
+        if intent in {"product_to_buy", "general_reference", "advice_to_remember"}:
+            intent = "idea_to_try"
+        domain = refine_domain(domain, subdomains, item_type, location)
+    subdomain_set = {normalize(subdomain).lower() for subdomain in subdomains}
+    has_place_like_subdomain = bool(subdomain_set & PLACE_LIKE_SUBDOMAINS)
+    has_food_place_subdomain = bool(subdomain_set & FOOD_PLACE_SUBDOMAINS)
+    if location and has_place_like_subdomain and item_type in {"general", "idea", "recipe"}:
+        item_type = "place"
+    if location and has_place_like_subdomain and intent in {"general_reference", "idea_to_try", "recipe_to_make"}:
+        intent = "place_to_visit"
+    if location and has_food_place_subdomain and item_type != "product":
+        item_type = "place"
+        if intent in {"general_reference", "idea_to_try", "recipe_to_make"}:
+            intent = "place_to_visit"
     if physical_product_signal and intent in {"general_reference", "idea_to_try", "place_to_visit"}:
         intent = "product_to_buy"
     if item_type == "app" and intent in {"general_reference", "advice_to_remember", "idea_to_try"}:
@@ -172,30 +304,34 @@ def heuristic_interpret(item: ReelItemRecord) -> dict:
 def interpret_item(item: ReelItemRecord, use_llm: bool = True) -> StructuredFeature:
     heuristic = heuristic_interpret(item)
     interpretation_source = "heuristic"
+    llm_error = ""
 
     if use_llm:
         try:
             llm_payload = llm_interpret(item)
             interpretation_source = "llm+heuristic"
-        except Exception:
+        except Exception as exc:
             llm_payload = {}
+            llm_error = str(exc)
     else:
         llm_payload = {}
 
-    domain = normalize(llm_payload.get("canonical_domain")) or heuristic["canonical_domain"]
+    llm_domain = canonical_domain(normalize(llm_payload.get("canonical_domain")) or "")
+    domain = llm_domain if llm_domain and llm_domain != "Miscellaneous" else heuristic["canonical_domain"]
     domain = canonical_domain(domain or item.primary_category)
+    llm_subdomains = canonical_subdomain_list(coerce_list(llm_payload.get("subdomains", [])))
     subdomains = merge_subdomains(
+        llm_subdomains,
         heuristic["subdomains"],
-        coerce_list(llm_payload.get("subdomains", [])),
     )
-    location = normalize(llm_payload.get("location")) or heuristic["location"]
-    location = canonical_location(location, item.specific_category, item.item_name, item.summary) or location
+    llm_location = normalize(llm_payload.get("location"))
+    location = canonical_location(llm_location, item.specific_category, item.item_name, item.summary) or heuristic["location"]
     vibe = merge_subdomains(
         heuristic["vibe"],
         coerce_list(llm_payload.get("vibe", [])),
     )
-    intent = normalize(llm_payload.get("intent")) or heuristic["intent"]
-    item_type = normalize(llm_payload.get("item_type")) or heuristic["item_type"]
+    intent = canonical_intent(llm_payload.get("intent")) or heuristic["intent"]
+    item_type = canonical_item_type(llm_payload.get("item_type")) or heuristic["item_type"]
     entities = normalize_entities(
         heuristic["entities"] +
         coerce_list(llm_payload.get("entities", []))
@@ -208,6 +344,17 @@ def interpret_item(item: ReelItemRecord, use_llm: bool = True) -> StructuredFeat
             if isinstance(value, (int, float))
         },
     }
+    llm_confidence = llm_payload.get("confidence_scores") or {}
+    if llm_subdomains and float(llm_confidence.get("subdomains", 0.0) or 0.0) >= 0.55:
+        subdomains = merge_subdomains(llm_subdomains, heuristic["subdomains"])
+    if llm_location and float(llm_confidence.get("location", 0.0) or 0.0) >= 0.55:
+        location = canonical_location(llm_location, item.specific_category, item.item_name, item.summary) or location
+    if llm_domain != "Miscellaneous" and float(llm_confidence.get("domain", 0.0) or 0.0) >= 0.55:
+        domain = llm_domain
+    if canonical_item_type(llm_payload.get("item_type")) and float(llm_confidence.get("subdomains", 0.0) or 0.0) >= 0.5:
+        item_type = canonical_item_type(llm_payload.get("item_type")) or item_type
+    if canonical_intent(llm_payload.get("intent")) and float(llm_confidence.get("intent", 0.0) or 0.0) >= 0.5:
+        intent = canonical_intent(llm_payload.get("intent")) or intent
     domain = refine_domain(domain, subdomains, item_type, location)
 
     return StructuredFeature(
@@ -232,5 +379,6 @@ def interpret_item(item: ReelItemRecord, use_llm: bool = True) -> StructuredFeat
         metadata={
             "heuristic": heuristic,
             "llm_payload": llm_payload,
+            "llm_error": llm_error,
         },
     )

@@ -45,7 +45,10 @@ TITLE_OVERRIDES = {
     "marketing": "Marketing Ideas",
     "business and money": "Business & Money",
     "beauty and style": "Beauty & Style",
+    "food products": "Food Products",
+    "home products": "Home Products",
     "men's clothing brands": "Men's Clothing Brands",
+    "slides and sandals": "Slides & Sandals",
     "luxury outlet shopping": "Luxury Outlet Shopping",
     "sneaker culture": "Sneaker Culture",
     "lifestyle ideas": "Lifestyle Ideas",
@@ -183,6 +186,9 @@ def primary_subdomain(subdomains: list[str], item_type: str = "") -> str:
             "kitchen device",
             "device",
             "fragrance",
+            "food products",
+            "home products",
+            "slides and sandals",
             "men's clothing brands",
             "sneaker culture",
             "beauty and style",
@@ -196,6 +202,34 @@ def primary_subdomain(subdomains: list[str], item_type: str = "") -> str:
         for label in app_first:
             if label in ordered:
                 return label
+    if item_type == "idea":
+        idea_first = [
+            "motivation and mindset",
+            "advice",
+            "startup advice",
+            "wealth education",
+            "money making ideas",
+            "beauty and style",
+            "lifestyle ideas",
+            "photo ideas",
+            "travel planning",
+            "destinations",
+            "ai",
+        ]
+        for label in idea_first:
+            if label in ordered:
+                return label
+    if item_type == "media":
+        media_first = [
+            "films and shows",
+            "music",
+            "commentary",
+            "humor",
+            "internet culture",
+        ]
+        for label in media_first:
+            if label in ordered:
+                return label
     preferred = [
         "street food",
         "seafood restaurants",
@@ -203,6 +237,7 @@ def primary_subdomain(subdomains: list[str], item_type: str = "") -> str:
         "late-night food",
         "restaurants",
         "restaurant",
+        "local rentals",
         "stay",
         "travel planning",
         "destinations",
@@ -216,7 +251,9 @@ def primary_subdomain(subdomains: list[str], item_type: str = "") -> str:
         "fitness",
         "wellness",
         "beauty and style",
+        "home products",
         "men's clothing brands",
+        "slides and sandals",
         "luxury outlet shopping",
         "sneaker culture",
         "lifestyle ideas",
@@ -256,6 +293,8 @@ def should_scope_cluster_by_location(domain: str, subdomains: list[str], item_ty
     label = primary_subdomain(subdomains, item_type)
     if domain in {"Travel & Food", "Food & Local Eats", "Travel Accommodations", "Travel Destinations", "Travel"}:
         return label in LOCATION_CLUSTER_SUBDOMAINS or item_type == "place"
+    if domain == "Products & Shopping":
+        return label == "food products"
     if domain == "Lifestyle":
         return label == "luxury outlet shopping"
     return False
@@ -397,13 +436,24 @@ def singleton_family_bucket(feature: StructuredFeature) -> str:
     if intent == "media_to_watch_or_hear":
         if label == "music":
             return "music"
+        if label == "humor":
+            return "humor_media"
         return "screen_entertainment"
 
-    if intent in {"idea_to_try", "advice_to_remember"}:
-        if domain in {"Personal Growth", "Career & Money"}:
-            return "advice_and_growth"
+    if intent == "idea_to_try":
+        if label == "beauty and style":
+            return "beauty_style_ideas"
+        if label == "lifestyle ideas":
+            return "lifestyle_ideas"
+        if label == "photo ideas":
+            return "photo_ideas"
         if domain == "Lifestyle":
             return "lifestyle_ideas"
+        return "ideas"
+
+    if intent == "advice_to_remember":
+        if domain in {"Personal Growth", "Career & Money"}:
+            return "advice_and_growth"
         return "ideas"
 
     return label
@@ -597,6 +647,51 @@ def merge_weak_cluster_families(cluster_records: dict, assignments: list[dict]) 
             cluster_records[cluster_node_id] = []
 
 
+def compact_cross_location_food_singletons(cluster_records: dict, assignments: list[dict]) -> None:
+    assignment_by_reel_item = {row["reel_item_id"]: row for row in assignments}
+    candidates = []
+    strong_food_locations = set()
+    for _cluster_node_id, members in cluster_records.items():
+        if not members:
+            continue
+        sample = members[0]
+        subdomain_set = set(as_list(sample.subdomains))
+        if len(members) >= 2 and sample.location and sample.intent == "place_to_visit" and (subdomain_set & PLACE_FOOD_LABELS):
+            strong_food_locations.add(sample.location)
+
+    for cluster_node_id, members in cluster_records.items():
+        if len(members) != 1:
+            continue
+        feature = members[0]
+        subdomain_set = set(as_list(feature.subdomains))
+        if feature.intent != "place_to_visit":
+            continue
+        if not (subdomain_set & PLACE_FOOD_LABELS):
+            continue
+        if feature.location and feature.location in strong_food_locations:
+            continue
+        candidates.append((cluster_node_id, feature))
+
+    if len(candidates) < 2:
+        return
+
+    anchor_node_id, _anchor_feature = candidates[0]
+    for cluster_node_id, feature in candidates[1:]:
+        cluster_records[anchor_node_id].append(feature)
+        cluster_records[cluster_node_id] = []
+        assignment = assignment_by_reel_item.get(feature.reel_item_id)
+        if assignment:
+            assignment["cluster_node_id"] = anchor_node_id
+            assignment["assignment_reason"] = {
+                "action": "merge_cross_location_food_singletons",
+                "source_cluster_node_id": cluster_node_id,
+                "target_cluster_node_id": anchor_node_id,
+                "intent": feature.intent,
+                "location": feature.location,
+                "primary_subdomain": primary_subdomain(feature.subdomains, feature.item_type),
+            }
+
+
 def absorb_singletons(cluster_records: dict, assignments: list[dict]) -> None:
     assignment_by_reel_item = {row["reel_item_id"]: row for row in assignments}
     for cluster_node_id, members in list(cluster_records.items()):
@@ -634,6 +729,14 @@ def absorb_singletons(cluster_records: dict, assignments: list[dict]) -> None:
                 )
             )
             if feature_bucket.startswith("food_places::") and candidate_bucket.startswith("food_places::") and feature_bucket != candidate_bucket:
+                continue
+            if (
+                feature.intent == "product_to_buy"
+                and feature.location
+                and feature.location != candidate.metadata.get("top_location", "")
+                and reasons.get("domain_match", 0.0) == 0.0
+                and reasons.get("subdomain_overlap", 0.0) == 0.0
+            ):
                 continue
             family_bonus = 0.14 if feature_bucket and feature_bucket == candidate_bucket else 0.0
             intent_bonus = 0.08 if feature.intent and feature.intent == candidate.metadata.get("intent_mode", "") else 0.0
@@ -698,19 +801,70 @@ def absorb_singletons(cluster_records: dict, assignments: list[dict]) -> None:
                 }
 
 
+def merge_duplicate_titles(cluster_records: dict, assignments: list[dict]) -> None:
+    assignment_by_reel_item = {row["reel_item_id"]: row for row in assignments}
+    grouped = defaultdict(list)
+    for cluster_node_id, members in cluster_records.items():
+        if not members:
+            continue
+        metadata = build_cluster_metadata(members)
+        confidence = sum(
+            max(
+                feature.confidence_scores.get("domain", 0.0),
+                feature.confidence_scores.get("subdomains", 0.0),
+                feature.confidence_scores.get("location", 0.0),
+            )
+            for feature in members
+        ) / max(len(members), 1)
+        title, _title_confidence = title_for_cluster(metadata, len(members), confidence)
+        grouped[title].append((cluster_node_id, members))
+
+    for title, entries in grouped.items():
+        if len(entries) < 2:
+            continue
+        entries.sort(key=lambda item: (-len(item[1]), item[0]))
+        anchor_node_id, anchor_members = entries[0]
+        for cluster_node_id, members in entries[1:]:
+            if cluster_node_id == anchor_node_id:
+                continue
+            for feature in members:
+                anchor_members.append(feature)
+                assignment = assignment_by_reel_item.get(feature.reel_item_id)
+                if assignment:
+                    assignment["cluster_node_id"] = anchor_node_id
+                    assignment["assignment_reason"] = {
+                        "action": "merge_duplicate_title",
+                        "source_cluster_node_id": cluster_node_id,
+                        "target_cluster_node_id": anchor_node_id,
+                        "title": title,
+                    }
+            cluster_records[cluster_node_id] = []
+
+
 def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tuple[str, float]:
     location = metadata.get("top_location", "")
     subdomains = metadata.get("top_subdomains", [])
     item_type = metadata.get("item_type_mode", "")
+    intent = metadata.get("intent_mode", "")
     label = metadata.get("primary_subdomain") or primary_subdomain(subdomains, item_type)
+    if metadata.get("canonical_domain") == "Generic" and label == "general":
+        return "Needs Review", min(0.78, confidence + 0.02)
     restaurant_family = PLACE_FOOD_LABELS - {"local food"}
     restaurant_labels = [value for value in subdomains if value in restaurant_family]
-    if location and len(set(restaurant_labels)) >= 2 and save_count >= 3:
+    if label == "fragrance" and save_count >= 2:
+        return "Fragrances", min(0.92, confidence + 0.06)
+    if label == "home products" and save_count >= 2:
+        return "Home Products", min(0.86, confidence + 0.04)
+    if label == "slides and sandals" and save_count >= 2:
+        return "Slides & Sandals", min(0.86, confidence + 0.04)
+    if location and len(set(restaurant_labels)) >= 2 and save_count >= 3 and label in PLACE_FOOD_LABELS:
         return f"Restaurants in {location}", min(0.92, confidence + 0.06)
-    if location and save_count >= 1 and (set(subdomains) & PLACE_FOOD_LABELS):
+    if location and save_count >= 1 and label in PLACE_FOOD_LABELS:
         return f"Restaurants in {location}", min(0.88, confidence + 0.05)
-    if len(set(restaurant_labels)) >= 2 and save_count >= 2 and not location:
-        return "Food Places", min(0.84, confidence + 0.04)
+    if len(set(restaurant_labels)) >= 2 and save_count >= 2 and not location and label in PLACE_FOOD_LABELS:
+        return "Restaurants", min(0.84, confidence + 0.04)
+    if save_count >= 2 and not location and label in PLACE_FOOD_LABELS:
+        return "Restaurants", min(0.82, confidence + 0.04)
     if save_count >= 2 and "destinations" in subdomains and not location:
         return "Travel Destinations", min(0.86, confidence + 0.05)
     if save_count >= 2 and {"protein recipes", "recipes"} & set(subdomains):
@@ -722,6 +876,10 @@ def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tup
         return "Gadgets & Devices", min(0.86, confidence + 0.05)
     if save_count >= 2 and {"job search tools", "wealth education", "money making ideas", "startup advice"} & set(subdomains):
         return "Career Growth", min(0.82, confidence + 0.04)
+    if item_type == "product" and location and label == "food products":
+        return f"Food Products in {location}", min(0.84, confidence + 0.05)
+    if item_type == "product" and location and label in {"local food", "dessert spots"}:
+        return f"Food Products in {location}", min(0.82, confidence + 0.04)
     if location and label and save_count >= 2 and confidence >= 0.58:
         if label in {"restaurant", "restaurants"}:
             return f"Restaurants in {location}", min(0.94, confidence + 0.08)
@@ -746,6 +904,18 @@ def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tup
         return location, min(0.9, confidence + 0.06)
     if label and save_count >= 2:
         return title_override_for_subdomain(label), min(0.86, confidence + 0.05)
+    if save_count == 1:
+        if item_type == "product" and location and label in {"food products", "local food", "dessert spots"}:
+            return f"Food Products in {location}", min(0.80, confidence + 0.03)
+        if location and label in PLACE_FOOD_LABELS:
+            return f"Restaurants in {location}", min(0.82, confidence + 0.04)
+        if label == "local rentals":
+            return "Stays & Rentals", min(0.78, confidence + 0.03)
+        if label == "recipe":
+            return "Recipes", min(0.78, confidence + 0.03)
+        if intent == "general_reference" and label in {"innovation", "consumer tech", "commentary", "internet culture"}:
+            fallback = metadata.get("canonical_domain", "Saved Reels")
+            return fallback, max(0.58, confidence)
     if label and confidence >= 0.72:
         return title_override_for_subdomain(label), min(0.82, confidence + 0.04)
     if label and label not in {"general", "general advice"}:
@@ -757,6 +927,8 @@ def title_for_cluster(metadata: dict, save_count: int, confidence: float) -> tup
             return "Entertainment", min(0.78, confidence + 0.02)
         return f"{item_type.title()} Picks", min(0.78, confidence + 0.02)
     fallback = metadata.get("canonical_domain", "Saved Reels")
+    if fallback == "Generic":
+        fallback = "Saved Reels"
     if fallback in BAD_VISIBLE_TITLES:
         fallback = "Saved Reels"
     return fallback, max(0.45, confidence)
@@ -951,9 +1123,11 @@ def rebuild_user_graph(repo: PersonalizationV2Repository, user_id: str) -> dict:
 
     compact_singleton_families(cluster_records, assignments)
     merge_weak_cluster_families(cluster_records, assignments)
+    compact_cross_location_food_singletons(cluster_records, assignments)
     absorb_singletons(cluster_records, assignments)
     execute_structural_splits(repo, user_id, cluster_records, assignments, domain_nodes)
     absorb_singletons(cluster_records, assignments)
+    merge_duplicate_titles(cluster_records, assignments)
     repo.replace_cluster_memberships(user_id, assignments)
 
     for cluster_node_id, members in cluster_records.items():
