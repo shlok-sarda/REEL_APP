@@ -414,7 +414,6 @@ def _ensure_v2_media_ready(user_id: str) -> None:
 
 def _load_or_build_v2_snapshot(user_id: str) -> dict:
     repo = PersonalizationV2Repository()
-    _ensure_v2_media_ready(user_id)
     current_item_count, current_max_reel_item_id = _current_reel_item_state(user_id)
     snapshot = repo.load_debug_snapshot(user_id)
     snapshot_item_ids = [
@@ -561,10 +560,12 @@ def load_personalized_collections(user_id: str) -> list[dict]:
 
 
 def load_library_payload(user_id: str) -> dict:
+    personalized = load_personalized_collections(user_id)
+    standard = [] if personalized else load_standard_collections(user_id)
     return {
         "user_id": user_id,
-        "standard": load_standard_collections(user_id),
-        "personalized": load_personalized_collections(user_id),
+        "standard": standard,
+        "personalized": personalized,
     }
 
 
