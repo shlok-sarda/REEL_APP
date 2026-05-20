@@ -7,6 +7,7 @@ from app.db.database import get_connection
 from app.services.media import ensure_reel_media
 from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
 from app.services.personalization_v2.engine import PersonalizationV2Engine
+from app.services.personalization_v2.hybrid_router import HYBRID_ASSIGNMENT_VERSION
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
@@ -422,9 +423,16 @@ def _load_or_build_v2_snapshot(user_id: str) -> dict:
         if row.get("reel_item_id") is not None
     ]
     snapshot_max_reel_item_id = max(snapshot_item_ids, default=0)
+    assignment_versions = {
+        (row.get("assignment_version") or "").strip()
+        for row in snapshot.get("memberships", [])
+        if (row.get("assignment_version") or "").strip()
+    }
+    snapshot_is_outdated = bool(snapshot.get("membership_count")) and HYBRID_ASSIGNMENT_VERSION not in assignment_versions
     if (
         snapshot.get("feature_count", 0) != current_item_count
         or snapshot_max_reel_item_id != current_max_reel_item_id
+        or snapshot_is_outdated
     ):
         engine = PersonalizationV2Engine(repo=repo)
         snapshot = engine.backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
