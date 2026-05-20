@@ -105,12 +105,34 @@ def processed_urls(rows):
     return done
 
 
+def merged_fieldnames(rows, fallback=None):
+    ordered = []
+    seen = set()
+    for name in fallback or []:
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    for row in rows or []:
+        for key in row.keys():
+            if key and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+    return ordered
+
+
+def normalize_rows_for_write(rows, fieldnames):
+    return [{field: row.get(field, "") for field in fieldnames} for row in rows]
+
+
 def write_raw_rows(rows, paths):
-    fieldnames = list(rows[0].keys()) if rows else ["URL", "Primary Category", "Secondary Category", "Folder", "Item Name", "Summary"]
+    fieldnames = merged_fieldnames(
+        rows,
+        ["URL", "Primary Category", "Secondary Category", "Folder", "Item Name", "Summary"],
+    )
     with paths.raw_output.open("w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(normalize_rows_for_write(rows, fieldnames))
 
 
 def filter_csv_by_active_urls(input_path, output_path, active_urls):
@@ -131,13 +153,13 @@ def filter_csv_by_active_urls(input_path, output_path, active_urls):
 
 def write_csv_rows(rows, output_path, preferred_fieldnames=None):
     output = Path(output_path)
-    fieldnames = preferred_fieldnames or (list(rows[0].keys()) if rows else [])
+    fieldnames = merged_fieldnames(rows, preferred_fieldnames)
     if not fieldnames:
         return
     with output.open("w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(normalize_rows_for_write(rows, fieldnames))
 
 
 def write_semantic_support_files(rows, paths):
