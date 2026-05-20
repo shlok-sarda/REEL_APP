@@ -31,6 +31,23 @@ def extract_shortcode(url: str) -> str:
     return path_parts[-1] if path_parts else ""
 
 
+def fallback_item_name(row: dict) -> str:
+    candidates = [
+        row.get("Product Name"),
+        row.get("Product Brand"),
+        row.get("Secondary Category"),
+        row.get("Primary Category"),
+    ]
+    for candidate in candidates:
+        value = normalize(candidate)
+        if value:
+            return value
+    summary = normalize(row.get("Summary"))
+    if summary:
+        return " ".join(summary.split()[:6]).strip() or "Untitled Reel"
+    return "Untitled Reel"
+
+
 REEL_FIELDNAMES = [
     "id",
     "user_id",
@@ -549,8 +566,8 @@ def sync_reel_items_from_accumulated(user_id: str, accumulated_csv_path: str | P
             for row in reader:
                 url = normalize(row.get("URL"))
                 reel_id = reels_by_url.get(url)
-                item_name = normalize(row.get("Item Name"))
-                if not reel_id or not item_name:
+                item_name = normalize(row.get("Item Name")) or fallback_item_name(row)
+                if not reel_id:
                     continue
 
                 connection.execute(

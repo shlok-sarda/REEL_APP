@@ -360,6 +360,24 @@ def _current_reel_item_count(user_id: str) -> int:
     return int(row["count"] if row else 0)
 
 
+def _current_reel_item_state(user_id: str) -> tuple[int, int]:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS count,
+                COALESCE(MAX(reel_items.id), 0) AS max_reel_item_id
+            FROM reel_items
+            JOIN reels ON reels.id = reel_items.reel_id
+            WHERE reels.user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    if not row:
+        return 0, 0
+    return int(row["count"] or 0), int(row["max_reel_item_id"] or 0)
+
+
 def _ensure_v2_media_ready(user_id: str) -> None:
     with get_connection() as connection:
         rows = connection.execute(
@@ -396,9 +414,18 @@ def _ensure_v2_media_ready(user_id: str) -> None:
 def _load_or_build_v2_snapshot(user_id: str) -> dict:
     repo = PersonalizationV2Repository()
     _ensure_v2_media_ready(user_id)
-    current_item_count = _current_reel_item_count(user_id)
+    current_item_count, current_max_reel_item_id = _current_reel_item_state(user_id)
     snapshot = repo.load_debug_snapshot(user_id)
-    if snapshot.get("feature_count", 0) != current_item_count:
+    snapshot_item_ids = [
+        int(row.get("reel_item_id") or 0)
+        for row in snapshot.get("features", [])
+        if row.get("reel_item_id") is not None
+    ]
+    snapshot_max_reel_item_id = max(snapshot_item_ids, default=0)
+    if (
+        snapshot.get("feature_count", 0) != current_item_count
+        or snapshot_max_reel_item_id != current_max_reel_item_id
+    ):
         engine = PersonalizationV2Engine(repo=repo)
         snapshot = engine.backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
     return snapshot
