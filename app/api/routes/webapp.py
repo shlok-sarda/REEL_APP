@@ -992,7 +992,7 @@ def build_data_deletion_html() -> str:
     )
 
 
-def build_landing_html(csrf_token: str, user: dict | None) -> str:
+def build_landing_html(csrf_token: str, user: dict | None, show_telegram_fallback: bool = False) -> str:
     google_client_id = settings.google_client_id
     telegram_bot_username = settings.telegram_bot_username
     instagram_app_username = settings.instagram_app_username
@@ -1027,9 +1027,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           <a class="primary-link" href="/app">Open My Library</a>
           {f'<a class="secondary-link" href="{instagram_href}" target="_blank" rel="noopener noreferrer">{instagram_label}</a>' if instagram_connected else '<button id="instagramConnectButton" type="button">Connect Instagram</button>'}
         </div>
-        <div class="form" style="padding-top:10px;">
-          <a class="secondary-link" href="{telegram_href}" target="_blank" rel="noopener noreferrer">Telegram fallback</a>
-        </div>
+        {f'<div class="form" style="padding-top:10px;"><a class="secondary-link" href="{telegram_href}" target="_blank" rel="noopener noreferrer">Telegram fallback</a></div>' if show_telegram_fallback and telegram_bot_username else ''}
         <button id="logoutButton" type="button" class="ghost-button">Sign out</button>
       </div>
       <div id="instagramModal" class="connect-modal hidden" aria-hidden="true">
@@ -2823,7 +2821,8 @@ def build_web_app_html(user_id: str) -> str:
 @router.get("/", response_class=HTMLResponse)
 def root_app(request: Request):
     csrf_token = create_login_csrf(request)
-    return HTMLResponse(build_landing_html(csrf_token, current_user(request)))
+    show_telegram_fallback = request.query_params.get("show_backup", "").strip().lower() in {"1", "true", "yes"}
+    return HTMLResponse(build_landing_html(csrf_token, current_user(request), show_telegram_fallback=show_telegram_fallback))
 
 
 @router.get("/privacy", response_class=HTMLResponse)
