@@ -9,6 +9,63 @@ from app.services.library import is_demo_user
 router = APIRouter(tags=["webapp"])
 
 
+def build_legal_html(title: str, body_html: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>{title}</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #07090c;
+      --panel: rgba(255,255,255,0.06);
+      --line: rgba(255,255,255,0.1);
+      --text: #f4f6f8;
+      --muted: #9ca4af;
+      --accent: #eed7a6;
+      --accent-2: #9fd5c5;
+      --shadow: 0 24px 70px rgba(0,0,0,0.38);
+    }}
+    * {{ box-sizing:border-box; }}
+    body {{
+      margin:0;
+      min-height:100vh;
+      background:
+        radial-gradient(circle at top left, rgba(238, 215, 166, 0.14), transparent 26rem),
+        radial-gradient(circle at top right, rgba(159, 213, 197, 0.12), transparent 24rem),
+        linear-gradient(180deg, #10141b 0%, #07090c 50%, #060709 100%);
+      color:var(--text);
+      font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif;
+      padding: 28px 16px 36px;
+    }}
+    .shell {{ width:min(860px, 100%); margin:0 auto; }}
+    .card {{
+      border:1px solid var(--line);
+      border-radius:24px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
+      box-shadow: var(--shadow);
+      padding:22px;
+    }}
+    .kicker {{ margin:0 0 8px; color:var(--accent-2); font-size:.72rem; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }}
+    h1 {{ margin:0 0 14px; font-size:clamp(1.6rem, 6vw, 2.4rem); line-height:1.02; letter-spacing:-.04em; }}
+    h2 {{ margin:22px 0 8px; font-size:1.02rem; }}
+    p, li {{ color:var(--muted); line-height:1.6; font-size:.95rem; }}
+    a {{ color:var(--accent); }}
+    ul {{ padding-left:18px; }}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="card">
+      {body_html}
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def build_demo_ui_review_html() -> str:
     return """<!DOCTYPE html>
 <html lang="en">
@@ -848,6 +905,91 @@ def build_demo_library_review_html() -> str:
   </script>
 </body>
 </html>"""
+
+
+def build_privacy_html() -> str:
+    return build_legal_html(
+        "Reel Organizer Privacy Policy",
+        """
+      <p class="kicker">Privacy Policy</p>
+      <h1>Reel Organizer Privacy Policy</h1>
+      <p>Reel Organizer helps users collect Instagram reel links they intentionally share and organizes them into a personal library. This page explains what data we store and how we use it.</p>
+      <h2>Information We Collect</h2>
+      <ul>
+        <li>Google account identity needed to create and maintain your Reel Organizer account.</li>
+        <li>Instagram reel URLs that you choose to send to our connected ingestion channel.</li>
+        <li>Processed reel metadata such as extracted item names, summaries, categories, transcript availability, visual extraction results, and personalization outputs.</li>
+        <li>Operational metadata such as linked Telegram or Instagram account IDs, processing status, and media file locations required to keep your library working.</li>
+      </ul>
+      <h2>How We Use Information</h2>
+      <ul>
+        <li>To ingest the reels you send us and attach them to your account.</li>
+        <li>To generate summaries, product extraction, and personalized lists.</li>
+        <li>To troubleshoot failed processing and improve product quality.</li>
+      </ul>
+      <h2>What We Do Not Do</h2>
+      <ul>
+        <li>We do not access arbitrary personal Instagram messages outside the messages you intentionally send to the app’s connected account.</li>
+        <li>We do not sell your personal data.</li>
+      </ul>
+      <h2>Storage and Retention</h2>
+      <p>Saved reels, extracted metadata, and generated media assets may be stored as long as needed to operate your library, unless you ask for deletion.</p>
+      <h2>Your Choices</h2>
+      <p>You can request deletion of your account-linked data using the instructions on the Data Deletion page.</p>
+      <h2>Contact</h2>
+      <p>For privacy questions, contact the app operator using the email configured in the associated Meta app settings.</p>
+        """,
+    )
+
+
+def build_terms_html() -> str:
+    return build_legal_html(
+        "Reel Organizer Terms of Service",
+        """
+      <p class="kicker">Terms of Service</p>
+      <h1>Reel Organizer Terms of Service</h1>
+      <p>By using Reel Organizer, you agree to use the service only for reels and content you are permitted to share with the app.</p>
+      <h2>Service Description</h2>
+      <p>Reel Organizer receives reel links you intentionally send, processes them, and organizes the results into a personal library.</p>
+      <h2>Acceptable Use</h2>
+      <ul>
+        <li>Do not use the service for unlawful activity.</li>
+        <li>Do not attempt to break, overload, or interfere with the service.</li>
+        <li>Do not send content you do not have the right to share.</li>
+      </ul>
+      <h2>Availability</h2>
+      <p>The service may change, improve, or go offline temporarily while features are being developed or maintained.</p>
+      <h2>Data and Deletion</h2>
+      <p>You may request deletion of your account-linked data using the instructions on the Data Deletion page.</p>
+      <h2>Disclaimer</h2>
+      <p>The service is provided on an as-is basis during active product development and beta testing.</p>
+        """,
+    )
+
+
+def build_data_deletion_html() -> str:
+    return build_legal_html(
+        "Reel Organizer Data Deletion",
+        """
+      <p class="kicker">Data Deletion</p>
+      <h1>Data Deletion Instructions</h1>
+      <p>If you want your Reel Organizer data removed, email the app operator from the email address associated with your Google sign-in and request deletion of your account data.</p>
+      <h2>What Will Be Deleted</h2>
+      <ul>
+        <li>Your linked account identifiers</li>
+        <li>Your saved reel records</li>
+        <li>Extracted reel items, summaries, diagnostics, and personalization data</li>
+        <li>Associated cached local media generated for your library</li>
+      </ul>
+      <h2>What To Include</h2>
+      <ul>
+        <li>Your Google account email used in the app</li>
+        <li>Your Instagram username if you linked Instagram</li>
+        <li>Your Telegram username if you linked Telegram</li>
+      </ul>
+      <p>Deletion requests are handled manually during the current beta phase.</p>
+        """,
+    )
 
 
 def build_landing_html(csrf_token: str, user: dict | None) -> str:
@@ -2621,6 +2763,21 @@ def build_web_app_html(user_id: str) -> str:
 def root_app(request: Request):
     csrf_token = create_login_csrf(request)
     return HTMLResponse(build_landing_html(csrf_token, current_user(request)))
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+def privacy_page():
+    return HTMLResponse(build_privacy_html())
+
+
+@router.get("/terms", response_class=HTMLResponse)
+def terms_page():
+    return HTMLResponse(build_terms_html())
+
+
+@router.get("/data-deletion", response_class=HTMLResponse)
+def data_deletion_page():
+    return HTMLResponse(build_data_deletion_html())
 
 
 @router.get("/demo/ui-review", response_class=HTMLResponse)
