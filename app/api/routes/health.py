@@ -12,8 +12,8 @@ router = APIRouter(tags=["health"])
 def health_check():
     ensure_storage()
     return HealthResponse(
-        service="telegram-ingest-api",
-        endpoint="/telegram-ingest",
+        service="reel-organizer-api",
+        endpoint="/instagram/webhook",
         environment=settings.app_env,
         storage_dir=str(settings.storage_dir),
         media_dir=str(settings.media_dir),

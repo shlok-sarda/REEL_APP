@@ -18,7 +18,7 @@ from app.db.init_db import initialize_database
 
 app = FastAPI(
     title="Reel Organizer Backend",
-    description="Backend foundation for Telegram reel ingest, dashboard state, and reel management.",
+    description="Backend for linked-account reel ingest, library management, and personalized saved-reel organization.",
     version="0.1.0",
 )
 

@@ -1007,6 +1007,11 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         instagram_label = "Instagram connected" if instagram_connected else "Connect Instagram"
         instagram_href = f"https://www.instagram.com/{instagram_app_username}/" if instagram_connected and instagram_app_username else "#"
         telegram_href = f"https://t.me/{telegram_bot_username}" if telegram_bot_username else "#"
+        instagram_meta = (
+            f"<p class=\"tiny\">Instagram linked as @{user.get('instagram_username') or instagram_app_username}</p>"
+            if instagram_connected
+            else "<p class=\"tiny\">Link Instagram once so every reel DM goes into the right library automatically.</p>"
+        )
         auth_section = f"""
       <div class="user-card">
         <div class="user-row">
@@ -1014,6 +1019,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
             <p class="tiny-label">Signed in as</p>
             <h2>{user.get("display_name", "User")}</h2>
             <p class="tiny">{user.get("email", "")}</p>
+            {instagram_meta}
           </div>
           {f'<img class="avatar" src="{user.get("picture_url", "")}" alt="Profile" />' if user.get("picture_url") else ""}
         </div>
@@ -1037,7 +1043,11 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           </div>
           <p class="tiny" style="margin-top:0;">DM this one-time code to @{instagram_app_username or 'yourapp'} on Instagram. After that, reels you share in that DM will go to this Google account.</p>
           <div class="code-box" id="instagramCodeBox">Loading code…</div>
+          <div class="action-grid" style="margin-top:8px;">
+            <button id="copyInstagramCodeButton" type="button">Copy code</button>
+          </div>
           <p class="tiny" id="instagramExpiryText"></p>
+          <p class="tiny" id="instagramStatusText">Waiting for your Instagram DM…</p>
           <ol>
             <li>Open Instagram and DM <strong>@{instagram_app_username or 'yourapp'}</strong>.</li>
             <li>Send the exact code once.</li>
@@ -1385,6 +1395,15 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     const instagramModalClose = document.getElementById('instagramModalClose');
     const instagramCodeBox = document.getElementById('instagramCodeBox');
     const instagramExpiryText = document.getElementById('instagramExpiryText');
+    const instagramStatusText = document.getElementById('instagramStatusText');
+    const copyInstagramCodeButton = document.getElementById('copyInstagramCodeButton');
+    let instagramSessionPoll = null;
+
+    async function refreshSessionState() {
+      const response = await fetch('/auth/session');
+      const payload = await response.json();
+      return payload;
+    }
 
     async function openInstagramConnectModal() {
       if (!instagramModal) return;
@@ -1392,17 +1411,43 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       instagramModal.setAttribute('aria-hidden', 'false');
       instagramCodeBox.textContent = 'Loading code…';
       instagramExpiryText.textContent = '';
+      if (instagramStatusText) {
+        instagramStatusText.textContent = 'Waiting for your Instagram DM…';
+      }
       try {
         const payload = await postJson('/auth/instagram/connect', {});
         instagramCodeBox.textContent = payload.code;
         instagramExpiryText.textContent = `This code expires at ${new Date(payload.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+        if (instagramSessionPoll) clearInterval(instagramSessionPoll);
+        instagramSessionPoll = setInterval(async () => {
+          try {
+            const session = await refreshSessionState();
+            if (session.instagram_connected) {
+              if (instagramStatusText) {
+                const handle = session.user?.instagram_username ? `@${session.user.instagram_username}` : 'your Instagram account';
+                instagramStatusText.textContent = `Linked successfully as ${handle}. Refreshing…`;
+              }
+              clearInterval(instagramSessionPoll);
+              setTimeout(() => window.location.reload(), 900);
+            }
+          } catch (error) {
+            // Ignore transient polling failures while waiting for the DM.
+          }
+        }, 2500);
       } catch (error) {
         instagramCodeBox.textContent = error.message || 'Could not create Instagram code.';
+        if (instagramStatusText) {
+          instagramStatusText.textContent = 'Could not start Instagram linking. Please try again.';
+        }
       }
     }
 
     function closeInstagramConnectModal() {
       if (!instagramModal) return;
+      if (instagramSessionPoll) {
+        clearInterval(instagramSessionPoll);
+        instagramSessionPoll = null;
+      }
       instagramModal.classList.add('hidden');
       instagramModal.setAttribute('aria-hidden', 'true');
     }
@@ -1416,6 +1461,22 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     if (instagramModal) {
       instagramModal.addEventListener('click', (event) => {
         if (event.target === instagramModal) closeInstagramConnectModal();
+      });
+    }
+    if (copyInstagramCodeButton) {
+      copyInstagramCodeButton.addEventListener('click', async () => {
+        const code = (instagramCodeBox?.textContent || '').trim();
+        if (!code || code === 'Loading code…') return;
+        try {
+          await navigator.clipboard.writeText(code);
+          if (instagramStatusText) {
+            instagramStatusText.textContent = 'Code copied. Send it in Instagram DM, then come back here.';
+          }
+        } catch (error) {
+          if (instagramStatusText) {
+            instagramStatusText.textContent = 'Copy failed. You can still type the code manually in Instagram.';
+          }
+        }
       });
     }
   </script>
@@ -2531,7 +2592,7 @@ def build_web_app_html(user_id: str) -> str:
       screenSubtitle.textContent = '';
       hideFloatingPlayer();
       if (!collections.length) {{
-        content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No collections yet</h2><p style="margin:0;">Send reels to the bot and they’ll appear here.</p></div></div>`;
+        content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No collections yet</h2><p style="margin:0;">Send a reel link through your connected Instagram DM and it’ll appear here.</p></div></div>`;
         return;
       }}
       content.innerHTML = collections.map((collection, index) => {{
