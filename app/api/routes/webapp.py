@@ -1005,6 +1005,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         instagram_connected = bool(user.get("instagram_user_id"))
         instagram_label = "Instagram connected" if instagram_connected else "Connect Instagram"
         instagram_href = f"https://www.instagram.com/{instagram_app_username}/" if instagram_connected and instagram_app_username else "#"
+        instagram_dm_href = f"https://ig.me/m/{instagram_app_username}" if instagram_app_username else instagram_href
         instagram_meta = (
             f"<p class=\"tiny\">Instagram linked as @{user.get('instagram_username') or instagram_app_username}</p>"
             if instagram_connected
@@ -1039,15 +1040,17 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           <p class="tiny" style="margin-top:0;">DM this one-time code to @{instagram_app_username or 'yourapp'} on Instagram. After that, reels you share in that DM will go to this Google account.</p>
           <div class="code-box" id="instagramCodeBox">Loading code…</div>
           <div class="action-grid" style="margin-top:8px;">
+            <button id="openInstagramDmButton" type="button">Copy code + Open Instagram DM</button>
             <button id="copyInstagramCodeButton" type="button">Copy code</button>
           </div>
           <p class="tiny" id="instagramExpiryText"></p>
           <p class="tiny" id="instagramStatusText">Waiting for your Instagram DM…</p>
           <ol>
-            <li>Open Instagram and DM <strong>@{instagram_app_username or 'yourapp'}</strong>.</li>
-            <li>Send the exact code once.</li>
+            <li>Tap <strong>Copy code + Open Instagram DM</strong>.</li>
+            <li>Send the exact code once in the chat with <strong>@{instagram_app_username or 'yourapp'}</strong>.</li>
             <li>After linking, just share reel links in that same DM.</li>
           </ol>
+          <p class="tiny">If Instagram opens in a browser instead of the app, the code is still copied. Just paste it into the same DM once.</p>
         </div>
       </div>
         """
@@ -1389,12 +1392,25 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     const instagramExpiryText = document.getElementById('instagramExpiryText');
     const instagramStatusText = document.getElementById('instagramStatusText');
     const copyInstagramCodeButton = document.getElementById('copyInstagramCodeButton');
+    const openInstagramDmButton = document.getElementById('openInstagramDmButton');
+    const instagramDmHref = __INSTAGRAM_DM_HREF__;
     let instagramSessionPoll = null;
 
     async function refreshSessionState() {
       const response = await fetch('/auth/session');
       const payload = await response.json();
       return payload;
+    }
+
+    async function copyInstagramCode() {
+      const code = (instagramCodeBox?.textContent || '').trim();
+      if (!code || code === 'Loading code…') return false;
+      try {
+        await navigator.clipboard.writeText(code);
+        return true;
+      } catch (error) {
+        return false;
+      }
     }
 
     async function openInstagramConnectModal() {
@@ -1410,6 +1426,12 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         const payload = await postJson('/auth/instagram/connect', {});
         instagramCodeBox.textContent = payload.code;
         instagramExpiryText.textContent = `This code expires at ${new Date(payload.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+        const copied = await copyInstagramCode();
+        if (instagramStatusText) {
+          instagramStatusText.textContent = copied
+            ? 'Code copied. Tap “Copy code + Open Instagram DM”.'
+            : 'Code ready. Tap “Copy code + Open Instagram DM”.';
+        }
         if (instagramSessionPoll) clearInterval(instagramSessionPoll);
         instagramSessionPoll = setInterval(async () => {
           try {
@@ -1457,23 +1479,30 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }
     if (copyInstagramCodeButton) {
       copyInstagramCodeButton.addEventListener('click', async () => {
-        const code = (instagramCodeBox?.textContent || '').trim();
-        if (!code || code === 'Loading code…') return;
-        try {
-          await navigator.clipboard.writeText(code);
-          if (instagramStatusText) {
-            instagramStatusText.textContent = 'Code copied. Send it in Instagram DM, then come back here.';
-          }
-        } catch (error) {
-          if (instagramStatusText) {
-            instagramStatusText.textContent = 'Copy failed. You can still type the code manually in Instagram.';
-          }
+        const copied = await copyInstagramCode();
+        if (instagramStatusText) {
+          instagramStatusText.textContent = copied
+            ? 'Code copied. Send it in Instagram DM, then come back here.'
+            : 'Copy failed. You can still type the code manually in Instagram.';
+        }
+      });
+    }
+    if (openInstagramDmButton) {
+      openInstagramDmButton.addEventListener('click', async () => {
+        const copied = await copyInstagramCode();
+        if (instagramStatusText) {
+          instagramStatusText.textContent = copied
+            ? 'Instagram is opening. Paste the copied code in the DM once.'
+            : 'Instagram is opening. If copy failed, type the code manually once.';
+        }
+        if (instagramDmHref && instagramDmHref !== '#') {
+          window.open(instagramDmHref, '_blank', 'noopener,noreferrer');
         }
       });
     }
   </script>
 </body>
-</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id))
+</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id)).replace("__INSTAGRAM_DM_HREF__", repr(instagram_dm_href if user else "#"))
 
 
 def build_web_app_html(user_id: str) -> str:
