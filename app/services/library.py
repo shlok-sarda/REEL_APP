@@ -7,6 +7,7 @@ from app.db.database import get_connection
 from app.services.media import ensure_reel_media
 from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
 from app.services.personalization_v2.engine import PersonalizationV2Engine
+from app.services.personalization_v2.graph_engine import ASSIGNMENT_VERSION as GRAPH_ASSIGNMENT_VERSION
 from app.services.personalization_v2.hybrid_router import HYBRID_ASSIGNMENT_VERSION
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 from app.services.reel_ingest import load_reels, user_dashboard_paths
@@ -427,7 +428,8 @@ def _load_or_build_v2_snapshot(user_id: str) -> dict:
         for row in snapshot.get("memberships", [])
         if (row.get("assignment_version") or "").strip()
     }
-    snapshot_is_outdated = bool(snapshot.get("membership_count")) and HYBRID_ASSIGNMENT_VERSION not in assignment_versions
+    current_personalization_versions = {GRAPH_ASSIGNMENT_VERSION, HYBRID_ASSIGNMENT_VERSION}
+    snapshot_is_outdated = bool(snapshot.get("membership_count")) and assignment_versions.isdisjoint(current_personalization_versions)
     if (
         snapshot.get("feature_count", 0) != current_item_count
         or snapshot_max_reel_item_id != current_max_reel_item_id
