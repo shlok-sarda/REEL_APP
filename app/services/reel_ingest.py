@@ -179,7 +179,7 @@ def get_reel_by_url(url: str, user_id: str | None = None) -> dict | None:
     return _normalize_reel_row(dict(row)) if row else None
 
 
-def append_reel(url: str, user_id: str = "default") -> dict:
+def append_reel(url: str, user_id: str = "default", source: str = "telegram") -> dict:
     normalized_user = ensure_user(user_id)
     normalized_url = normalize(url)
     shortcode = extract_shortcode(normalized_url)
@@ -228,7 +228,7 @@ def append_reel(url: str, user_id: str = "default") -> dict:
                 reel["media_status"],
                 reel["local_video_path"],
                 reel["thumbnail_path"],
-                "telegram",
+                normalize(source) or "telegram",
                 timestamp,
                 timestamp,
             ),

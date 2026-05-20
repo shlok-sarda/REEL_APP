@@ -5,6 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.health import router as health_router
+from app.api.routes.instagram import router as instagram_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.library import router as library_router
 from app.api.routes.personalization_v2 import router as personalization_v2_router
@@ -45,6 +46,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(webapp_router)
 app.include_router(telegram_router)
+app.include_router(instagram_router)
 app.include_router(reels_router)
 app.include_router(jobs_router)
 app.include_router(library_router)

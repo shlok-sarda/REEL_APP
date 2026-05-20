@@ -853,6 +853,7 @@ def build_demo_library_review_html() -> str:
 def build_landing_html(csrf_token: str, user: dict | None) -> str:
     google_client_id = settings.google_client_id
     telegram_bot_username = settings.telegram_bot_username
+    instagram_app_username = settings.instagram_app_username
     google_script = (
         '<script src="https://accounts.google.com/gsi/client" async defer></script>'
         if google_client_id
@@ -860,9 +861,10 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     )
     auth_section = ""
     if user:
-        telegram_connected = bool(user.get("telegram_user_id"))
-        telegram_label = "Telegram connected" if telegram_connected else "Connect Telegram"
-        telegram_href = "/auth/telegram/connect" if not telegram_connected else f"https://t.me/{telegram_bot_username}" if telegram_bot_username else "#"
+        instagram_connected = bool(user.get("instagram_user_id"))
+        instagram_label = "Instagram connected" if instagram_connected else "Connect Instagram"
+        instagram_href = f"https://www.instagram.com/{instagram_app_username}/" if instagram_connected and instagram_app_username else "#"
+        telegram_href = f"https://t.me/{telegram_bot_username}" if telegram_bot_username else "#"
         auth_section = f"""
       <div class="user-card">
         <div class="user-row">
@@ -875,9 +877,31 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         </div>
         <div class="action-grid">
           <a class="primary-link" href="/app">Open My Library</a>
-          <a class="secondary-link" href="{telegram_href}">{telegram_label}</a>
+          {f'<a class="secondary-link" href="{instagram_href}" target="_blank" rel="noopener noreferrer">{instagram_label}</a>' if instagram_connected else '<button id="instagramConnectButton" type="button">Connect Instagram</button>'}
+        </div>
+        <div class="form" style="padding-top:10px;">
+          <a class="secondary-link" href="{telegram_href}" target="_blank" rel="noopener noreferrer">Telegram fallback</a>
         </div>
         <button id="logoutButton" type="button" class="ghost-button">Sign out</button>
+      </div>
+      <div id="instagramModal" class="connect-modal hidden" aria-hidden="true">
+        <div class="connect-card">
+          <div class="connect-head">
+            <div>
+              <p class="kicker">Connect Instagram</p>
+              <h3 style="margin:0;">Link your Instagram once</h3>
+            </div>
+            <button id="instagramModalClose" type="button" class="ghost-button small-ghost">Close</button>
+          </div>
+          <p class="tiny" style="margin-top:0;">DM this one-time code to @{instagram_app_username or 'yourapp'} on Instagram. After that, reels you share in that DM will go to this Google account.</p>
+          <div class="code-box" id="instagramCodeBox">Loading code…</div>
+          <p class="tiny" id="instagramExpiryText"></p>
+          <ol>
+            <li>Open Instagram and DM <strong>@{instagram_app_username or 'yourapp'}</strong>.</li>
+            <li>Send the exact code once.</li>
+            <li>After linking, just share reel links in that same DM.</li>
+          </ol>
+        </div>
       </div>
         """
     else:
@@ -886,7 +910,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       <div class="auth-card">
         <p class="kicker">Step 1</p>
         <h2>Continue with Google</h2>
-        <p>Use your Google account once. After that, your library stays attached to you instead of a shared Telegram ID.</p>
+        <p>Use your Google account once. After that, your library stays attached to you and you can link Instagram as the ingest channel.</p>
         <div id="googleButton" class="google-button-shell"></div>
         {disabled_note}
       </div>
@@ -1047,6 +1071,12 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       font-weight:800;
       cursor:pointer;
     }
+    .small-ghost {
+      width:auto;
+      min-height:38px;
+      padding:0 14px;
+      font-size:.84rem;
+    }
     input, button {
       width:100%;
       min-height:52px;
@@ -1073,14 +1103,58 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       font-size:.82rem;
       color:#7e8694;
     }
+    .connect-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 9, 12, 0.82);
+      backdrop-filter: blur(14px);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      z-index: 50;
+    }
+    .connect-modal.hidden {
+      display: none;
+    }
+    .connect-card {
+      width: min(520px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.06));
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .connect-head {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+      margin-bottom:12px;
+    }
+    .code-box {
+      width:100%;
+      min-height:60px;
+      border-radius:20px;
+      border:1px dashed rgba(238,215,166,0.35);
+      background: rgba(238,215,166,0.08);
+      display:grid;
+      place-items:center;
+      font-size:1.2rem;
+      font-weight:900;
+      letter-spacing:.08em;
+      color: var(--accent);
+      margin: 14px 0 8px;
+      padding: 10px 14px;
+      text-align:center;
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <section class="hero">
       <p class="kicker">Live Reel Library</p>
-      <h1>Sign in once. Connect Telegram once. Your reels stay yours.</h1>
-      <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets them send reels to the bot without ever typing a Telegram user ID.</p>
+      <h1>Sign in once. Connect Instagram once. Your reels stay yours.</h1>
+      <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets each person DM reels to your Instagram account without mixing libraries.</p>
       __AUTH_SECTION__
       <div class="form">
         <a class="secondary-link" href="/app/demo">View Demo Library</a>
@@ -1090,8 +1164,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       <p class="kicker">How It Works</p>
       <ol>
         <li>Continue with Google.</li>
-        <li>Tap Connect Telegram once and press Start in the bot.</li>
-        <li>From then on, send reels to the bot and they appear in your own library.</li>
+        <li>Tap Connect Instagram once and DM the one-time code to your app’s Instagram account.</li>
+        <li>From then on, send reel links in that DM and they appear in your own library.</li>
       </ol>
     </section>
   </main>
@@ -1161,6 +1235,45 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       logoutButton.addEventListener('click', async () => {
         await postJson('/auth/logout', {});
         window.location.href = '/';
+      });
+    }
+
+    const instagramConnectButton = document.getElementById('instagramConnectButton');
+    const instagramModal = document.getElementById('instagramModal');
+    const instagramModalClose = document.getElementById('instagramModalClose');
+    const instagramCodeBox = document.getElementById('instagramCodeBox');
+    const instagramExpiryText = document.getElementById('instagramExpiryText');
+
+    async function openInstagramConnectModal() {
+      if (!instagramModal) return;
+      instagramModal.classList.remove('hidden');
+      instagramModal.setAttribute('aria-hidden', 'false');
+      instagramCodeBox.textContent = 'Loading code…';
+      instagramExpiryText.textContent = '';
+      try {
+        const payload = await postJson('/auth/instagram/connect', {});
+        instagramCodeBox.textContent = payload.code;
+        instagramExpiryText.textContent = `This code expires at ${new Date(payload.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`;
+      } catch (error) {
+        instagramCodeBox.textContent = error.message || 'Could not create Instagram code.';
+      }
+    }
+
+    function closeInstagramConnectModal() {
+      if (!instagramModal) return;
+      instagramModal.classList.add('hidden');
+      instagramModal.setAttribute('aria-hidden', 'true');
+    }
+
+    if (instagramConnectButton) {
+      instagramConnectButton.addEventListener('click', openInstagramConnectModal);
+    }
+    if (instagramModalClose) {
+      instagramModalClose.addEventListener('click', closeInstagramConnectModal);
+    }
+    if (instagramModal) {
+      instagramModal.addEventListener('click', (event) => {
+        if (event.target === instagramModal) closeInstagramConnectModal();
       });
     }
   </script>
@@ -1416,7 +1529,7 @@ def build_web_app_html(user_id: str) -> str:
       <div class="topbar">
         <button id="backButton" class="back hidden">‹</button>
         <div class="title-wrap">
-          <p class="kicker">Telegram Reel Library</p>
+          <p class="kicker">Instagram Reel Library</p>
           <h1 id="screenTitle" class="title">Reel Organizer</h1>
           <p id="screenSubtitle" class="subtitle">A mobile-first reel library that stays clean and actionable.</p>
           <p id="syncNote" class="sync-note">Connecting to your live reel library…</p>

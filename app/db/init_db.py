@@ -30,6 +30,18 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS instagram_link_tokens (
+        code TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT NOT NULL DEFAULT '',
+        instagram_user_id TEXT NOT NULL DEFAULT '',
+        instagram_username TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS reels (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -244,6 +256,8 @@ USER_EXTRA_COLUMNS = {
     "email": "TEXT NOT NULL DEFAULT ''",
     "picture_url": "TEXT NOT NULL DEFAULT ''",
     "telegram_username": "TEXT NOT NULL DEFAULT ''",
+    "instagram_user_id": "TEXT NOT NULL DEFAULT ''",
+    "instagram_username": "TEXT NOT NULL DEFAULT ''",
     "last_login_at": "TEXT NOT NULL DEFAULT ''",
     "updated_at": "TEXT NOT NULL DEFAULT ''",
 }
@@ -261,6 +275,7 @@ def create_tables():
             if column_name not in existing_columns:
                 connection.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_instagram_user_id ON users(instagram_user_id) WHERE instagram_user_id IS NOT NULL AND instagram_user_id != ''")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_user_id ON reel_item_features(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_reel_item_id ON reel_item_features(reel_item_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_interest_nodes_user_node_type ON user_interest_nodes(user_id, node_type)")
@@ -275,9 +290,9 @@ def ensure_default_user():
             """
             INSERT OR IGNORE INTO users (
                 id, telegram_user_id, display_name, created_at, google_sub, email,
-                picture_url, telegram_username, last_login_at, updated_at
+                picture_url, telegram_username, instagram_user_id, instagram_username, last_login_at, updated_at
             )
-            VALUES (?, ?, ?, datetime('now'), NULL, '', '', '', '', datetime('now'))
+            VALUES (?, ?, ?, datetime('now'), NULL, '', '', '', '', '', '', datetime('now'))
             """,
             ("default", "default", "Default User"),
         )

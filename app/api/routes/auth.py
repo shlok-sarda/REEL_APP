@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.schemas import GoogleLoginRequest, SessionResponse, TelegramLinkCompleteRequest, UserProfile
+from app.schemas import GoogleLoginRequest, InstagramLinkStartResponse, SessionResponse, TelegramLinkCompleteRequest, UserProfile
 from app.services.auth import (
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
+    create_instagram_link_code,
     build_telegram_link_url,
     complete_telegram_link,
     create_login_csrf,
@@ -30,8 +31,11 @@ def _session_payload(request: Request) -> SessionResponse:
             picture_url=user["picture_url"],
             telegram_user_id=user["telegram_user_id"],
             telegram_username=user["telegram_username"],
+            instagram_user_id=user["instagram_user_id"],
+            instagram_username=user["instagram_username"],
         ),
         telegram_connected=bool(user["telegram_user_id"]),
+        instagram_connected=bool(user["instagram_user_id"]),
     )
 
 
@@ -67,6 +71,19 @@ def telegram_connect(request: Request):
     if not user:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url=build_telegram_link_url(user["id"]), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/instagram/connect", response_model=InstagramLinkStartResponse)
+def instagram_connect(request: Request):
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    payload = create_instagram_link_code(user["id"])
+    return InstagramLinkStartResponse(
+        code=payload["code"],
+        instagram_username=payload["instagram_username"],
+        expires_at=payload["expires_at"],
+    )
 
 
 @router.post("/telegram-link/complete")

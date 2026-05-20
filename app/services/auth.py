@@ -16,6 +16,7 @@ from app.db.database import get_connection
 SESSION_USER_KEY = "user_id"
 SESSION_CSRF_KEY = "login_csrf"
 TELEGRAM_LINK_TTL_MINUTES = 15
+INSTAGRAM_LINK_TTL_MINUTES = 15
 
 
 def normalize(value: str | None) -> str:
@@ -50,6 +51,8 @@ def row_to_user(row) -> dict[str, Any] | None:
         "google_sub": normalize(row["google_sub"]),
         "telegram_user_id": normalize(row["telegram_user_id"]),
         "telegram_username": normalize(row["telegram_username"]),
+        "instagram_user_id": normalize(row["instagram_user_id"]),
+        "instagram_username": normalize(row["instagram_username"]),
         "created_at": normalize(row["created_at"]),
         "last_login_at": normalize(row["last_login_at"]),
         "updated_at": normalize(row["updated_at"]),
@@ -61,7 +64,7 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
             FROM users
             WHERE id = ?
             LIMIT 1
@@ -76,7 +79,7 @@ def get_user_by_google_sub(google_sub: str) -> dict[str, Any] | None:
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
             FROM users
             WHERE google_sub = ?
             LIMIT 1
@@ -91,12 +94,27 @@ def get_user_by_telegram_user_id(telegram_user_id: str) -> dict[str, Any] | None
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
             FROM users
             WHERE telegram_user_id = ?
             LIMIT 1
             """,
             (normalize(telegram_user_id),),
+        ).fetchone()
+    return row_to_user(row)
+
+
+def get_user_by_instagram_user_id(instagram_user_id: str) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
+                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
+            FROM users
+            WHERE instagram_user_id = ?
+            LIMIT 1
+            """,
+            (normalize(instagram_user_id),),
         ).fetchone()
     return row_to_user(row)
 
@@ -152,9 +170,9 @@ def login_or_create_google_user(payload: dict[str, Any]) -> dict[str, Any]:
             """
             INSERT INTO users (
                 id, telegram_user_id, display_name, created_at, google_sub, email, picture_url,
-                telegram_username, last_login_at, updated_at
+                telegram_username, instagram_user_id, instagram_username, last_login_at, updated_at
             )
-            VALUES (?, NULL, ?, ?, ?, ?, ?, '', ?, ?)
+            VALUES (?, NULL, ?, ?, ?, ?, ?, '', '', '', ?, ?)
             """,
             (user_id, display_name, now, google_sub, email, picture_url, now, now),
         )
@@ -257,3 +275,79 @@ def build_telegram_link_url(user_id: str) -> str:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram bot username is not configured")
     code = create_telegram_link_code(user_id)
     return f"https://t.me/{settings.telegram_bot_username}?start={code}"
+
+
+def create_instagram_link_code(user_id: str) -> dict[str, str]:
+    if not settings.instagram_app_username:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Instagram app username is not configured")
+    code = f"REEL-{secrets.randbelow(900000) + 100000}"
+    now = utc_now()
+    expires_at = now + timedelta(minutes=INSTAGRAM_LINK_TTL_MINUTES)
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM instagram_link_tokens WHERE user_id = ? OR expires_at < ? OR used_at != ''",
+            (normalize(user_id), now.isoformat(timespec="seconds")),
+        )
+        connection.execute(
+            """
+            INSERT INTO instagram_link_tokens (
+                code, user_id, created_at, expires_at, used_at, instagram_user_id, instagram_username
+            )
+            VALUES (?, ?, ?, ?, '', '', '')
+            """,
+            (code, normalize(user_id), now.isoformat(timespec="seconds"), expires_at.isoformat(timespec="seconds")),
+        )
+    return {
+        "code": code,
+        "instagram_username": settings.instagram_app_username,
+        "expires_at": expires_at.isoformat(timespec="seconds"),
+    }
+
+
+def complete_instagram_link(code: str, instagram_user_id: str, instagram_username: str = "") -> dict[str, Any]:
+    normalized_code = normalize(code).upper()
+    normalized_ig_id = normalize(instagram_user_id)
+    normalized_ig_username = normalize(instagram_username).lstrip("@")
+    with get_connection() as connection:
+        token_row = connection.execute(
+            """
+            SELECT code, user_id, created_at, expires_at, used_at, instagram_user_id, instagram_username
+            FROM instagram_link_tokens
+            WHERE code = ?
+            LIMIT 1
+            """,
+            (normalized_code,),
+        ).fetchone()
+        if not token_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This Instagram link has expired or is invalid")
+        token = dict(token_row)
+        if normalize(token.get("used_at")):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This Instagram link has already been used")
+        if parse_iso(token["expires_at"]) < utc_now():
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="This Instagram link has expired")
+
+        existing_owner = connection.execute(
+            "SELECT id FROM users WHERE instagram_user_id = ? LIMIT 1",
+            (normalized_ig_id,),
+        ).fetchone()
+        if existing_owner and normalize(existing_owner["id"]) != normalize(token["user_id"]):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This Instagram account is already linked to another user")
+
+        now = iso_now()
+        connection.execute(
+            """
+            UPDATE users
+            SET instagram_user_id = ?, instagram_username = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (normalized_ig_id, normalized_ig_username, now, normalize(token["user_id"])),
+        )
+        connection.execute(
+            """
+            UPDATE instagram_link_tokens
+            SET used_at = ?, instagram_user_id = ?, instagram_username = ?
+            WHERE code = ?
+            """,
+            (now, normalized_ig_id, normalized_ig_username, normalized_code),
+        )
+    return get_user_by_id(token["user_id"]) or {}

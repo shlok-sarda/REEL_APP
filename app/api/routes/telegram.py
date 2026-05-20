@@ -34,7 +34,7 @@ def telegram_ingest(payload: TelegramIngestRequest, x_ingest_token: str = Header
             )
         resolved_user_id = user["id"]
 
-    reel = append_reel(payload.url, user_id=resolved_user_id or "default")
+    reel = append_reel(payload.url, user_id=resolved_user_id or "default", source=payload.source or "telegram")
     job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
     start_worker_if_needed()
     return TelegramIngestResponse(

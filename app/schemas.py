@@ -24,12 +24,15 @@ class UserProfile(BaseModel):
     picture_url: str = ""
     telegram_user_id: str = ""
     telegram_username: str = ""
+    instagram_user_id: str = ""
+    instagram_username: str = ""
 
 
 class SessionResponse(BaseModel):
     authenticated: bool = False
     user: Optional[UserProfile] = None
     telegram_connected: bool = False
+    instagram_connected: bool = False
 
 
 class TelegramLinkCompleteRequest(BaseModel):
@@ -37,6 +40,13 @@ class TelegramLinkCompleteRequest(BaseModel):
     telegram_user_id: str = Field(..., min_length=1)
     telegram_username: str = ""
     telegram_display_name: str = ""
+
+
+class InstagramLinkStartResponse(BaseModel):
+    ok: bool = True
+    code: str
+    instagram_username: str
+    expires_at: str
 
 
 class ReelRecord(BaseModel):
