@@ -516,6 +516,32 @@ def _build_v2_collections(user_id: str) -> list[dict]:
         for (parent_title, list_title), items in grouped.items()
         if items
     ]
+    merged_by_title: dict[str, dict] = {}
+    generic_parent_titles = {"", "Miscellaneous", "Generic", "Personalized", "General"}
+    for collection in collections:
+        title_key = (collection.get("list_title") or "").strip().lower()
+        if not title_key:
+            continue
+        existing = merged_by_title.get(title_key)
+        if not existing:
+            merged_by_title[title_key] = {
+                "parent_title": collection.get("parent_title", ""),
+                "list_title": collection.get("list_title", ""),
+                "items": list(collection.get("items", [])),
+            }
+            continue
+        existing_parent = (existing.get("parent_title") or "").strip()
+        incoming_parent = (collection.get("parent_title") or "").strip()
+        if existing_parent in generic_parent_titles and incoming_parent not in generic_parent_titles:
+            existing["parent_title"] = incoming_parent
+        seen = {(row.get("reel_id"), row.get("name"), row.get("url")) for row in existing["items"]}
+        for item in collection.get("items", []):
+            dedupe_key = (item.get("reel_id"), item.get("name"), item.get("url"))
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            existing["items"].append(item)
+    collections = list(merged_by_title.values())
     collections.sort(key=lambda row: (-len(row["items"]), row["parent_title"].lower(), row["list_title"].lower()))
     return collections
 
