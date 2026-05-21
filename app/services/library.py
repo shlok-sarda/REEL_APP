@@ -12,7 +12,6 @@ from app.services.personalization_v2.hybrid_router import HYBRID_ASSIGNMENT_VERS
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
-from render_personalized_mobile_app import build_collections as build_personalized_collections
 
 
 DEMO_USER_ID = "demo"
@@ -572,18 +571,8 @@ def load_personalized_collections(user_id: str) -> list[dict]:
         collections = _build_v2_collections(user_id)
         if collections:
             return collections
-    except Exception:
-        pass
-
-    paths = user_dashboard_paths(user_id)
-    view_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_personalized_view.json"))
-    graph_path = _existing_path(str(Path(paths["storage_dir"]) / "shlok_reels_topic_graph.json"))
-    if view_path and graph_path:
-        view = json.loads(view_path.read_text(encoding="utf-8"))
-        graph = json.loads(graph_path.read_text(encoding="utf-8"))
-        collections = _attach_reel_ids(build_personalized_collections(view, graph), user_id)
-        if collections:
-            return collections
+    except Exception as exc:
+        print(f"[library] personalization v2 fallback for {user_id}: {exc}")
     return []
 
 
