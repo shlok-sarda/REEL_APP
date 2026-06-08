@@ -1,14 +1,13 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from app.config import settings
 from app.services.auth import ensure_user_access, require_user
 from app.services.deep_search import (
-    MeiliClient,
+    evaluate_user_search,
     index_user_documents,
     load_deep_search_documents,
-    search_documents_locally,
+    search_user_documents,
 )
 
 
@@ -48,29 +47,21 @@ def deep_search(
             "results": [],
         }
 
-    if backend in {"auto", "meili"} and settings.meili_host:
-        client = MeiliClient()
-        try:
-            result = client.search(settings.meili_index, query, user_id=resolved_user_id, limit=limit)
-            return {
-                "user_id": resolved_user_id,
-                "query": query,
-                "backend": "meili",
-                "index": settings.meili_index,
-                "result": result,
-            }
-        except Exception as exc:
-            if backend == "meili":
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    try:
+        return search_user_documents(resolved_user_id, query, limit=limit, backend=backend)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    documents = load_deep_search_documents(resolved_user_id)
-    return {
-        "user_id": resolved_user_id,
-        "query": query,
-        "backend": "local",
-        "document_count": len(documents),
-        "results": search_documents_locally(documents, query, limit=limit),
-    }
+
+@router.get("/evaluate")
+def evaluate_deep_search(
+    request: Request,
+    user_id: str = Query(default=""),
+    q: Optional[list[str]] = Query(default=None),
+    limit: int = Query(default=5, ge=1, le=20),
+):
+    resolved_user_id = ensure_user_access(request, user_id)
+    return evaluate_user_search(resolved_user_id, queries=q or None, limit=limit)
 
 
 @router.post("/index")
@@ -81,10 +72,11 @@ def index_deep_search(
 ):
     require_user(request)
     resolved_user_id = ensure_user_access(request, user_id)
+    from app.config import settings
+
     if not settings.meili_host:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MEILI_HOST is not configured. Configure a staging Meilisearch host before indexing.",
         )
     return index_user_documents(resolved_user_id, index_name=index or settings.meili_index)
-

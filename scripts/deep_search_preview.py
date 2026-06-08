@@ -8,7 +8,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.services.deep_search import index_user_documents, load_deep_search_documents, search_documents_locally
+from app.services.deep_search import evaluate_user_search, index_user_documents, load_deep_search_documents, search_documents_locally
 
 
 def main() -> None:
@@ -17,11 +17,16 @@ def main() -> None:
     parser.add_argument("--query", default="")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--index-meili", action="store_true")
+    parser.add_argument("--evaluate", action="store_true")
     parser.add_argument("--index", default="")
     args = parser.parse_args()
 
     if args.index_meili:
         print(json.dumps(index_user_documents(args.user_id, index_name=args.index or None), indent=2, ensure_ascii=False))
+        return
+
+    if args.evaluate:
+        print(json.dumps(evaluate_user_search(args.user_id, limit=args.limit), indent=2, ensure_ascii=False))
         return
 
     documents = load_deep_search_documents(args.user_id)
@@ -39,4 +44,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

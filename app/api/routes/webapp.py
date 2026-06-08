@@ -1976,7 +1976,7 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     function deepSearchSourceLabel(result) {{
-      const fields = new Set(result.matched_fields || []);
+      const fields = new Set((result.matched_fields || []).map((field) => String(field).split(':')[0]));
       const hasAny = (names) => names.some((name) => fields.has(name));
       if (hasAny(['item_names', 'product_names', 'brands', 'models', 'entities'])) return 'Best match';
       if (hasAny(['visual_entities', 'visual_summary', 'visible_text'])) return 'Visual match';

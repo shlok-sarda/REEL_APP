@@ -23,6 +23,12 @@ Search:
 GET /deep-search?q=perfume&user_id=USER_ID&limit=20
 ```
 
+Evaluate a fixed query suite:
+
+```text
+GET /deep-search/evaluate?user_id=USER_ID&limit=5
+```
+
 Force local fallback:
 
 ```text
@@ -45,6 +51,10 @@ MEILI_INDEX=clipnest_deep_search_reels_staging
 
 If `MEILI_HOST` is empty, `/deep-search` uses local weighted search. This is for
 testing and does not provide Meilisearch typo/prefix behavior.
+
+If `MEILI_HOST` is configured but the staging index is empty, the first automatic
+search seeds the user's documents into Meilisearch and returns local fallback
+results immediately. Subsequent searches can use Meilisearch.
 
 ## Local Preview
 
@@ -82,4 +92,3 @@ when present:
 If these fields are not present in SQLite, object search still works for
 item/product/entity fields, but true visual-only queries need a dedicated search
 document export/table that persists extraction-time visual data.
-
