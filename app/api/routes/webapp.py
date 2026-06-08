@@ -1936,7 +1936,10 @@ def build_web_app_html(user_id: str) -> str:
           entities: hit.entities || [],
           locations: hit.locations || [],
           visual_entities: hit.visual_entities || [],
+          visible_text: hit.visible_text || [],
           visual_summary: hit.visual_summary || '',
+          visual_theme: hit.visual_theme || '',
+          match_reasons: hit.match_reasons || [],
           media: hit.media || {{}},
         }}));
       }}
@@ -1952,6 +1955,8 @@ def build_web_app_html(user_id: str) -> str:
     }}
 
     function deepSearchSummary(result) {{
+      const reasons = result.match_reasons || [];
+      if (reasons.length) return reasons.slice(0, 3).join(' · ');
       if (result.visual_summary) return result.visual_summary;
       const parts = [
         ...(result.product_names || []),
@@ -1959,6 +1964,7 @@ def build_web_app_html(user_id: str) -> str:
         ...(result.entities || []),
         ...(result.locations || []),
         ...(result.visual_entities || []),
+        ...(result.visible_text || []),
       ].filter(Boolean);
       return parts.slice(0, 8).join(' · ') || 'Matched from your saved reel metadata.';
     }}
@@ -2776,6 +2782,7 @@ def build_web_app_html(user_id: str) -> str:
           ...(result.product_names || []).slice(0, 2),
           ...(result.brands || []).slice(0, 2),
           ...(result.visual_entities || []).slice(0, 3),
+          ...(result.visible_text || []).slice(0, 2),
           ...(result.locations || []).slice(0, 2),
         ].filter(Boolean).slice(0, 5);
         return `
@@ -2789,7 +2796,6 @@ def build_web_app_html(user_id: str) -> str:
             <p class="search-reason">${{escapeHtml(deepSearchSummary(result))}}</p>
             <div class="card-meta-row">
               ${{chips.map((chip) => `<span class="mini-chip">${{escapeHtml(chip)}}</span>`).join('')}}
-              ${{media.media_status ? `<span class="mini-chip">${{escapeHtml(media.media_status)}}</span>` : ''}}
             </div>
           </article>
         `;

@@ -62,7 +62,9 @@ DISPLAYED_ATTRIBUTES = [
     "entities",
     "locations",
     "visual_entities",
+    "visible_text",
     "visual_summary",
+    "visual_theme",
     "match_context",
     "items",
     "products",
@@ -591,10 +593,40 @@ def _freshness_boost(received_at: str) -> int:
     return max(0, min(25, year - 2020))
 
 
+def _match_reasons(document: dict[str, Any], matches: list[str]) -> list[str]:
+    fields = {str(field).split(":")[0] for field in matches}
+    reasons = []
+
+    def add(label: str, values: Any, limit: int = 3) -> None:
+        items = _as_list(values)[:limit]
+        if items:
+            reasons.append(f"{label}: {', '.join(items)}")
+
+    if fields & {"visual_entities", "visual_summary", "visual_theme", "visible_text"}:
+        add("Seen", document.get("visual_entities"))
+        add("On-screen text", document.get("visible_text"))
+        if document.get("visual_summary"):
+            reasons.append(f"Visual summary: {_normalize(document.get('visual_summary'))}")
+    if fields & {"product_names", "brands", "models", "product_types"}:
+        add("Product", document.get("product_names"))
+        add("Brand", document.get("brands"))
+    if fields & {"entities", "item_names"}:
+        add("Item", document.get("item_names") or document.get("entities"))
+    if fields & {"locations"}:
+        add("Place", document.get("locations"))
+    if fields & {"caption", "transcript", "hashtags"}:
+        reasons.append("Matched caption, transcript, or hashtags")
+    if fields & {"primary_category", "secondary_category", "subdomains", "canonical_domains", "intents"}:
+        add("Category", [document.get("primary_category"), document.get("secondary_category")])
+
+    return _unique(reasons)[:4]
+
+
 def _result_payload(document: dict[str, Any], score: int, matches: list[str]) -> dict[str, Any]:
     return {
         "score": score,
         "matched_fields": matches,
+        "match_reasons": _match_reasons(document, matches),
         "id": document["id"],
         "reel_id": document["reel_id"],
         "shortcode": document.get("shortcode", ""),
@@ -606,16 +638,20 @@ def _result_payload(document: dict[str, Any], score: int, matches: list[str]) ->
         "entities": document.get("entities", []),
         "locations": document.get("locations", []),
         "visual_entities": document.get("visual_entities", []),
+        "visible_text": document.get("visible_text", []),
         "visual_summary": document.get("visual_summary", ""),
+        "visual_theme": document.get("visual_theme", ""),
         "match_context": document.get("match_context", ""),
         "media": document.get("media", {}),
     }
 
 
 def _meili_hit_payload(hit: dict[str, Any], rank: int) -> dict[str, Any]:
+    matches = list(hit.get("_formatted", {}).keys()) if isinstance(hit.get("_formatted"), dict) else []
     return {
         "score": max(1, 1000 - rank),
-        "matched_fields": list(hit.get("_formatted", {}).keys()) if isinstance(hit.get("_formatted"), dict) else [],
+        "matched_fields": matches,
+        "match_reasons": _match_reasons(hit, matches),
         "id": hit.get("id", ""),
         "reel_id": hit.get("reel_id", ""),
         "shortcode": hit.get("shortcode", ""),
@@ -627,7 +663,9 @@ def _meili_hit_payload(hit: dict[str, Any], rank: int) -> dict[str, Any]:
         "entities": hit.get("entities", []),
         "locations": hit.get("locations", []),
         "visual_entities": hit.get("visual_entities", []),
+        "visible_text": hit.get("visible_text", []),
         "visual_summary": hit.get("visual_summary", ""),
+        "visual_theme": hit.get("visual_theme", ""),
         "match_context": hit.get("match_context", ""),
         "media": hit.get("media", {}),
     }
@@ -709,7 +747,16 @@ class MeiliClient:
                 "q": query,
                 "limit": limit,
                 "filter": f'user_id = "{user_id}"',
-                "attributesToHighlight": ["item_names", "product_names", "brands", "entities", "visual_entities", "visual_summary"],
+                "attributesToHighlight": [
+                    "item_names",
+                    "product_names",
+                    "brands",
+                    "entities",
+                    "visual_entities",
+                    "visible_text",
+                    "visual_summary",
+                    "visual_theme",
+                ],
                 "highlightPreTag": "<mark>",
                 "highlightPostTag": "</mark>",
             },
