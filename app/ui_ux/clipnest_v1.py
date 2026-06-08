@@ -42,6 +42,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       min-height:100vh;
       padding:calc(18px + var(--safe-top)) 16px calc(96px + var(--safe-bottom));
     }
+    .screen.search-mode {
+      background:
+        linear-gradient(180deg, #07070b 0%, #101018 48%, #050508 100%);
+      color:#fff;
+      transition:background 160ms ease, color 160ms ease;
+    }
     .topbar {
       display:flex;
       align-items:center;
@@ -283,6 +289,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:rgba(255,255,255,.96);
       padding:9px 18px calc(9px + var(--safe-bottom));
     }
+    .bottom-nav.search-nav-mode {
+      border-top-color:rgba(255,255,255,.12);
+      background:rgba(6,6,10,.96);
+    }
     .nav-button {
       display:grid;
       gap:3px;
@@ -319,31 +329,33 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .magic-search {
       width:100%;
       display:grid;
-      gap:16px;
+      gap:18px;
       text-align:center;
     }
     .magic-orb {
-      width:54px;
-      height:54px;
+      width:60px;
+      height:60px;
       margin:0 auto;
-      border-radius:17px;
+      border-radius:20px;
       display:grid;
       place-items:center;
       color:#fff;
-      background:linear-gradient(135deg, #111, #6c4dff 62%, #b7a8ff);
-      box-shadow:0 16px 38px rgba(108,77,255,.25);
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,0)),
+        linear-gradient(135deg, #12121a, #6c4dff 68%, #e5dcff);
+      box-shadow:0 18px 46px rgba(108,77,255,.34), inset 0 1px 0 rgba(255,255,255,.28);
       font-weight:900;
     }
     .magic-title {
       margin:0;
-      font-size:1.62rem;
+      font-size:1.72rem;
       line-height:1.05;
       font-weight:900;
     }
     .magic-copy {
       margin:0 auto;
       max-width:19rem;
-      color:var(--muted);
+      color:rgba(255,255,255,.64);
       font-size:.9rem;
       line-height:1.45;
       font-weight:600;
@@ -355,10 +367,18 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .magic-bar::before {
       content:"";
       position:absolute;
-      inset:-2px;
-      border-radius:25px;
-      background:linear-gradient(90deg, rgba(108,77,255,.9), rgba(17,17,17,.28), rgba(108,77,255,.62));
-      opacity:.8;
+      inset:-1px;
+      border-radius:26px;
+      background:linear-gradient(90deg, rgba(108,77,255,.95), rgba(255,255,255,.4), rgba(128,104,255,.82));
+      opacity:.92;
+      z-index:0;
+    }
+    .magic-bar::after {
+      content:"";
+      position:absolute;
+      inset:2px;
+      border-radius:23px;
+      background:#0d0d14;
       z-index:0;
     }
     .magic-bar input {
@@ -366,15 +386,21 @@ def build_clipnest_v1_html(user_id: str) -> str:
       z-index:1;
       width:100%;
       height:58px;
-      border:2px solid #fff;
+      border:1px solid rgba(255,255,255,.12);
       border-radius:24px;
-      background:#fff;
-      color:var(--text);
+      background:rgba(12,12,20,.94);
+      color:#fff;
       outline:none;
       padding:0 54px 0 18px;
       font-size:1rem;
       font-weight:750;
-      box-shadow:0 18px 42px rgba(17,17,17,.08);
+      box-shadow:0 18px 42px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .magic-bar input::placeholder {
+      color:rgba(255,255,255,.48);
+    }
+    .magic-bar input:focus {
+      border-color:rgba(255,255,255,.22);
     }
     .magic-submit {
       position:absolute;
@@ -390,6 +416,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:var(--accent);
       color:#fff;
       font-weight:900;
+      box-shadow:0 10px 26px rgba(108,77,255,.36);
     }
     .result-list { display:grid; gap:10px; width:100%; margin-top:18px; }
     .result-card {
@@ -398,10 +425,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       gap:12px;
       align-items:center;
       padding:9px;
-      border:1px solid var(--border);
+      border:1px solid rgba(255,255,255,.1);
       border-radius:16px;
-      background:#fff;
+      background:rgba(255,255,255,.07);
+      color:#fff;
       text-align:left;
+      backdrop-filter:blur(14px);
     }
     .result-thumb {
       width:58px;
@@ -423,7 +452,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .result-card p {
       margin:4px 0 0;
-      color:var(--muted);
+      color:rgba(255,255,255,.58);
       font-size:.75rem;
       line-height:1.25;
       overflow:hidden;
@@ -820,12 +849,30 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="item-title-row"><p class="item-title">${escapeHtml(item.name)}</p><span class="more-dot">...</span></div>
       </button>`;
     }
-    function renderSearchTab() {
+    function searchTabResults() {
       const q = state.magicQuery.trim();
       const allItems = sortedCollections().flatMap((list) => list.items.map((item) => ({ ...item, list_title: list.list_title, parent_title: list.parent_title })));
-      const results = q
+      return q
         ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''}`, q)).slice(0, 24)
         : [];
+    }
+    function renderSearchResults() {
+      const q = state.magicQuery.trim();
+      const results = searchTabResults();
+      const resultList = document.getElementById('magicResults');
+      if (!resultList) return;
+      resultList.innerHTML = `
+        ${q && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
+        ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
+          <div class="result-thumb">${renderMedia(item)}</div>
+          <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.list_title || item.summary || '')}</p></div>
+        </button>`).join('')}
+      `;
+      resultList.querySelectorAll('[data-search-item]').forEach((button) => {
+        button.addEventListener('click', () => openMiniPlayer(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem)));
+      });
+    }
+    function renderSearchTab() {
       app.innerHTML = `
         <section class="search-stage">
           <div class="magic-search">
@@ -838,25 +885,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
               <input id="magicInput" value="${escapeHtml(state.magicQuery)}" placeholder="What are you trying to remember?" autocomplete="off" />
               <button id="magicSubmit" class="magic-submit" type="button" aria-label="Search">↗</button>
             </label>
-            <div class="result-list">
-              ${q && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
-              ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
-                <div class="result-thumb">${renderMedia(item)}</div>
-                <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.list_title || item.summary || '')}</p></div>
-              </button>`).join('')}
-            </div>
+            <div id="magicResults" class="result-list"></div>
           </div>
         </section>
       `;
       const input = document.getElementById('magicInput');
       input?.focus();
+      if (input) input.setSelectionRange(input.value.length, input.value.length);
       input?.addEventListener('input', (event) => {
         state.magicQuery = event.target.value;
-        render();
+        renderSearchResults();
       });
-      app.querySelectorAll('[data-search-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem)));
-      });
+      document.getElementById('magicSubmit')?.addEventListener('click', renderSearchResults);
+      renderSearchResults();
     }
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
@@ -1006,6 +1047,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       render();
     }
     function render() {
+      app.classList.toggle('search-mode', state.screen === 'search');
+      document.querySelector('.bottom-nav')?.classList.toggle('search-nav-mode', state.screen === 'search');
       searchNav.classList.toggle('active', state.screen === 'search');
       libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list');
       profileNav.classList.toggle('active', state.screen === 'profile');
