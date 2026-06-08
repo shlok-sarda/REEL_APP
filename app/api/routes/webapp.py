@@ -1588,6 +1588,9 @@ def build_web_app_html(user_id: str) -> str:
     .card-meta-row {{
       display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;
     }}
+    .search-reason {{
+      margin:10px 0 0; color:var(--muted); font-size:.82rem; line-height:1.45;
+    }}
     .mini-chip {{
       display:inline-flex; align-items:center; min-height:28px; padding:0 10px; border-radius:999px;
       border:1px solid var(--line); background:rgba(255,255,255,0.045); color:var(--muted); font-size:.72rem; font-weight:850;
@@ -1814,6 +1817,7 @@ def build_web_app_html(user_id: str) -> str:
       mode: 'personalized',
       query: '',
       library: {{ standard: [], personalized: [] }},
+      deepSearch: {{ query: '', loading: false, error: '', results: [] }},
       currentList: null,
       currentItem: 0,
       jobs: [],
@@ -1896,12 +1900,14 @@ def build_web_app_html(user_id: str) -> str:
 
     function matchesItem(item, q) {{
       if (!q) return true;
-      return `${{item.name}} ${{item.summary}} ${{item.product_name || ''}} ${{item.product_brand || ''}}`.toLowerCase().includes(q);
+      const normalizedQuery = q.toLowerCase();
+      return `${{item.name}} ${{item.summary}} ${{item.product_name || ''}} ${{item.product_brand || ''}}`.toLowerCase().includes(normalizedQuery);
     }}
 
     function matchesCollection(collection, q) {{
       if (!q) return true;
-      return `${{collection.parent_title || ''}} ${{collection.list_title}}`.toLowerCase().includes(q) || collection.items.some((item) => matchesItem(item, q));
+      const normalizedQuery = q.toLowerCase();
+      return `${{collection.parent_title || ''}} ${{collection.list_title}}`.toLowerCase().includes(normalizedQuery) || collection.items.some((item) => matchesItem(item, q));
     }}
 
     function visibleCollections() {{
@@ -1911,6 +1917,97 @@ def build_web_app_html(user_id: str) -> str:
     function visibleItemsForCurrentList() {{
       const collection = visibleCollections()[state.currentList];
       return collection ? collection.items.filter((item) => matchesItem(item, state.query)) : [];
+    }}
+
+    function normalizeDeepSearchPayload(payload) {{
+      if (Array.isArray(payload?.results)) return payload.results;
+      if (Array.isArray(payload?.result?.hits)) {{
+        return payload.result.hits.map((hit) => ({{
+          score: hit._rankingScore || 0,
+          matched_fields: [],
+          id: hit.id,
+          reel_id: hit.reel_id,
+          shortcode: hit.shortcode,
+          url: hit.url,
+          received_at: hit.received_at,
+          item_names: hit.item_names || [],
+          product_names: hit.product_names || [],
+          brands: hit.brands || [],
+          entities: hit.entities || [],
+          locations: hit.locations || [],
+          visual_entities: hit.visual_entities || [],
+          visual_summary: hit.visual_summary || '',
+          media: hit.media || {{}},
+        }}));
+      }}
+      return [];
+    }}
+
+    function primaryDeepSearchTitle(result) {{
+      return result.item_names?.[0]
+        || result.product_names?.[0]
+        || result.brands?.[0]
+        || result.shortcode
+        || 'Saved reel';
+    }}
+
+    function deepSearchSummary(result) {{
+      if (result.visual_summary) return result.visual_summary;
+      const parts = [
+        ...(result.product_names || []),
+        ...(result.brands || []),
+        ...(result.entities || []),
+        ...(result.locations || []),
+        ...(result.visual_entities || []),
+      ].filter(Boolean);
+      return parts.slice(0, 8).join(' · ') || 'Matched from your saved reel metadata.';
+    }}
+
+    function deepSearchPlayerItem(result) {{
+      const media = result.media || {{}};
+      return {{
+        reel_id: result.reel_id || result.id,
+        name: primaryDeepSearchTitle(result),
+        summary: deepSearchSummary(result),
+        local_video_url: media.local_video_url || '',
+        thumbnail_url: media.thumbnail_url || '',
+        media_status: media.media_status || '',
+      }};
+    }}
+
+    let deepSearchTimer = null;
+    let deepSearchRequestId = 0;
+    function scheduleDeepSearch(query) {{
+      if (deepSearchTimer) clearTimeout(deepSearchTimer);
+      const trimmed = query.trim();
+      if (!trimmed) {{
+        state.deepSearch = {{ query: '', loading: false, error: '', results: [] }};
+        render();
+        return;
+      }}
+      state.deepSearch = {{ ...state.deepSearch, query: trimmed, loading: true, error: '' }};
+      render();
+      deepSearchTimer = setTimeout(() => runDeepSearch(trimmed), 220);
+    }}
+
+    async function runDeepSearch(query) {{
+      const requestId = ++deepSearchRequestId;
+      try {{
+        const response = await fetch(`/deep-search?q=${{encodeURIComponent(query)}}&user_id=${{encodeURIComponent(USER_ID)}}&limit=30`);
+        if (!response.ok) throw new Error('Search failed');
+        const payload = await response.json();
+        if (requestId !== deepSearchRequestId) return;
+        state.deepSearch = {{
+          query,
+          loading: false,
+          error: '',
+          results: normalizeDeepSearchPayload(payload),
+        }};
+      }} catch (error) {{
+        if (requestId !== deepSearchRequestId) return;
+        state.deepSearch = {{ query, loading: false, error: 'Search is unavailable right now.', results: [] }};
+      }}
+      render();
     }}
 
     async function loadData() {{
@@ -2606,6 +2703,10 @@ def build_web_app_html(user_id: str) -> str:
         content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Refreshing your library…</h2><p style="margin:0;">Pulling your latest reels, items, and status.</p></div></div>`;
         return;
       }}
+      if (state.query) {{
+        renderDeepSearchHome();
+        return;
+      }}
       const collections = visibleCollections();
       header.classList.remove('compact');
       backButton.classList.add('hidden');
@@ -2634,6 +2735,66 @@ def build_web_app_html(user_id: str) -> str:
           state.currentList = Number(node.dataset.collection);
           state.currentItem = 0;
           render();
+        }});
+      }});
+    }}
+
+    function renderDeepSearchHome() {{
+      header.classList.remove('compact');
+      backButton.classList.add('hidden');
+      screenTitle.textContent = 'Search Results';
+      screenSubtitle.textContent = '';
+      hideFloatingPlayer();
+      const search = state.deepSearch;
+      if (search.loading && search.query === state.query) {{
+        content.innerHTML = `<div class="loading"><div><h2 style="margin:0 0 8px;">Searching saved reels…</h2><p style="margin:0;">Checking items, products, captions, transcripts, and visuals.</p></div></div>`;
+        return;
+      }}
+      if (search.error) {{
+        content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">Search unavailable</h2><p style="margin:0;">${{escapeHtml(search.error)}}</p></div></div>`;
+        return;
+      }}
+      const results = search.query === state.query ? search.results : [];
+      if (!results.length) {{
+        content.innerHTML = `<div class="empty"><div><h2 style="margin:0 0 8px;">No matching reels</h2><p style="margin:0;">Try a broader word like perfume, cafe, gym, bottle, app, or nike.</p></div></div>`;
+        return;
+      }}
+      content.innerHTML = results.map((result, index) => {{
+        const title = primaryDeepSearchTitle(result);
+        const media = result.media || {{}};
+        const chips = [
+          ...(result.product_names || []).slice(0, 2),
+          ...(result.brands || []).slice(0, 2),
+          ...(result.visual_entities || []).slice(0, 3),
+          ...(result.locations || []).slice(0, 2),
+        ].filter(Boolean).slice(0, 5);
+        const matched = (result.matched_fields || []).slice(0, 4).join(', ');
+        return `
+          <article class="card" data-search-result="${{index}}">
+            <div class="card-top">
+              <div>
+                <p class="card-kicker">${{matched ? `Matched: ${{escapeHtml(matched)}}` : 'Deep Search'}}</p>
+                <h2 class="card-title">${{escapeHtml(title)}}</h2>
+              </div>
+              <span class="count">${{Math.round(result.score || 0)}}</span>
+            </div>
+            <p class="search-reason">${{escapeHtml(deepSearchSummary(result))}}</p>
+            <div class="card-meta-row">
+              ${{chips.map((chip) => `<span class="mini-chip">${{escapeHtml(chip)}}</span>`).join('')}}
+              ${{media.media_status ? `<span class="mini-chip">${{escapeHtml(media.media_status)}}</span>` : ''}}
+            </div>
+          </article>
+        `;
+      }}).join('');
+      content.querySelectorAll('[data-search-result]').forEach((node) => {{
+        node.addEventListener('click', () => {{
+          const result = results[Number(node.dataset.searchResult)];
+          const item = deepSearchPlayerItem(result);
+          if (item.local_video_url || item.thumbnail_url) {{
+            openFloatingPlayer(item);
+            return;
+          }}
+          if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
         }});
       }});
     }}
@@ -2828,9 +2989,10 @@ def build_web_app_html(user_id: str) -> str:
       if (event.target === statusSheet) statusSheet.classList.remove('open');
     }});
     searchInput.addEventListener('input', (event) => {{
-      state.query = event.target.value.trim().toLowerCase();
+      state.query = event.target.value.trim();
       state.currentList = null;
       hideFloatingPlayer();
+      scheduleDeepSearch(state.query);
       render();
     }});
 
