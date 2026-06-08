@@ -2056,7 +2056,7 @@ def build_web_app_html(user_id: str) -> str:
       if (refreshTimer) clearTimeout(refreshTimer);
       if (state.currentList !== null || playerUi.active || playerUi.dragging) return;
       const dash = state.dashboard || {{}};
-      const hasActiveWork = (dash.pending_url_count || 0) > 0 || (dash.running_job_count || 0) > 0 || (dash.failed_url_count || 0) > 0;
+      const hasActiveWork = (dash.queued_job_count || 0) > 0 || (dash.running_job_count || 0) > 0;
       refreshTimer = setTimeout(loadData, hasActiveWork ? 5000 : 20000);
     }}
 
@@ -2064,7 +2064,7 @@ def build_web_app_html(user_id: str) -> str:
       const collections = modeCollections().filter((c) => matchesCollection(c, state.query));
       const items = collections.reduce((sum, c) => sum + c.items.filter((item) => matchesItem(item, state.query)).length, 0);
       const dash = state.dashboard || {{}};
-      const jobAttention = (dash.pending_url_count || 0) + (dash.running_job_count || 0) + (dash.failed_url_count || 0);
+      const jobAttention = (dash.queued_job_count || 0) + (dash.running_job_count || 0);
       statusBadge.textContent = String(jobAttention);
       statusBadge.classList.toggle('visible', jobAttention > 0);
       syncNote.textContent = dash.last_updated
@@ -2952,12 +2952,16 @@ def build_web_app_html(user_id: str) -> str:
     function renderStatus() {{
       const dash = state.dashboard || {{}};
       statusSummary.innerHTML = `
-        <span class="chip">${{dash.pending_url_count || 0}} Pending</span>
+        <span class="chip">${{dash.queued_job_count || 0}} Queued</span>
         <span class="chip">${{dash.running_job_count || 0}} Running</span>
-        <span class="chip">${{dash.failed_url_count || 0}} Failed</span>
+        <span class="chip">${{dash.failed_url_count || 0}} Failed reels</span>
       `;
       if (!state.jobs.length) {{
-        statusList.innerHTML = `<div class="empty" style="min-height:20vh;"><div><h3 style="margin:0 0 8px;">No recent jobs</h3><p style="margin:0;">Your processing activity will appear here.</p></div></div>`;
+        const pendingReels = dash.pending_url_count || 0;
+        const message = pendingReels > 0
+          ? `${{pendingReels}} saved reels are still marked pending, but there are no active processing jobs right now. Use refresh/retry on a reel if one looks stuck.`
+          : 'Your processing activity will appear here.';
+        statusList.innerHTML = `<div class="empty" style="min-height:20vh;"><div><h3 style="margin:0 0 8px;">No recent jobs</h3><p style="margin:0;">${{escapeHtml(message)}}</p></div></div>`;
         return;
       }}
       const describeJob = (job) => {{
