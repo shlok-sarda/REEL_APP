@@ -1975,6 +1975,16 @@ def build_web_app_html(user_id: str) -> str:
       }};
     }}
 
+    function deepSearchSourceLabel(result) {{
+      const fields = new Set(result.matched_fields || []);
+      const hasAny = (names) => names.some((name) => fields.has(name));
+      if (hasAny(['item_names', 'product_names', 'brands', 'models', 'entities'])) return 'Best match';
+      if (hasAny(['visual_entities', 'visual_summary', 'visible_text'])) return 'Visual match';
+      if (hasAny(['caption', 'transcript', 'hashtags'])) return 'Text match';
+      if (hasAny(['locations', 'subdomains', 'canonical_domains', 'primary_category', 'secondary_category'])) return 'Category match';
+      return 'Deep Search';
+    }}
+
     let deepSearchTimer = null;
     let deepSearchRequestId = 0;
     function scheduleDeepSearch(query) {{
@@ -2768,15 +2778,13 @@ def build_web_app_html(user_id: str) -> str:
           ...(result.visual_entities || []).slice(0, 3),
           ...(result.locations || []).slice(0, 2),
         ].filter(Boolean).slice(0, 5);
-        const matched = (result.matched_fields || []).slice(0, 4).join(', ');
         return `
           <article class="card" data-search-result="${{index}}">
             <div class="card-top">
               <div>
-                <p class="card-kicker">${{matched ? `Matched: ${{escapeHtml(matched)}}` : 'Deep Search'}}</p>
+                <p class="card-kicker">${{escapeHtml(deepSearchSourceLabel(result))}}</p>
                 <h2 class="card-title">${{escapeHtml(title)}}</h2>
               </div>
-              <span class="count">${{Math.round(result.score || 0)}}</span>
             </div>
             <p class="search-reason">${{escapeHtml(deepSearchSummary(result))}}</p>
             <div class="card-meta-row">
