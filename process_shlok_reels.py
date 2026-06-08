@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from render_mobile_knowledge_app import render_html as render_standard_html, load_collections
 from render_personalized_mobile_app import build_collections as build_personalized_collections
 from app.services.media import ensure_reel_media
+from app.services.deep_search import rebuild_deep_search_documents
 from app.services.reel_ingest import (
     get_reel_by_url,
     load_reels,
@@ -305,6 +306,7 @@ def sync_live_library_state(user_id: str, source_csv: Path) -> None:
     try:
         sync_reel_items_from_accumulated(user_id, source_csv)
         sync_reel_diagnostics_from_accumulated(user_id, source_csv)
+        rebuild_deep_search_documents(user_id)
     except Exception:
         # Keep the long-form rebuild resilient even if the fast DB sync fails.
         pass
@@ -594,6 +596,10 @@ def main(user_id="default", only_urls=None):
         build_personalized_page(paths, app_title=f"{title_root} Personalized")
         sync_reel_items_from_accumulated(user_id, paths.accumulated)
         sync_reel_diagnostics_from_accumulated(user_id, paths.accumulated)
+        try:
+            rebuild_deep_search_documents(user_id)
+        except Exception:
+            pass
 
     refreshed_rows = load_raw_rows(paths)
     write_status(

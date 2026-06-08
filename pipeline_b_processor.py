@@ -23,6 +23,31 @@ client = get_openai_client()
 BASE_DIR = Path(__file__).resolve().parent
 MODEL = "gpt-4.1"
 
+DEEP_SEARCH_DIAGNOSTIC_COLUMNS = [
+    ("Creator", "creator"),
+    ("Caption", "caption"),
+    ("Hashtags", "hashtags"),
+    ("Transcript", "transcript"),
+    ("Inferred Main Theme", "inferred_main_theme"),
+    ("Relevant Visible Text", "relevant_visible_text"),
+    ("Relevant Visual Entities", "relevant_visual_entities"),
+    ("Visual Supporting Points", "visual_supporting_points"),
+    ("Overall Visual Summary", "overall_visual_summary"),
+]
+
+
+def encode_csv_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def deep_search_diagnostic_values(output: dict) -> list[str]:
+    diagnostics = output.get("diagnostics", {})
+    return [encode_csv_value(diagnostics.get(key, "")) for _, key in DEEP_SEARCH_DIAGNOSTIC_COLUMNS]
+
 
 def fill_template(template: str, result: dict, visual_data: dict) -> str:
     replacements = {
@@ -225,6 +250,15 @@ def run_pipeline(url: str) -> dict:
         "visual_status": visual_status,
         "visual_error": visual_error,
         "processing_version": "pipeline_b_v2_observable",
+        "creator": result.get("creator", ""),
+        "caption": result.get("caption", ""),
+        "hashtags": result.get("hashtags", ""),
+        "transcript": result.get("transcript", ""),
+        "inferred_main_theme": visual_data.get("inferred_main_theme", ""),
+        "relevant_visible_text": visual_data.get("relevant_visible_text", []),
+        "relevant_visual_entities": visual_data.get("relevant_visual_entities", []),
+        "visual_supporting_points": visual_data.get("visual_supporting_points", []),
+        "overall_visual_summary": visual_data.get("overall_visual_summary", ""),
     }
 
     return final_output
@@ -287,6 +321,7 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                             output.get("diagnostics", {}).get("visual_error", ""),
                             output.get("diagnostics", {}).get("processing_version", ""),
                         ]
+                        + deep_search_diagnostic_values(output)
                     )
 
                 if not output.get("items"):
@@ -325,6 +360,7 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                             output.get("diagnostics", {}).get("visual_error", ""),
                             output.get("diagnostics", {}).get("processing_version", ""),
                         ]
+                        + deep_search_diagnostic_values(output)
                     )
             except Exception as exc:
                 print(f"❌ Failed: {url} | {exc}")
@@ -361,6 +397,7 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                         summarize_error(exc),
                         "pipeline_b_v2_observable",
                     ]
+                    + [""] * len(DEEP_SEARCH_DIAGNOSTIC_COLUMNS)
                 )
 
     with output_csv.open("w", newline="", encoding="utf-8") as outfile:
@@ -397,6 +434,7 @@ def process_csv(input_csv: str | Path, output_csv: str | Path) -> None:
                 "Visual Status",
                 "Visual Error",
                 "Processing Version",
+                *[column for column, _ in DEEP_SEARCH_DIAGNOSTIC_COLUMNS],
             ]
         )
         writer.writerows(results)

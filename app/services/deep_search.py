@@ -5,6 +5,7 @@ import re
 import urllib.error
 import urllib.request
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from app.config import settings
@@ -238,7 +239,37 @@ def _build_search_terms(document: dict[str, Any]) -> list[str]:
     return _unique(terms + expanded)
 
 
-def load_deep_search_documents(user_id: str) -> list[dict[str, Any]]:
+def _load_persisted_deep_search_documents(user_id: str) -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        try:
+            rows = connection.execute(
+                """
+                SELECT document_json
+                FROM deep_search_documents
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        except Exception:
+            return []
+    documents = []
+    for row in rows:
+        document = _loads_json(row["document_json"], {})
+        if isinstance(document, dict) and document.get("reel_id"):
+            documents.append(document)
+    return documents
+
+
+def load_deep_search_documents(user_id: str, prefer_persisted: bool = True) -> list[dict[str, Any]]:
+    if prefer_persisted:
+        persisted = _load_persisted_deep_search_documents(user_id)
+        if persisted:
+            return persisted
+    return build_deep_search_documents_from_db(user_id)
+
+
+def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -444,6 +475,48 @@ def load_deep_search_documents(user_id: str) -> list[dict[str, Any]]:
     return documents
 
 
+def rebuild_deep_search_documents(user_id: str) -> dict[str, Any]:
+    documents = build_deep_search_documents_from_db(user_id)
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_connection() as connection:
+        connection.execute("DELETE FROM deep_search_documents WHERE user_id = ?", (user_id,))
+        for document in documents:
+            connection.execute(
+                """
+                INSERT INTO deep_search_documents (
+                    reel_id, user_id, shortcode, url, document_json, search_terms_json,
+                    source_version, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(reel_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    shortcode = excluded.shortcode,
+                    url = excluded.url,
+                    document_json = excluded.document_json,
+                    search_terms_json = excluded.search_terms_json,
+                    source_version = excluded.source_version,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    document["reel_id"],
+                    document["user_id"],
+                    document.get("shortcode", ""),
+                    document.get("url", ""),
+                    json.dumps(document, ensure_ascii=False),
+                    json.dumps(document.get("search_terms", []), ensure_ascii=False),
+                    "deep_search_v1",
+                    now,
+                    now,
+                ),
+            )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "document_count": len(documents),
+        "updated_at": now,
+    }
+
+
 def _tokens(query: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", query.casefold())
 
@@ -644,6 +717,7 @@ class MeiliClient:
 
 
 def index_user_documents(user_id: str, index_name: str | None = None) -> dict[str, Any]:
+    rebuild = rebuild_deep_search_documents(user_id)
     documents = load_deep_search_documents(user_id)
     client = MeiliClient()
     target_index = index_name or settings.meili_index
@@ -654,6 +728,7 @@ def index_user_documents(user_id: str, index_name: str | None = None) -> dict[st
         "user_id": user_id,
         "index": target_index,
         "document_count": len(documents),
+        "rebuild": rebuild,
         "task": task,
     }
 

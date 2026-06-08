@@ -7,6 +7,7 @@ from app.services.deep_search import (
     evaluate_user_search,
     index_user_documents,
     load_deep_search_documents,
+    rebuild_deep_search_documents,
     search_user_documents,
 )
 
@@ -80,3 +81,13 @@ def index_deep_search(
             detail="MEILI_HOST is not configured. Configure a staging Meilisearch host before indexing.",
         )
     return index_user_documents(resolved_user_id, index_name=index or settings.meili_index)
+
+
+@router.post("/rebuild-documents")
+def rebuild_deep_search(
+    request: Request,
+    user_id: str = Query(default=""),
+):
+    require_user(request)
+    resolved_user_id = ensure_user_access(request, user_id)
+    return rebuild_deep_search_documents(resolved_user_id)

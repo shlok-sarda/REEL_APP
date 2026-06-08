@@ -10,6 +10,7 @@ from app.config import settings
 from app.db.database import get_connection
 from app.db.init_db import initialize_database
 from app.services.jobs import claim_next_job, complete_job, create_worker_lock, fail_job, release_worker_lock
+from app.services.deep_search import index_user_documents, rebuild_deep_search_documents
 from app.services.reel_ingest import get_reel_by_id
 
 
@@ -86,6 +87,14 @@ def process_job(job: dict):
         if reel.get("status") != "completed":
             fail_job(job["id"], failure_summary_for_reel(job["reel_id"]))
             return
+
+    try:
+        if settings.meili_host:
+            index_user_documents(job["user_id"])
+        else:
+            rebuild_deep_search_documents(job["user_id"])
+    except Exception:
+        pass
 
     complete_job(job["id"])
 

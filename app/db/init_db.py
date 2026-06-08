@@ -249,6 +249,20 @@ SCHEMA_STATEMENTS = [
         created_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS deep_search_documents (
+        reel_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        shortcode TEXT NOT NULL DEFAULT '',
+        url TEXT NOT NULL DEFAULT '',
+        document_json TEXT NOT NULL,
+        search_terms_json TEXT NOT NULL DEFAULT '[]',
+        source_version TEXT NOT NULL DEFAULT 'deep_search_v1',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
 ]
 
 USER_EXTRA_COLUMNS = {
@@ -282,6 +296,8 @@ def create_tables():
         connection.execute("CREATE INDEX IF NOT EXISTS idx_interest_edges_user_id ON user_interest_edges(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_cluster_memberships_user_id ON cluster_memberships(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_cluster_titles_cluster_node_id ON cluster_titles(cluster_node_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_deep_search_documents_user_id ON deep_search_documents(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_deep_search_documents_shortcode ON deep_search_documents(shortcode)")
 
 
 def ensure_default_user():

@@ -637,6 +637,29 @@ def sync_reel_diagnostics_from_accumulated(user_id: str, accumulated_csv_path: s
         if (row.get("url") or "").strip()
     }
     seen_urls = set()
+
+    def metadata_from_row(row: dict) -> dict:
+        metadata = {
+            "secondary_category": normalize(row.get("Secondary Category")),
+            "item_name": normalize(row.get("Item Name")),
+        }
+        csv_to_metadata = {
+            "Creator": "creator",
+            "Caption": "caption",
+            "Hashtags": "hashtags",
+            "Transcript": "transcript",
+            "Inferred Main Theme": "inferred_main_theme",
+            "Relevant Visible Text": "relevant_visible_text",
+            "Relevant Visual Entities": "relevant_visual_entities",
+            "Visual Supporting Points": "visual_supporting_points",
+            "Overall Visual Summary": "overall_visual_summary",
+        }
+        for csv_key, metadata_key in csv_to_metadata.items():
+            value = normalize(row.get(csv_key))
+            if value:
+                metadata[metadata_key] = value
+        return metadata
+
     with accumulated_path.open(newline="", encoding="utf-8") as infile:
         reader = csv.DictReader(infile)
         for row in reader:
@@ -661,10 +684,7 @@ def sync_reel_diagnostics_from_accumulated(user_id: str, accumulated_csv_path: s
                     "visual_status": row.get("Visual Status", ""),
                     "visual_error": row.get("Visual Error", ""),
                     "processing_version": row.get("Processing Version", ""),
-                    "metadata": {
-                        "secondary_category": normalize(row.get("Secondary Category")),
-                        "item_name": normalize(row.get("Item Name")),
-                    },
+                    "metadata": metadata_from_row(row),
                 },
             )
 
