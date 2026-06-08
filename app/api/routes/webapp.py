@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.config import settings
 from app.services.auth import create_login_csrf, current_user
 from app.services.library import is_demo_user
+from app.ui_ux.clipnest_v1 import build_clipnest_v1_html
 
 
 router = APIRouter(tags=["webapp"])
@@ -1506,6 +1507,10 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 
 
 def build_web_app_html(user_id: str) -> str:
+    return build_clipnest_v1_html(user_id)
+
+
+def build_legacy_web_app_html(user_id: str) -> str:
     safe_user_id = user_id.replace("\\", "\\\\").replace("'", "\\'")
     return f"""<!DOCTYPE html>
 <html lang="en">
