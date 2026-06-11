@@ -655,9 +655,6 @@ def load_personalized_collections(user_id: str) -> list[dict]:
     except Exception as exc:
         print(f"[library] strong personalization fallback for {user_id}: {exc}")
 
-    if _strong_personalization_source_item_count(user_id) > 0:
-        return []
-
     try:
         collections = _build_v2_collections(user_id)
         if collections:
@@ -669,7 +666,7 @@ def load_personalized_collections(user_id: str) -> list[dict]:
 
 def load_library_payload(user_id: str) -> dict:
     personalized = load_personalized_collections(user_id)
-    standard = [] if personalized or _strong_personalization_source_item_count(user_id) > 0 else load_standard_collections(user_id)
+    standard = [] if personalized else load_standard_collections(user_id)
     return {
         "user_id": user_id,
         "standard": standard,
