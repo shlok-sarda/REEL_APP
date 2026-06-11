@@ -404,7 +404,53 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-size:1.08rem;
     }
     .nav-button.active { color:var(--accent); }
-    .profile-panel { display:grid; gap:12px; margin-top:22px; }
+    .sync-banner {
+      display:grid;
+      grid-template-columns:10px minmax(0,1fr) auto;
+      gap:11px;
+      align-items:center;
+      border:1px solid var(--border);
+      border-radius:18px;
+      background:#fff;
+      padding:12px;
+      margin:14px 0;
+      box-shadow:0 10px 30px rgba(17,17,17,.05);
+    }
+    .sync-banner.idle { background:var(--soft); box-shadow:none; }
+    .sync-dot {
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background:#26b36d;
+      box-shadow:0 0 0 5px rgba(38,179,109,.12);
+    }
+    .sync-banner.active .sync-dot {
+      background:var(--accent);
+      box-shadow:0 0 0 5px rgba(108,77,255,.14);
+      animation:pulse 1.2s ease-in-out infinite;
+    }
+    .sync-banner.issue .sync-dot {
+      background:#d9822b;
+      box-shadow:0 0 0 5px rgba(217,130,43,.14);
+    }
+    @keyframes pulse {
+      0%, 100% { transform:scale(1); opacity:1; }
+      50% { transform:scale(.72); opacity:.62; }
+    }
+    .sync-title { margin:0; font-size:.86rem; font-weight:850; line-height:1.2; }
+    .sync-copy { margin:3px 0 0; color:var(--muted); font-size:.74rem; line-height:1.3; font-weight:650; }
+    .sync-count {
+      min-height:28px;
+      border-radius:14px;
+      padding:7px 10px;
+      background:#111;
+      color:#fff;
+      font-size:.7rem;
+      font-weight:850;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .profile-panel { display:grid; gap:12px; margin-top:16px; }
     .profile-row {
       min-height:54px;
       border-bottom:1px solid var(--border);
@@ -415,6 +461,110 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-weight:750;
     }
     .profile-row span { color:var(--muted); font-size:.82rem; font-weight:700; }
+    .profile-grid {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0,1fr));
+      gap:10px;
+      margin-top:14px;
+    }
+    .metric-card {
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      padding:13px;
+      box-shadow:0 10px 26px rgba(17,17,17,.04);
+    }
+    .metric-card span {
+      display:block;
+      color:var(--muted);
+      font-size:.69rem;
+      font-weight:800;
+      text-transform:uppercase;
+    }
+    .metric-card b {
+      display:block;
+      margin-top:7px;
+      font-size:1.3rem;
+      line-height:1;
+      font-weight:900;
+    }
+    .profile-section-title {
+      margin:22px 0 10px;
+      font-size:.82rem;
+      line-height:1;
+      font-weight:900;
+      color:#444;
+      text-transform:uppercase;
+    }
+    .job-list { display:grid; gap:10px; }
+    .job-card {
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      padding:12px;
+      box-shadow:0 10px 26px rgba(17,17,17,.04);
+    }
+    .job-head {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:8px;
+      align-items:start;
+    }
+    .job-title {
+      margin:0;
+      font-size:.86rem;
+      line-height:1.25;
+      font-weight:850;
+      overflow:hidden;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+    }
+    .status-pill {
+      min-height:24px;
+      border-radius:12px;
+      padding:5px 8px;
+      background:var(--soft);
+      color:#444;
+      font-size:.66rem;
+      line-height:1;
+      font-weight:900;
+      text-transform:uppercase;
+    }
+    .status-pill.running, .status-pill.queued, .status-pill.pending { background:#f0edff; color:#4f34d9; }
+    .status-pill.completed { background:#eaf8f0; color:#147d49; }
+    .status-pill.failed { background:#fff2e5; color:#a85512; }
+    .job-meta {
+      margin:8px 0 0;
+      color:var(--muted);
+      font-size:.72rem;
+      line-height:1.35;
+      font-weight:650;
+      word-break:break-word;
+    }
+    .json-box {
+      margin-top:10px;
+      border-radius:12px;
+      background:#111;
+      color:#e8e8e8;
+      overflow:hidden;
+    }
+    .json-box summary {
+      cursor:pointer;
+      padding:10px 12px;
+      font-size:.72rem;
+      font-weight:850;
+    }
+    .json-box pre {
+      margin:0;
+      max-height:260px;
+      overflow:auto;
+      padding:0 12px 12px;
+      font-size:.68rem;
+      line-height:1.45;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
     .search-stage {
       min-height:calc(100vh - 130px - var(--safe-bottom));
       display:grid;
@@ -759,6 +909,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       miniIndex: 0,
       playing: false,
       progressTimer: null,
+      pollTimer: null,
       progress: 0,
       loading: true
     };
@@ -803,6 +954,82 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function hasText(text, query) {
       return String(text || '').toLowerCase().includes(String(query || '').toLowerCase());
+    }
+    function activeJobCount() {
+      return Number(state.dashboard.queued_job_count || 0) + Number(state.dashboard.running_job_count || 0);
+    }
+    function recentJobs() {
+      return Array.isArray(state.jobs) ? state.jobs.slice(0, 8) : [];
+    }
+    function pipelineStatus() {
+      const active = activeJobCount();
+      const failed = Number(state.dashboard.failed_url_count || 0);
+      const pending = Number(state.dashboard.pending_url_count || 0);
+      if (active > 0) {
+        return {
+          tone: 'active',
+          title: active === 1 ? 'Processing 1 reel' : `Processing ${active} reels`,
+          copy: 'New saves are being downloaded, extracted, and added to search.',
+          count: `${active} active`
+        };
+      }
+      if (pending > 0) {
+        return {
+          tone: 'active',
+          title: pending === 1 ? '1 reel waiting' : `${pending} reels waiting`,
+          copy: 'The queue has pending reels that should move into processing shortly.',
+          count: `${pending} queued`
+        };
+      }
+      if (failed > 0) {
+        return {
+          tone: 'issue',
+          title: failed === 1 ? '1 reel needs attention' : `${failed} reels need attention`,
+          copy: 'Open Profile diagnostics to inspect recent job errors.',
+          count: `${failed} failed`
+        };
+      }
+      const processed = Number(state.dashboard.processed_url_count || 0);
+      return {
+        tone: 'idle',
+        title: 'Pipeline ready',
+        copy: processed ? `${processed} reels processed. New saves will appear here while they run.` : 'No active reel jobs right now.',
+        count: 'Ready'
+      };
+    }
+    function renderSyncBanner(compact = false) {
+      const status = pipelineStatus();
+      if (compact && status.tone === 'idle') return '';
+      return `<section class="sync-banner ${status.tone}">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <div><p class="sync-title">${escapeHtml(status.title)}</p><p class="sync-copy">${escapeHtml(status.copy)}</p></div>
+        <span class="sync-count">${escapeHtml(status.count)}</span>
+      </section>`;
+    }
+    function formatTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    }
+    function jobTitle(job) {
+      return job.reel_shortcode || job.reel_id || job.reel_url || `Job ${job.id}`;
+    }
+    function renderJobCard(job) {
+      const status = String(job.status || 'unknown').toLowerCase();
+      const url = job.reel_url || '';
+      const time = job.finished_at || job.started_at || job.created_at || '';
+      const json = JSON.stringify(job, null, 2);
+      return `<article class="job-card">
+        <div class="job-head">
+          <h3 class="job-title">${escapeHtml(jobTitle(job))}</h3>
+          <span class="status-pill ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        </div>
+        <p class="job-meta">${escapeHtml(job.job_type || 'processing')} · ${escapeHtml(formatTime(time) || 'time unavailable')} · attempts ${escapeHtml(job.attempts ?? 0)}</p>
+        ${url ? `<p class="job-meta">${escapeHtml(url)}</p>` : ''}
+        ${job.error_message ? `<p class="job-meta">${escapeHtml(job.error_message)}</p>` : ''}
+        <details class="json-box"><summary>View job JSON</summary><pre>${escapeHtml(json)}</pre></details>
+      </article>`;
     }
     function listMatches(list) {
       const q = state.query.trim();
@@ -868,6 +1095,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </div>
         <h1 class="page-title">All Folders</h1>
         <p class="microcopy">Sorted by most saved items first. Smaller noisy folders naturally settle lower.</p>
+        ${renderSyncBanner(true)}
         ${renderSearch('Search folders...', state.query, 'librarySearch')}
         ${renderChips(chips(), state.chip, 'library')}
         ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
@@ -1026,20 +1254,36 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
-      const activeJobs = (state.dashboard.queued_job_count || 0) + (state.dashboard.running_job_count || 0);
+      const jobs = recentJobs();
+      const dashboardJson = JSON.stringify(state.dashboard || {}, null, 2);
       app.innerHTML = `
-        <div class="topbar"><div class="brand-mark">MyLife</div></div>
+        <div class="topbar">
+          <div class="brand-mark">MyLife</div>
+          <div class="icon-row"><button class="icon-button" type="button" aria-label="Refresh diagnostics" id="profileRefresh">↻</button></div>
+        </div>
         <h1 class="page-title">Profile</h1>
+        ${renderSyncBanner(false)}
+        <section class="profile-grid">
+          <div class="metric-card"><span>Library Items</span><b>${totalItems}</b></div>
+          <div class="metric-card"><span>Processed Reels</span><b>${state.dashboard.processed_url_count || 0}</b></div>
+          <div class="metric-card"><span>Queued</span><b>${state.dashboard.queued_job_count || 0}</b></div>
+          <div class="metric-card"><span>Running</span><b>${state.dashboard.running_job_count || 0}</b></div>
+        </section>
         <section class="profile-panel">
           <div class="profile-row">Connected Instagram <span>${USER_ID}</span></div>
-          <div class="profile-row">Sync Status <span>${activeJobs ? `${activeJobs} active` : 'Ready'}</span></div>
-          <div class="profile-row">Settings <span>›</span></div>
-          <div class="profile-row">Appearance <span>Light</span></div>
-          <div class="profile-row">Export Data <span>›</span></div>
+          <div class="profile-row">Sync Status <span>${escapeHtml(pipelineStatus().title)}</span></div>
+          <div class="profile-row">Pending Reels <span>${state.dashboard.pending_url_count || 0}</span></div>
+          <div class="profile-row">Failed Reels <span>${state.dashboard.failed_url_count || 0}</span></div>
           <div class="profile-row">Storage Usage <span>${totalItems} items</span></div>
-          <div class="profile-row">Logout <span>›</span></div>
         </section>
+        <h2 class="profile-section-title">Recent Reel Jobs</h2>
+        <section class="job-list">
+          ${jobs.length ? jobs.map(renderJobCard).join('') : '<div class="empty">No recent jobs found yet</div>'}
+        </section>
+        <h2 class="profile-section-title">Dashboard JSON</h2>
+        <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
       `;
+      document.getElementById('profileRefresh')?.addEventListener('click', loadData);
     }
     function bindChips() {
       app.querySelectorAll('[data-chip-kind]').forEach((button) => {
@@ -1199,7 +1443,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
         state.data = [];
       }
       state.loading = false;
+      scheduleStatusPolling();
       render();
+    }
+    function scheduleStatusPolling() {
+      clearTimeout(state.pollTimer);
+      const interval = activeJobCount() > 0 || Number(state.dashboard.pending_url_count || 0) > 0 ? 8000 : 25000;
+      state.pollTimer = setTimeout(loadData, interval);
     }
     function normalizeCollections(collections) {
       return (collections || []).map((list, index) => ({
