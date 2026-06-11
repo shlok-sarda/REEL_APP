@@ -118,6 +118,11 @@ SYNONYMS = {
     "travel": ["trip", "destination", "place", "stay"],
     "hotel": ["stay", "villa", "airbnb", "resort"],
     "recipe": ["cook", "cooking", "food", "dish"],
+    "saree": ["sari", "traditional outfit", "ethnic wear", "indian traditional wear", "farewell outfit", "dupatta"],
+    "sari": ["saree", "traditional outfit", "ethnic wear", "indian traditional wear", "farewell outfit", "dupatta"],
+    "traditional": ["ethnic wear", "saree", "sari", "kurta", "lehenga", "dupatta"],
+    "ethnic": ["traditional outfit", "saree", "sari", "kurta", "lehenga", "dupatta"],
+    "farewell": ["saree", "sari", "traditional outfit", "ethnic wear"],
 }
 
 EVALUATION_QUERIES = [
@@ -133,6 +138,8 @@ EVALUATION_QUERIES = [
     "laptop",
     "travel",
     "food",
+    "saree",
+    "traditional outfit",
 ]
 
 

@@ -20,16 +20,19 @@ SECONDARY_MODEL = "gpt-4.1"
 # --------------------------------------------------
 # STEP 1: Extract keyframes
 # --------------------------------------------------
-def extract_scene_keyframes(video_path, output_dir=BASE_DIR / "keyframes", threshold=0.45, min_frame_gap=10, max_frames=8):
+def extract_scene_keyframes(video_path, output_dir=BASE_DIR / "keyframes", threshold=0.45, min_frame_gap=10, max_frames=10):
     os.makedirs(output_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     prev_hist = None
     frame_idx = 0
     saved_count = 0
     last_saved_frame = -min_frame_gap
     saved_paths = []
+    saved_frame_indices = []
 
     while True:
         ret, frame = cap.read()
@@ -53,6 +56,7 @@ def extract_scene_keyframes(video_path, output_dir=BASE_DIR / "keyframes", thres
             save_path = os.path.join(output_dir, f"frame_{saved_count}.jpg")
             cv2.imwrite(save_path, frame)
             saved_paths.append(save_path)
+            saved_frame_indices.append(frame_idx)
 
             saved_count += 1
             last_saved_frame = frame_idx
@@ -64,7 +68,31 @@ def extract_scene_keyframes(video_path, output_dir=BASE_DIR / "keyframes", thres
         frame_idx += 1
 
     cap.release()
-    return saved_paths
+
+    if total_frames > 0 and len(saved_paths) < max_frames:
+        uniform_points = [
+            int(total_frames * fraction)
+            for fraction in (0.18, 0.35, 0.52, 0.68, 0.84)
+        ]
+        cap = cv2.VideoCapture(video_path)
+        existing_frames = set(saved_frame_indices)
+        for frame_number in uniform_points:
+            if len(saved_paths) >= max_frames:
+                break
+            if any(abs(frame_number - existing) < fps for existing in existing_frames):
+                continue
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+            save_path = os.path.join(output_dir, f"frame_{saved_count}.jpg")
+            cv2.imwrite(save_path, frame)
+            saved_paths.append(save_path)
+            existing_frames.add(frame_number)
+            saved_count += 1
+        cap.release()
+
+    return saved_paths[:max_frames]
 
 
 # --------------------------------------------------
@@ -88,6 +116,9 @@ Hashtags: {format_hashtags(result.get('hashtags', ''))}
 
 OBJECTIVE:
 Understand what the reel is about and extract meaningful visuals.
+Pay special attention to visible clothing, fashion, accessories, products, places, food, and culturally specific objects.
+For clothing, name the exact garment when visible or strongly likely, such as saree/sari, lehenga, kurta, dupatta, blazer, dress, sneakers, watch, or jewelry.
+Do not rely only on the caption. If an object or garment is visible but never mentioned in text, still include it in relevant_visual_entities.
 
 OUTPUT STRICT JSON:
 {{
