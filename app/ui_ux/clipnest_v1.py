@@ -906,6 +906,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
       itemQuery: '',
       itemChip: 'All',
       magicQuery: '',
+      deepSearch: { query: '', loading: false, error: '', results: [] },
+      deepSearchTimer: null,
+      deepSearchRequestId: 0,
       miniItem: null,
       miniIndex: 0,
       playing: false,
@@ -1234,16 +1237,99 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''}`, q)).slice(0, 24)
         : [];
     }
+    function normalizeDeepSearchPayload(payload) {
+      if (Array.isArray(payload?.results)) return payload.results;
+      if (Array.isArray(payload?.result?.hits)) return payload.result.hits;
+      return [];
+    }
+    function deepSearchTitle(result) {
+      return result.item_names?.[0]
+        || result.product_names?.[0]
+        || result.brands?.[0]
+        || result.shortcode
+        || 'Saved reel';
+    }
+    function deepSearchSummary(result) {
+      const reasons = result.match_reasons || [];
+      if (reasons.length) return reasons.slice(0, 2).join(' • ');
+      const parts = [
+        ...(result.product_names || []),
+        ...(result.brands || []),
+        ...(result.entities || []),
+        ...(result.visual_entities || []),
+        ...(result.visible_text || []),
+        ...(result.visual_supporting_points || []),
+        result.visual_summary || '',
+      ].filter(Boolean);
+      return parts.slice(0, 5).join(' • ') || 'Matched from your saved reel memory.';
+    }
+    function deepSearchItem(result) {
+      const media = result.media || {};
+      return {
+        reel_id: result.reel_id || result.id,
+        url: result.url || '',
+        name: deepSearchTitle(result),
+        summary: deepSearchSummary(result),
+        product_name: (result.product_names || [])[0] || '',
+        product_brand: (result.brands || [])[0] || '',
+        local_video_url: media.local_video_url || '',
+        thumbnail_url: media.thumbnail_url || '',
+        reel_thumbnail: media.thumbnail_url || '',
+        list_title: 'Deep Search',
+      };
+    }
+    function scheduleDeepSearch() {
+      clearTimeout(state.deepSearchTimer);
+      const q = state.magicQuery.trim();
+      if (!q) {
+        state.deepSearch = { query: '', loading: false, error: '', results: [] };
+        renderSearchResults();
+        return;
+      }
+      state.deepSearch = { ...state.deepSearch, query: q, loading: true, error: '' };
+      renderSearchResults();
+      state.deepSearchTimer = setTimeout(() => runDeepSearch(q), 180);
+    }
+    async function runDeepSearch(query) {
+      const requestId = ++state.deepSearchRequestId;
+      try {
+        const response = await fetch(`/deep-search?q=${encodeURIComponent(query)}&user_id=${encodeURIComponent(USER_ID)}&limit=30`);
+        if (!response.ok) throw new Error('Search failed');
+        const payload = await response.json();
+        if (requestId !== state.deepSearchRequestId) return;
+        state.deepSearch = {
+          query,
+          loading: false,
+          error: '',
+          results: normalizeDeepSearchPayload(payload),
+        };
+      } catch (error) {
+        if (requestId !== state.deepSearchRequestId) return;
+        state.deepSearch = { query, loading: false, error: 'Deep Search is unavailable right now.', results: [] };
+      }
+      renderSearchResults();
+    }
     function renderSearchResults() {
       const q = state.magicQuery.trim();
-      const results = searchTabResults();
+      const deepReady = state.deepSearch.query === q;
+      const deepResults = deepReady ? state.deepSearch.results.map(deepSearchItem) : [];
+      const localResults = searchTabResults();
+      const seen = new Set();
+      const results = [...deepResults, ...localResults].filter((item) => {
+        const key = item.reel_id || item.url || item.name;
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 30);
       const resultList = document.getElementById('magicResults');
       if (!resultList) return;
       resultList.innerHTML = `
-        ${q && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
+        ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="empty">Searching captions, products, visuals, and transcripts...</div>' : ''}
+        ${q && state.deepSearch.error ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
+        ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
           <div class="result-thumb">${renderMedia(item)}</div>
-          <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.list_title || item.summary || '')}</p></div>
+          <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.summary || item.list_title || '')}</p></div>
         </button>`).join('')}
       `;
       resultList.querySelectorAll('[data-search-item]').forEach((button) => {
@@ -1272,10 +1358,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (input) input.setSelectionRange(input.value.length, input.value.length);
       input?.addEventListener('input', (event) => {
         state.magicQuery = event.target.value;
-        renderSearchResults();
+        scheduleDeepSearch();
       });
-      document.getElementById('magicSubmit')?.addEventListener('click', renderSearchResults);
-      renderSearchResults();
+      document.getElementById('magicSubmit')?.addEventListener('click', scheduleDeepSearch);
+      if (state.magicQuery.trim() && state.deepSearch.query !== state.magicQuery.trim()) scheduleDeepSearch();
+      else renderSearchResults();
     }
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
