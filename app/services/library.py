@@ -12,6 +12,7 @@ from app.services.personalization_v2.hybrid_router import HYBRID_ASSIGNMENT_VERS
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 from app.services.reel_ingest import load_reels, user_dashboard_paths
 from render_mobile_knowledge_app import build_collections_from_rows, load_collections
+from strong_personalization import build_strong_personalization, load_items as load_strong_personalization_items
 
 
 DEMO_USER_ID = "demo"
@@ -347,6 +348,70 @@ def _db_v2_item_rows(user_id: str) -> dict[int, dict]:
     return {int(row["reel_item_id"]): dict(row) for row in rows}
 
 
+def _build_strong_personalization_collections(user_id: str) -> list[dict]:
+    strong_items = load_strong_personalization_items(settings.database_path, user_id)
+    if not strong_items:
+        return []
+
+    payload = build_strong_personalization(strong_items)
+    item_rows_by_id = _db_v2_item_rows(user_id)
+    collections = []
+    for collection in payload.get("published_lists", []):
+        definition = collection.get("definition") or {}
+        parent_title = (
+            definition.get("canonical_domain")
+            or definition.get("family")
+            or "Personalized"
+        ).strip()
+        list_title = (collection.get("title") or "Personalized").strip()
+        items = []
+        seen = set()
+        for strong_item in collection.get("items", []):
+            reel_item_id = int(strong_item.get("reel_item_id") or 0)
+            item_row = item_rows_by_id.get(reel_item_id, {})
+            product_name = item_row.get("product_name") or strong_item.get("product_name", "")
+            item = {
+                "reel_id": item_row.get("reel_id") or strong_item.get("reel_id", ""),
+                "name": item_row.get("item_name") or strong_item.get("item_name") or "Untitled Reel",
+                "summary": item_row.get("summary") or strong_item.get("summary") or "",
+                "url": item_row.get("url") or strong_item.get("url", ""),
+                "contains_product": "Yes" if product_name else "No",
+                "product_name": product_name,
+                "product_brand": item_row.get("product_brand") or strong_item.get("brand", ""),
+                "product_model": item_row.get("product_model", ""),
+                "product_type": item_row.get("product_type", ""),
+                "product_search_query": item_row.get("product_search_query", ""),
+                "best_buy_link": item_row.get("best_buy_link", ""),
+                "amazon_link": item_row.get("amazon_link", ""),
+                "flipkart_link": item_row.get("flipkart_link", ""),
+                "nykaa_link": item_row.get("nykaa_link", ""),
+                "media_status": item_row.get("media_status", ""),
+                "local_video_path": item_row.get("local_video_path", ""),
+                "local_video_url": _media_url_from_path(item_row.get("local_video_path", "")),
+                "thumbnail_path": item_row.get("thumbnail_path", ""),
+                "thumbnail_url": _media_url_from_path(item_row.get("thumbnail_path", "")),
+                "membership_score": strong_item.get("membership_score", ""),
+                "membership_reasons": strong_item.get("membership_reasons", {}),
+                "personalization_model": payload.get("model", ""),
+            }
+            dedupe_key = (item["reel_id"], item["name"], item["url"])
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            items.append(item)
+        if items:
+            collections.append(
+                {
+                    "parent_title": parent_title,
+                    "list_title": list_title,
+                    "items": items,
+                    "personalization_model": payload.get("model", ""),
+                    "metrics": collection.get("metrics", {}),
+                }
+            )
+    return collections
+
+
 def _current_reel_item_count(user_id: str) -> int:
     with get_connection() as connection:
         row = connection.execute(
@@ -566,6 +631,13 @@ def load_standard_collections(user_id: str) -> list[dict]:
 def load_personalized_collections(user_id: str) -> list[dict]:
     if is_demo_user(user_id):
         return _demo_personalized_collections()
+
+    try:
+        collections = _build_strong_personalization_collections(user_id)
+        if collections:
+            return collections
+    except Exception as exc:
+        print(f"[library] strong personalization fallback for {user_id}: {exc}")
 
     try:
         collections = _build_v2_collections(user_id)
