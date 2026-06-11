@@ -529,6 +529,126 @@ def rebuild_deep_search_documents(user_id: str) -> dict[str, Any]:
     }
 
 
+def _find_user_reel(user_id: str, reel_id: str = "", url: str = "", shortcode: str = "") -> dict[str, Any] | None:
+    conditions = ["user_id = ?"]
+    params = [user_id]
+    if reel_id:
+        conditions.append("id = ?")
+        params.append(reel_id)
+    elif url:
+        conditions.append("url = ?")
+        params.append(url)
+    elif shortcode:
+        conditions.append("shortcode = ?")
+        params.append(shortcode)
+    else:
+        return None
+
+    with get_connection() as connection:
+        row = connection.execute(
+            f"""
+            SELECT id, user_id, url, shortcode, received_at, status, media_status
+            FROM reels
+            WHERE {' AND '.join(conditions)}
+            ORDER BY received_at DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def backfill_reel_visual_search(
+    user_id: str,
+    reel_id: str = "",
+    url: str = "",
+    shortcode: str = "",
+) -> dict[str, Any]:
+    reel = _find_user_reel(user_id, reel_id=reel_id.strip(), url=url.strip(), shortcode=shortcode.strip())
+    if not reel:
+        return {
+            "ok": False,
+            "error": "reel_not_found",
+            "user_id": user_id,
+            "reel_id": reel_id,
+            "url": url,
+            "shortcode": shortcode,
+        }
+
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT metadata_json FROM reel_processing_diagnostics WHERE reel_id = ? LIMIT 1",
+            (reel["id"],),
+        ).fetchone()
+    metadata = _loads_json(row["metadata_json"], {}) if row else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    from data_preprocessing import download_reel
+    from finale import extract_visual_data
+    from app.services.reel_ingest import upsert_reel_processing_diagnostics
+
+    video_path, video_status = download_reel(reel["url"])
+    if not video_path:
+        return {
+            "ok": False,
+            "error": "video_download_failed",
+            "user_id": user_id,
+            "reel_id": reel["id"],
+            "url": reel["url"],
+            "video_download_status": video_status,
+        }
+
+    visual_data = extract_visual_data(
+        {
+            "caption": _metadata_text(metadata, "caption"),
+            "transcript": _metadata_text(metadata, "transcript"),
+            "hashtags": _metadata_list(metadata, "hashtags"),
+            "creator": _metadata_text(metadata, "creator"),
+        },
+        video_path,
+    )
+    merged_metadata = {
+        **metadata,
+        "inferred_main_theme": visual_data.get("inferred_main_theme", ""),
+        "relevant_visible_text": visual_data.get("relevant_visible_text", []),
+        "relevant_visual_entities": visual_data.get("relevant_visual_entities", []),
+        "visual_supporting_points": visual_data.get("visual_supporting_points", []),
+        "overall_visual_summary": visual_data.get("overall_visual_summary", ""),
+        "visual_backfill": visual_data,
+    }
+    upsert_reel_processing_diagnostics(
+        reel["url"],
+        {
+            "visual_present": bool(visual_data),
+            "visual_status": "success" if visual_data else "empty",
+            "video_download_status": video_status,
+            "processing_version": "deep_search_visual_backfill_v1",
+            "metadata": merged_metadata,
+        },
+    )
+    rebuild = rebuild_deep_search_documents(user_id)
+    indexed_task = None
+    index_error = ""
+    if settings.meili_host:
+        try:
+            indexed_task = index_user_documents(user_id)
+        except Exception as exc:
+            index_error = str(exc)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "reel_id": reel["id"],
+        "url": reel["url"],
+        "shortcode": reel.get("shortcode", ""),
+        "video_download_status": video_status,
+        "visual_data": visual_data,
+        "rebuild": rebuild,
+        "indexed_task": indexed_task,
+        "index_error": index_error,
+    }
+
+
 def _tokens(query: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", query.casefold())
 

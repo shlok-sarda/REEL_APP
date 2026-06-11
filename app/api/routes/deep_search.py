@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from app.services.auth import ensure_user_access, require_user
 from app.services.deep_search import (
+    backfill_reel_visual_search,
     evaluate_user_search,
     explain_user_search,
     index_user_documents,
@@ -103,3 +104,24 @@ def rebuild_deep_search(
     require_user(request)
     resolved_user_id = ensure_user_access(request, user_id)
     return rebuild_deep_search_documents(resolved_user_id)
+
+
+@router.post("/backfill-visual")
+def backfill_visual_deep_search(
+    request: Request,
+    user_id: str = Query(default=""),
+    reel_id: str = Query(default=""),
+    url: str = Query(default=""),
+    shortcode: str = Query(default=""),
+):
+    require_user(request)
+    resolved_user_id = ensure_user_access(request, user_id)
+    payload = backfill_reel_visual_search(
+        resolved_user_id,
+        reel_id=reel_id,
+        url=url,
+        shortcode=shortcode,
+    )
+    if not payload.get("ok"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=payload)
+    return payload
