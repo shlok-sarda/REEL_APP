@@ -157,16 +157,17 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .chip.active { background:var(--accent); color:#fff; }
     .list-grid {
       display:grid;
-      grid-template-columns:repeat(2, minmax(0,1fr));
+      grid-template-columns:1fr;
       gap:12px;
     }
     .list-card {
       position:relative;
-      min-height:172px;
+      min-height:210px;
       overflow:hidden;
       border-radius:10px;
       background:linear-gradient(180deg, #efeff1, #bbb);
       isolation:isolate;
+      text-align:left;
     }
     .list-card img, .list-card video {
       position:absolute;
@@ -183,17 +184,46 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:linear-gradient(180deg, rgba(0,0,0,.02), rgba(0,0,0,.64));
       z-index:1;
     }
-    .list-card-title {
+    .list-card-content {
       position:absolute;
       left:12px;
       right:12px;
       bottom:12px;
       z-index:2;
       color:#fff;
+      display:grid;
+      gap:7px;
+      text-align:left;
+    }
+    .list-domain {
+      width:max-content;
+      max-width:100%;
+      min-height:25px;
+      border-radius:13px;
+      padding:5px 9px;
+      background:rgba(255,255,255,.9);
+      color:#111;
+      font-size:.68rem;
+      font-weight:850;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .list-card-title {
       font-size:1.02rem;
       line-height:1.12;
       font-weight:850;
-      text-align:left;
+    }
+    .list-preview {
+      margin:0;
+      color:rgba(255,255,255,.84);
+      font-size:.78rem;
+      line-height:1.32;
+      font-weight:650;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
     }
     .count-badge {
       position:absolute;
@@ -213,11 +243,27 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .item-grid {
       display:grid;
-      grid-template-columns:repeat(3, minmax(0,1fr));
-      gap:18px 9px;
+      grid-template-columns:1fr;
+      gap:12px;
       align-items:start;
     }
-    .item-card { min-width:0; text-align:left; }
+    .item-card {
+      min-width:0;
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      padding:10px;
+      text-align:left;
+      box-shadow:0 10px 28px rgba(17,17,17,.05);
+    }
+    .item-open {
+      width:100%;
+      display:grid;
+      grid-template-columns:96px minmax(0,1fr);
+      gap:12px;
+      text-align:left;
+      align-items:start;
+    }
     .thumb-wrap {
       position:relative;
       aspect-ratio:9 / 14;
@@ -262,13 +308,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       display:grid;
       grid-template-columns:minmax(0,1fr) 18px;
       gap:4px;
-      margin-top:7px;
+      margin-top:1px;
     }
     .item-title {
       margin:0;
       min-width:0;
-      font-size:.76rem;
-      line-height:1.18;
+      font-size:.95rem;
+      line-height:1.16;
       font-weight:800;
       display:-webkit-box;
       -webkit-line-clamp:2;
@@ -276,6 +322,55 @@ def build_clipnest_v1_html(user_id: str) -> str:
       overflow:hidden;
     }
     .more-dot { color:var(--muted); font-weight:900; line-height:1; }
+    .item-summary {
+      margin:7px 0 0;
+      color:#555;
+      font-size:.78rem;
+      line-height:1.34;
+      font-weight:600;
+      display:-webkit-box;
+      -webkit-line-clamp:3;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    .item-meta-row {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:9px;
+    }
+    .item-pill {
+      min-height:24px;
+      border-radius:12px;
+      padding:5px 8px;
+      background:var(--soft);
+      color:#555;
+      font-size:.68rem;
+      line-height:1;
+      font-weight:850;
+      max-width:100%;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .item-pill.product { background:#f0edff; color:#4f34d9; }
+    .buy-row {
+      display:flex;
+      flex-wrap:wrap;
+      gap:7px;
+      margin:10px 0 0 108px;
+    }
+    .buy-link {
+      min-height:30px;
+      border-radius:15px;
+      padding:7px 10px;
+      background:#111;
+      color:#fff;
+      text-decoration:none;
+      font-size:.72rem;
+      line-height:1;
+      font-weight:850;
+    }
     .bottom-nav {
       position:fixed;
       left:50%;
@@ -797,10 +892,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
     }
     function renderListCard(list) {
+      const examples = (list.items || [])
+        .slice(0, 3)
+        .map((item) => item.name || item.product_name)
+        .filter(Boolean)
+        .join(' • ');
       return `<button class="list-card" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
         ${renderMedia(coverItem(list))}
         <span class="count-badge">${list.real_count}</span>
-        <span class="list-card-title">${escapeHtml(list.list_title)}</span>
+        <span class="list-card-content">
+          <span class="list-domain">${escapeHtml(list.parent_title || 'Strong interest')}</span>
+          <span class="list-card-title">${escapeHtml(list.list_title)}</span>
+          ${examples ? `<span class="list-preview">${escapeHtml(examples)}</span>` : ''}
+        </span>
       </button>`;
     }
     function renderListScreen() {
@@ -840,14 +944,35 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
     }
     function renderItemCard(item, index) {
-      return `<button class="item-card" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
-        <div class="thumb-wrap">
-          ${renderMedia(item)}
-          <span class="duration">${escapeHtml(durationFor(item, index))}</span>
-          <span class="play-dot">▶</span>
-        </div>
-        <div class="item-title-row"><p class="item-title">${escapeHtml(item.name)}</p><span class="more-dot">...</span></div>
-      </button>`;
+      const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
+      return `<article class="item-card">
+        <button class="item-open" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
+          <div class="thumb-wrap">
+            ${renderMedia(item)}
+            <span class="duration">${escapeHtml(durationFor(item, index))}</span>
+            <span class="play-dot">▶</span>
+          </div>
+          <div>
+            <div class="item-title-row"><p class="item-title">${escapeHtml(item.name)}</p><span class="more-dot">...</span></div>
+            ${item.summary ? `<p class="item-summary">${escapeHtml(item.summary)}</p>` : ''}
+            <div class="item-meta-row">
+              ${hasProduct(item) ? '<span class="item-pill product">Product</span>' : ''}
+              ${productText ? `<span class="item-pill">${escapeHtml(productText)}</span>` : ''}
+            </div>
+          </div>
+        </button>
+        ${renderBuyLinks(item)}
+      </article>`;
+    }
+    function renderBuyLinks(item) {
+      const links = [
+        ['Best', item.best_buy_link],
+        ['Amazon', item.amazon_link],
+        ['Flipkart', item.flipkart_link],
+        ['Nykaa', item.nykaa_link],
+      ].filter((entry) => entry[1]);
+      if (!links.length) return '';
+      return `<div class="buy-row">${links.map(([label, href]) => `<a class="buy-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`).join('')}</div>`;
     }
     function searchTabResults() {
       const q = state.magicQuery.trim();
