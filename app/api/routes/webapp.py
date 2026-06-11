@@ -1942,6 +1942,7 @@ def build_legacy_web_app_html(user_id: str) -> str:
           locations: hit.locations || [],
           visual_entities: hit.visual_entities || [],
           visible_text: hit.visible_text || [],
+          visual_supporting_points: hit.visual_supporting_points || [],
           visual_summary: hit.visual_summary || '',
           visual_theme: hit.visual_theme || '',
           match_reasons: hit.match_reasons || [],
@@ -1970,6 +1971,7 @@ def build_legacy_web_app_html(user_id: str) -> str:
         ...(result.locations || []),
         ...(result.visual_entities || []),
         ...(result.visible_text || []),
+        ...(result.visual_supporting_points || []),
       ].filter(Boolean);
       return parts.slice(0, 8).join(' · ') || 'Matched from your saved reel metadata.';
     }}
@@ -2788,6 +2790,7 @@ def build_legacy_web_app_html(user_id: str) -> str:
           ...(result.brands || []).slice(0, 2),
           ...(result.visual_entities || []).slice(0, 3),
           ...(result.visible_text || []).slice(0, 2),
+          ...(result.visual_supporting_points || []).slice(0, 1),
           ...(result.locations || []).slice(0, 2),
         ].filter(Boolean).slice(0, 5);
         return `

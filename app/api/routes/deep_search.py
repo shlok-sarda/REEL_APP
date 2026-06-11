@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from app.services.auth import ensure_user_access, require_user
 from app.services.deep_search import (
     evaluate_user_search,
+    explain_user_search,
     index_user_documents,
     load_deep_search_documents,
     rebuild_deep_search_documents,
@@ -63,6 +64,17 @@ def evaluate_deep_search(
 ):
     resolved_user_id = ensure_user_access(request, user_id)
     return evaluate_user_search(resolved_user_id, queries=q or None, limit=limit)
+
+
+@router.get("/explain")
+def explain_deep_search(
+    request: Request,
+    q: str = Query(default=""),
+    user_id: str = Query(default=""),
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    resolved_user_id = ensure_user_access(request, user_id)
+    return explain_user_search(resolved_user_id, q.strip(), limit=limit)
 
 
 @router.post("/index")

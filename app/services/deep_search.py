@@ -29,6 +29,7 @@ SEARCHABLE_ATTRIBUTES = [
     "caption",
     "visible_text",
     "visual_entities",
+    "visual_supporting_points",
     "product_types",
     "item_summaries",
     "transcript",
@@ -63,6 +64,7 @@ DISPLAYED_ATTRIBUTES = [
     "locations",
     "visual_entities",
     "visible_text",
+    "visual_supporting_points",
     "visual_summary",
     "visual_theme",
     "match_context",
@@ -86,6 +88,7 @@ FIELD_WEIGHTS = [
     ("caption", 45),
     ("visible_text", 42),
     ("visual_entities", 40),
+    ("visual_supporting_points", 38),
     ("product_types", 35),
     ("item_summaries", 30),
     ("transcript", 25),
@@ -118,11 +121,10 @@ SYNONYMS = {
     "travel": ["trip", "destination", "place", "stay"],
     "hotel": ["stay", "villa", "airbnb", "resort"],
     "recipe": ["cook", "cooking", "food", "dish"],
-    "saree": ["sari", "traditional outfit", "ethnic wear", "indian traditional wear", "farewell outfit", "dupatta"],
-    "sari": ["saree", "traditional outfit", "ethnic wear", "indian traditional wear", "farewell outfit", "dupatta"],
+    "saree": ["sari", "traditional outfit", "ethnic wear", "indian traditional wear", "dupatta"],
+    "sari": ["saree", "traditional outfit", "ethnic wear", "indian traditional wear", "dupatta"],
     "traditional": ["ethnic wear", "saree", "sari", "kurta", "lehenga", "dupatta"],
     "ethnic": ["traditional outfit", "saree", "sari", "kurta", "lehenga", "dupatta"],
-    "farewell": ["saree", "sari", "traditional outfit", "ethnic wear"],
 }
 
 EVALUATION_QUERIES = [
@@ -225,6 +227,7 @@ def _build_match_context(document: dict[str, Any]) -> str:
         "subdomains",
         "visible_text",
         "visual_entities",
+        "visual_supporting_points",
     ):
         parts.extend(_as_list(document.get(field)))
     parts.extend(
@@ -609,9 +612,10 @@ def _match_reasons(document: dict[str, Any], matches: list[str]) -> list[str]:
         if items:
             reasons.append(f"{label}: {', '.join(items)}")
 
-    if fields & {"visual_entities", "visual_summary", "visual_theme", "visible_text"}:
+    if fields & {"visual_entities", "visual_summary", "visual_theme", "visible_text", "visual_supporting_points"}:
         add("Seen", document.get("visual_entities"))
         add("On-screen text", document.get("visible_text"))
+        add("Visual clue", document.get("visual_supporting_points"), limit=2)
         if document.get("visual_summary"):
             reasons.append(f"Visual summary: {_normalize(document.get('visual_summary'))}")
     if fields & {"product_names", "brands", "models", "product_types"}:
@@ -646,6 +650,7 @@ def _result_payload(document: dict[str, Any], score: int, matches: list[str]) ->
         "locations": document.get("locations", []),
         "visual_entities": document.get("visual_entities", []),
         "visible_text": document.get("visible_text", []),
+        "visual_supporting_points": document.get("visual_supporting_points", []),
         "visual_summary": document.get("visual_summary", ""),
         "visual_theme": document.get("visual_theme", ""),
         "match_context": document.get("match_context", ""),
@@ -671,6 +676,7 @@ def _meili_hit_payload(hit: dict[str, Any], rank: int) -> dict[str, Any]:
         "locations": hit.get("locations", []),
         "visual_entities": hit.get("visual_entities", []),
         "visible_text": hit.get("visible_text", []),
+        "visual_supporting_points": hit.get("visual_supporting_points", []),
         "visual_summary": hit.get("visual_summary", ""),
         "visual_theme": hit.get("visual_theme", ""),
         "match_context": hit.get("match_context", ""),
@@ -761,6 +767,7 @@ class MeiliClient:
                     "entities",
                     "visual_entities",
                     "visible_text",
+                    "visual_supporting_points",
                     "visual_summary",
                     "visual_theme",
                 ],
@@ -790,6 +797,11 @@ def index_user_documents(user_id: str, index_name: str | None = None) -> dict[st
 def search_user_documents(user_id: str, query: str, limit: int = 20, backend: str = "auto") -> dict[str, Any]:
     documents = load_deep_search_documents(user_id)
     local_results = search_documents_locally(documents, query, limit=limit)
+    rebuilt_for_empty_results = None
+    if not local_results and documents:
+        rebuilt_for_empty_results = rebuild_deep_search_documents(user_id)
+        documents = load_deep_search_documents(user_id)
+        local_results = search_documents_locally(documents, query, limit=limit)
 
     if backend == "local" or not settings.meili_host:
         return {
@@ -797,6 +809,7 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
             "query": query,
             "backend": "local",
             "document_count": len(documents),
+            "rebuilt_for_empty_results": rebuilt_for_empty_results,
             "results": local_results,
         }
 
@@ -814,11 +827,12 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
             return {
                 "user_id": user_id,
                 "query": query,
-                "backend": "meili",
+                "backend": "hybrid",
                 "index": settings.meili_index,
                 "document_count": len(documents),
-                "results": _merge_results(meili_results, local_results, limit),
+                "results": _merge_results(local_results, meili_results, limit),
                 "raw_hit_count": len(hits),
+                "rebuilt_for_empty_results": rebuilt_for_empty_results,
             }
         if documents and backend == "auto":
             client.configure_index(settings.meili_index)
@@ -843,6 +857,7 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
         "results": local_results,
         "meili_error": meili_error,
         "indexed_task": indexed_task,
+        "rebuilt_for_empty_results": rebuilt_for_empty_results,
     }
 
 
@@ -858,6 +873,48 @@ def _merge_results(primary: list[dict[str, Any]], secondary: list[dict[str, Any]
         if len(merged) >= limit:
             break
     return merged
+
+
+def explain_user_search(user_id: str, query: str, limit: int = 10) -> dict[str, Any]:
+    documents = load_deep_search_documents(user_id)
+    if not query:
+        return {
+            "user_id": user_id,
+            "query": query,
+            "query_terms": [],
+            "expanded_terms": [],
+            "document_count": len(documents),
+            "backend": "none",
+            "results": [],
+        }
+    payload = search_user_documents(user_id, query, limit=limit, backend="auto")
+    terms, expanded = _expand_query(query)
+    return {
+        "user_id": user_id,
+        "query": query,
+        "query_terms": terms,
+        "expanded_terms": _unique(expanded),
+        "document_count": len(documents),
+        "backend": payload.get("backend"),
+        "meili_error": payload.get("meili_error", ""),
+        "results": [
+            {
+                "rank": index + 1,
+                "reel_id": result.get("reel_id"),
+                "shortcode": result.get("shortcode"),
+                "url": result.get("url"),
+                "score": result.get("score"),
+                "matched_fields": result.get("matched_fields", []),
+                "match_reasons": result.get("match_reasons", []),
+                "item_names": result.get("item_names", []),
+                "visual_entities": result.get("visual_entities", []),
+                "visible_text": result.get("visible_text", []),
+                "visual_supporting_points": result.get("visual_supporting_points", []),
+                "visual_summary": result.get("visual_summary", ""),
+            }
+            for index, result in enumerate(payload.get("results", [])[:limit])
+        ],
+    }
 
 
 def evaluate_user_search(user_id: str, queries: list[str] | None = None, limit: int = 5) -> dict[str, Any]:
