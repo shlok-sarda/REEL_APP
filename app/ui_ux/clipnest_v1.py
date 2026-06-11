@@ -898,6 +898,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       data: [],
       dashboard: {},
       jobs: [],
+      diagnostics: [],
       screen: 'library',
       currentListId: '',
       query: '',
@@ -1029,6 +1030,30 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${url ? `<p class="job-meta">${escapeHtml(url)}</p>` : ''}
         ${job.error_message ? `<p class="job-meta">${escapeHtml(job.error_message)}</p>` : ''}
         <details class="json-box"><summary>View job JSON</summary><pre>${escapeHtml(json)}</pre></details>
+      </article>`;
+    }
+    function recentDiagnostics() {
+      return Array.isArray(state.diagnostics) ? state.diagnostics.slice(0, 8) : [];
+    }
+    function renderReelDiagnosticCard(reel) {
+      const status = String(reel.status || 'unknown').toLowerCase();
+      const json = JSON.stringify(reel, null, 2);
+      const title = reel.shortcode || reel.id || reel.url || 'Recent reel';
+      const counts = `${reel.item_count || 0} items · ${reel.feature_count || 0} features · ${reel.product_count || 0} products`;
+      const firstItems = (reel.items || [])
+        .slice(0, 3)
+        .map((item) => item.item_name || item.product_name)
+        .filter(Boolean)
+        .join(' • ');
+      return `<article class="job-card">
+        <div class="job-head">
+          <h3 class="job-title">${escapeHtml(title)}</h3>
+          <span class="status-pill ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        </div>
+        <p class="job-meta">${escapeHtml(counts)} · ${escapeHtml(formatTime(reel.updated_at || reel.received_at) || 'time unavailable')}</p>
+        ${firstItems ? `<p class="job-meta">${escapeHtml(firstItems)}</p>` : ''}
+        ${reel.url ? `<p class="job-meta">${escapeHtml(reel.url)}</p>` : ''}
+        <details class="json-box"><summary>View stored extraction JSON</summary><pre>${escapeHtml(json)}</pre></details>
       </article>`;
     }
     function listMatches(list) {
@@ -1255,6 +1280,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
       const jobs = recentJobs();
+      const diagnostics = recentDiagnostics();
       const dashboardJson = JSON.stringify(state.dashboard || {}, null, 2);
       app.innerHTML = `
         <div class="topbar">
@@ -1279,6 +1305,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <h2 class="profile-section-title">Recent Reel Jobs</h2>
         <section class="job-list">
           ${jobs.length ? jobs.map(renderJobCard).join('') : '<div class="empty">No recent jobs found yet</div>'}
+        </section>
+        <h2 class="profile-section-title">Recent Stored Reels</h2>
+        <section class="job-list">
+          ${diagnostics.length ? diagnostics.map(renderReelDiagnosticCard).join('') : '<div class="empty">No stored reel diagnostics found yet</div>'}
         </section>
         <h2 class="profile-section-title">Dashboard JSON</h2>
         <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
@@ -1430,17 +1460,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
       state.loading = true;
       render();
       try {
-        const [libraryRes, dashboardRes, jobsRes] = await Promise.all([
+        const [libraryRes, dashboardRes, jobsRes, diagnosticsRes] = await Promise.all([
           fetch(`/library?user_id=${encodeURIComponent(USER_ID)}`),
           fetch(`/dashboard?user_id=${encodeURIComponent(USER_ID)}`),
-          fetch(`/jobs?user_id=${encodeURIComponent(USER_ID)}&limit=50`)
+          fetch(`/jobs?user_id=${encodeURIComponent(USER_ID)}&limit=50`),
+          fetch(`/diagnostics/reels?user_id=${encodeURIComponent(USER_ID)}&limit=12`)
         ]);
         const library = await libraryRes.json();
         state.data = normalizeCollections(library.personalized?.length ? library.personalized : library.standard || []);
         state.dashboard = await dashboardRes.json();
         state.jobs = await jobsRes.json();
+        state.diagnostics = await diagnosticsRes.json();
       } catch (error) {
         state.data = [];
+        state.diagnostics = [];
       }
       state.loading = false;
       scheduleStatusPolling();
