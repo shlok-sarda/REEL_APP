@@ -152,6 +152,27 @@ EVALUATION_QUERIES = [
     "restaurants in Bali",
 ]
 
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "for",
+    "from",
+    "go",
+    "how",
+    "in",
+    "near",
+    "of",
+    "on",
+    "or",
+    "spot",
+    "spots",
+    "the",
+    "to",
+    "with",
+}
+
 
 def _normalize(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
@@ -732,12 +753,68 @@ def _contains_term(text: str, term: str) -> bool:
     return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
 
 
+def _meaningful_query_terms(query: str) -> list[str]:
+    return [term for term in _tokens(query) if term not in STOPWORDS and len(term) > 1]
+
+
+def _concept_terms(term: str) -> list[str]:
+    return _unique([term] + _tokens(" ".join(SYNONYMS.get(term, []))))
+
+
+def _query_concept_coverage(document: dict[str, Any], query: str) -> tuple[int, int]:
+    terms = _meaningful_query_terms(query)
+    if not terms:
+        return 0, 0
+    text = _field_text({field: document.get(field) for field, _ in FIELD_WEIGHTS})
+    matched = 0
+    for term in terms:
+        if any(_contains_term(text, concept) for concept in _concept_terms(term)):
+            matched += 1
+    return matched, len(terms)
+
+
+def _term_matches_fields(document: dict[str, Any], term: str, fields: tuple[str, ...]) -> bool:
+    text = _field_text({field: document.get(field) for field in fields})
+    return any(_contains_term(text, concept) for concept in _concept_terms(term))
+
+
+def _passes_query_requirements(document: dict[str, Any], query: str) -> bool:
+    terms = set(_meaningful_query_terms(query))
+    food_terms = {"restaurant", "restaurants", "cafe", "cafes", "food", "dining"}
+    if terms & food_terms:
+        return any(
+            _term_matches_fields(
+                document,
+                term,
+                (
+                    "item_names",
+                    "product_names",
+                    "collection_titles",
+                    "entities",
+                    "subdomains",
+                    "canonical_domains",
+                    "primary_category",
+                    "secondary_category",
+                    "caption",
+                    "item_summaries",
+                    "transcript",
+                    "visual_summary",
+                    "visual_theme",
+                ),
+            )
+            for term in terms & food_terms
+        )
+    return True
+
+
 def search_documents_locally(documents: list[dict[str, Any]], query: str, limit: int = 20) -> list[dict[str, Any]]:
     primary_terms, expanded_terms = _expand_query(query)
+    meaningful_terms = _meaningful_query_terms(query)
     scored = []
     for document in documents:
         score = 0
         matches = []
+        phrase_matched = False
         for field, weight in FIELD_WEIGHTS:
             text = _field_text(document.get(field))
             if not text:
@@ -746,6 +823,7 @@ def search_documents_locally(documents: list[dict[str, Any]], query: str, limit:
             if phrase and len(phrase) >= 3 and phrase in text:
                 score += weight * 2
                 matches.append(field)
+                phrase_matched = True
             for term in primary_terms:
                 if _contains_term(text, term):
                     score += weight
@@ -755,6 +833,14 @@ def search_documents_locally(documents: list[dict[str, Any]], query: str, limit:
                     score += max(1, weight // 4)
                     matches.append(f"{field}:expanded")
         if score:
+            covered, total = _query_concept_coverage(document, query)
+            if len(meaningful_terms) >= 2 and not phrase_matched and covered < min(2, total):
+                continue
+            if not _passes_query_requirements(document, query):
+                continue
+            score += covered * 45
+            if total and covered == total:
+                score += 90
             score += _freshness_boost(document.get("received_at", ""))
             scored.append((score, document, sorted(set(matches))))
 
@@ -1049,6 +1135,84 @@ def _merge_results(primary: list[dict[str, Any]], secondary: list[dict[str, Any]
         if len(merged) >= limit:
             break
     return merged
+
+
+def _title_from_query(query: str) -> str:
+    words = []
+    small_words = {"in", "at", "for", "of", "and", "or", "to", "with"}
+    for index, word in enumerate(_normalize(query).split()):
+        lower = word.lower()
+        if index > 0 and lower in small_words:
+            words.append(lower)
+        elif lower in {"atv", "uk", "usa", "ai"}:
+            words.append(lower.upper())
+        else:
+            words.append(word[:1].upper() + word[1:])
+    return " ".join(words) or "Search Collection"
+
+
+def _collection_item_from_result(result: dict[str, Any]) -> dict[str, Any]:
+    media = result.get("media") or {}
+    return {
+        "reel_id": result.get("reel_id") or result.get("id", ""),
+        "shortcode": result.get("shortcode", ""),
+        "url": result.get("url", ""),
+        "name": (result.get("item_names") or result.get("product_names") or [result.get("shortcode") or "Saved reel"])[0],
+        "summary": (
+            (result.get("match_reasons") or [None])[0]
+            or result.get("visual_summary")
+            or result.get("match_context")
+            or ""
+        ),
+        "product_name": (result.get("product_names") or [""])[0],
+        "product_brand": (result.get("brands") or [""])[0],
+        "collection_titles": result.get("collection_titles", []),
+        "parent_titles": result.get("parent_titles", []),
+        "matched_fields": result.get("matched_fields", []),
+        "match_reasons": result.get("match_reasons", []),
+        "score": result.get("score", 0),
+        "media": media,
+    }
+
+
+def build_search_collection_candidates(user_id: str, query: str, limit: int = 20) -> dict[str, Any]:
+    clean_query = _normalize(query)
+    if not clean_query:
+        return {
+            "user_id": user_id,
+            "query": clean_query,
+            "candidates": [],
+        }
+
+    payload = search_user_documents(user_id, clean_query, limit=limit, backend="auto")
+    results = payload.get("results", [])[:limit]
+    items = [_collection_item_from_result(result) for result in results]
+    top_reasons = _unique(reason for item in items for reason in item.get("match_reasons", []))[:6]
+    existing_titles = _unique(title for item in items for title in item.get("collection_titles", []))
+    confidence = 0
+    if items:
+        confidence = min(100, 35 + len(items) * 8 + min(25, int((items[0].get("score") or 0) / 20)))
+
+    candidate = {
+        "id": re.sub(r"[^a-z0-9]+", "-", clean_query.casefold()).strip("-") or "search",
+        "title": existing_titles[0] if existing_titles else _title_from_query(clean_query),
+        "suggested_title": _title_from_query(clean_query),
+        "query": clean_query,
+        "confidence": confidence,
+        "result_count": len(items),
+        "source": "deep_search",
+        "backend": payload.get("backend", ""),
+        "existing_collection_titles": existing_titles,
+        "reasons": top_reasons,
+        "items": items,
+        "can_create_list": bool(items),
+    }
+    return {
+        "user_id": user_id,
+        "query": clean_query,
+        "document_count": payload.get("document_count", 0),
+        "candidates": [candidate] if items else [],
+    }
 
 
 def explain_user_search(user_id: str, query: str, limit: int = 10) -> dict[str, Any]:
