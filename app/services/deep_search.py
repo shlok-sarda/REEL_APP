@@ -20,7 +20,9 @@ SEARCHABLE_ATTRIBUTES = [
     "brands",
     "models",
     "entities",
+    "collection_titles",
     "locations",
+    "parent_titles",
     "subdomains",
     "canonical_domains",
     "primary_category",
@@ -60,6 +62,8 @@ DISPLAYED_ATTRIBUTES = [
     "item_names",
     "product_names",
     "brands",
+    "collection_titles",
+    "parent_titles",
     "entities",
     "locations",
     "visual_entities",
@@ -78,8 +82,10 @@ FIELD_WEIGHTS = [
     ("product_names", 115),
     ("brands", 110),
     ("models", 105),
+    ("collection_titles", 100),
     ("entities", 95),
     ("locations", 90),
+    ("parent_titles", 85),
     ("subdomains", 80),
     ("canonical_domains", 70),
     ("primary_category", 65),
@@ -108,6 +114,7 @@ SYNONYMS = {
     "workout": ["gym", "fitness", "training"],
     "food": ["restaurant", "recipe", "street food", "cafe"],
     "restaurant": ["food", "cafe", "street food", "dining"],
+    "restaurants": ["restaurant", "food", "cafe", "street food", "dining"],
     "watch": ["movie", "series", "film", "show"],
     "movie": ["film", "show", "series", "watch"],
     "buy": ["product", "shopping", "shop"],
@@ -142,6 +149,7 @@ EVALUATION_QUERIES = [
     "food",
     "saree",
     "traditional outfit",
+    "restaurants in Bali",
 ]
 
 
@@ -222,6 +230,8 @@ def _build_match_context(document: dict[str, Any]) -> str:
         "item_names",
         "product_names",
         "brands",
+        "collection_titles",
+        "parent_titles",
         "entities",
         "locations",
         "subdomains",
@@ -241,6 +251,39 @@ def _build_match_context(document: dict[str, Any]) -> str:
         ]
     )
     return " ".join(_unique(parts))
+
+
+def _library_context_by_reel(user_id: str) -> dict[str, dict[str, list[str]]]:
+    try:
+        from app.services.library import load_library_payload
+
+        payload = load_library_payload(user_id)
+    except Exception:
+        return {}
+
+    context: dict[str, dict[str, list[str]]] = {}
+    for section in ("personalized", "standard"):
+        for collection in payload.get(section, []) or []:
+            list_title = _normalize(collection.get("list_title"))
+            parent_title = _normalize(collection.get("parent_title"))
+            for item in collection.get("items", []) or []:
+                reel_id = _normalize(item.get("reel_id"))
+                if not reel_id:
+                    continue
+                bucket = context.setdefault(
+                    reel_id,
+                    {"collection_titles": [], "parent_titles": []},
+                )
+                bucket["collection_titles"].append(list_title)
+                bucket["parent_titles"].append(parent_title)
+
+    return {
+        reel_id: {
+            "collection_titles": _unique(values.get("collection_titles", [])),
+            "parent_titles": _unique(values.get("parent_titles", [])),
+        }
+        for reel_id, values in context.items()
+    }
 
 
 def _build_search_terms(document: dict[str, Any]) -> list[str]:
@@ -282,6 +325,7 @@ def load_deep_search_documents(user_id: str, prefer_persisted: bool = True) -> l
 
 
 def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
+    library_context = _library_context_by_reel(user_id)
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -347,6 +391,7 @@ def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
     documents = []
     for reel_id, reel_rows in grouped.items():
         first = reel_rows[0]
+        reel_library_context = library_context.get(reel_id, {})
         diagnostics_metadata = _loads_json(first.get("diagnostics_metadata_json"), {})
         if not isinstance(diagnostics_metadata, dict):
             diagnostics_metadata = {}
@@ -456,6 +501,8 @@ def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
             "brands": brands,
             "models": models,
             "product_types": product_types,
+            "collection_titles": reel_library_context.get("collection_titles", []),
+            "parent_titles": reel_library_context.get("parent_titles", []),
             "entities": _unique(entities),
             "locations": _unique(locations),
             "subdomains": _unique(subdomains),
@@ -741,6 +788,9 @@ def _match_reasons(document: dict[str, Any], matches: list[str]) -> list[str]:
     if fields & {"product_names", "brands", "models", "product_types"}:
         add("Product", document.get("product_names"))
         add("Brand", document.get("brands"))
+    if fields & {"collection_titles", "parent_titles"}:
+        add("Folder", document.get("collection_titles"))
+        add("Group", document.get("parent_titles"), limit=2)
     if fields & {"entities", "item_names"}:
         add("Item", document.get("item_names") or document.get("entities"))
     if fields & {"locations"}:
@@ -766,6 +816,8 @@ def _result_payload(document: dict[str, Any], score: int, matches: list[str]) ->
         "item_names": document.get("item_names", []),
         "product_names": document.get("product_names", []),
         "brands": document.get("brands", []),
+        "collection_titles": document.get("collection_titles", []),
+        "parent_titles": document.get("parent_titles", []),
         "entities": document.get("entities", []),
         "locations": document.get("locations", []),
         "visual_entities": document.get("visual_entities", []),
@@ -792,6 +844,8 @@ def _meili_hit_payload(hit: dict[str, Any], rank: int) -> dict[str, Any]:
         "item_names": hit.get("item_names", []),
         "product_names": hit.get("product_names", []),
         "brands": hit.get("brands", []),
+        "collection_titles": hit.get("collection_titles", []),
+        "parent_titles": hit.get("parent_titles", []),
         "entities": hit.get("entities", []),
         "locations": hit.get("locations", []),
         "visual_entities": hit.get("visual_entities", []),
@@ -884,6 +938,8 @@ class MeiliClient:
                     "item_names",
                     "product_names",
                     "brands",
+                    "collection_titles",
+                    "parent_titles",
                     "entities",
                     "visual_entities",
                     "visible_text",
@@ -1031,6 +1087,8 @@ def explain_user_search(user_id: str, query: str, limit: int = 10) -> dict[str, 
                 "visible_text": result.get("visible_text", []),
                 "visual_supporting_points": result.get("visual_supporting_points", []),
                 "visual_summary": result.get("visual_summary", ""),
+                "collection_titles": result.get("collection_titles", []),
+                "parent_titles": result.get("parent_titles", []),
             }
             for index, result in enumerate(payload.get("results", [])[:limit])
         ],

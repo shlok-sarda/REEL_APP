@@ -1234,7 +1234,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const q = state.magicQuery.trim();
       const allItems = sortedCollections().flatMap((list) => list.items.map((item) => ({ ...item, list_title: list.list_title, parent_title: list.parent_title })));
       return q
-        ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''}`, q)).slice(0, 24)
+        ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''} ${item.parent_title || ''}`, q)).slice(0, 24)
         : [];
     }
     function normalizeDeepSearchPayload(payload) {
@@ -1255,6 +1255,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const parts = [
         ...(result.product_names || []),
         ...(result.brands || []),
+        ...(result.collection_titles || []),
+        ...(result.parent_titles || []),
         ...(result.entities || []),
         ...(result.visual_entities || []),
         ...(result.visible_text || []),
@@ -1275,7 +1277,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         local_video_url: media.local_video_url || '',
         thumbnail_url: media.thumbnail_url || '',
         reel_thumbnail: media.thumbnail_url || '',
-        list_title: 'Deep Search',
+        list_title: (result.collection_titles || [])[0] || (result.parent_titles || [])[0] || 'Deep Search',
       };
     }
     function scheduleDeepSearch() {
