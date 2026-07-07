@@ -589,11 +589,22 @@ def rebuild_deep_search_documents(user_id: str) -> dict[str, Any]:
                     now,
                 ),
             )
+    # Generate/refresh OpenAI embeddings for hybrid semantic search. Non-fatal:
+    # ingest must never break if OpenAI is unavailable — search degrades to
+    # lexical-only until embeddings exist.
+    embedding_report = None
+    try:
+        from app.services.deep_search_hybrid import index_document_embeddings
+
+        embedding_report = index_document_embeddings(documents)
+    except Exception as exc:
+        embedding_report = {"error": str(exc)}
     return {
         "ok": True,
         "user_id": user_id,
         "document_count": len(documents),
         "updated_at": now,
+        "embeddings": embedding_report,
     }
 
 
@@ -1065,7 +1076,27 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
         documents = load_deep_search_documents(user_id)
         local_results = search_documents_locally(documents, query, limit=limit)
 
-    if backend == "local" or not settings.meili_host:
+    # Hybrid semantic search is the default. It returns None when OpenAI is
+    # unavailable or no embeddings exist yet, in which case we fall through to
+    # the proven lexical (and optional Meili) paths below — never a hard break.
+    if backend in ("auto", "hybrid"):
+        try:
+            from app.services.deep_search_hybrid import search_documents_hybrid
+
+            hybrid_results = search_documents_hybrid(documents, query, limit=limit)
+        except Exception:
+            hybrid_results = None
+        if hybrid_results is not None:
+            return {
+                "user_id": user_id,
+                "query": query,
+                "backend": "hybrid",
+                "document_count": len(documents),
+                "rebuilt_for_empty_results": rebuilt_for_empty_results,
+                "results": hybrid_results,
+            }
+
+    if backend == "local" or backend == "hybrid" or not settings.meili_host:
         return {
             "user_id": user_id,
             "query": query,

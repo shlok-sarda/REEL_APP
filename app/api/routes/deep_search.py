@@ -39,7 +39,7 @@ def deep_search(
     q: str = Query(default=""),
     user_id: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
-    backend: Literal["auto", "local", "meili"] = Query(default="auto"),
+    backend: Literal["auto", "hybrid", "local", "meili"] = Query(default="auto"),
 ):
     resolved_user_id = ensure_user_access(request, user_id)
     query = q.strip()
