@@ -185,26 +185,49 @@ def content_hash(document: dict) -> str:
 # embedding (remote-only; deterministic fallback would break cosine vs OpenAI)
 # --------------------------------------------------------------------------
 
+EMBED_BATCH_SIZE = 128
+
+
 def embed_remote(text: str) -> list[float] | None:
-    """OpenAI embedding, L2-normalized. Returns None on any failure so callers
-    can degrade to lexical-only rather than mixing incompatible vectors."""
-    normalized = (text or "").strip()
-    if not normalized:
-        return None
+    """OpenAI embedding for a single text (used for the query at search time).
+    Returns None on any failure so callers degrade to lexical-only rather than
+    mixing incompatible vectors."""
+    result = embed_remote_batch([text])
+    return result[0] if result else None
+
+
+def embed_remote_batch(texts: list[str]) -> list[list[float] | None] | None:
+    """Batch OpenAI embedding, L2-normalized, preserving order. Empty strings
+    map to None. Returns None entirely if the API call fails (caller degrades).
+    Batching is essential at scale: one call embeds up to EMBED_BATCH_SIZE
+    reels, so a 500-reel backfill is ~10 calls, not 1000."""
+    cleaned = [(t or "").strip() for t in texts]
+    non_empty = [(i, t) for i, t in enumerate(cleaned) if t]
+    if not non_empty:
+        return [None] * len(texts)
+    out: list[list[float] | None] = [None] * len(texts)
     try:
         from api_config import get_openai_client
 
         client = get_openai_client()
-        response = client.embeddings.create(model=EMBEDDING_MODEL, input=[normalized])
-        return l2_normalize(response.data[0].embedding)
+        for start in range(0, len(non_empty), EMBED_BATCH_SIZE):
+            chunk = non_empty[start:start + EMBED_BATCH_SIZE]
+            response = client.embeddings.create(
+                model=EMBEDDING_MODEL, input=[t for _, t in chunk]
+            )
+            for (idx, _), item in zip(chunk, response.data):
+                out[idx] = l2_normalize(item.embedding)
     except Exception:
         return None
+    return out
 
 
 def index_document_embeddings(documents: list[dict]) -> dict[str, Any]:
     """Build + persist subject/context vectors for docs whose content changed.
+    Batched so a full backfill of hundreds of reels is a handful of API calls.
     Non-fatal: returns a report; never raises. Skips silently if OpenAI down."""
-    embedded = skipped = failed = 0
+    todo = []  # (reel_id, digest, subject_text, context_text)
+    skipped = 0
     for document in documents:
         reel_id = document.get("reel_id")
         if not reel_id:
@@ -213,8 +236,19 @@ def index_document_embeddings(documents: list[dict]) -> dict[str, Any]:
         if _load_vector(reel_id, "subject") is not None and _stored_hash(reel_id) == digest:
             skipped += 1
             continue
-        subj = embed_remote(subject_text(document) or context_text(document))
-        ctx = embed_remote(context_text(document))
+        todo.append((reel_id, digest, subject_text(document) or context_text(document), context_text(document)))
+
+    if not todo:
+        return {"embedded": 0, "skipped": skipped, "failed": 0, "total": len(documents)}
+
+    subj_vecs = embed_remote_batch([t[2] for t in todo])
+    ctx_vecs = embed_remote_batch([t[3] for t in todo])
+    if subj_vecs is None or ctx_vecs is None:
+        # OpenAI unavailable — leave everything unembedded; search stays lexical.
+        return {"embedded": 0, "skipped": skipped, "failed": len(todo), "total": len(documents)}
+
+    embedded = failed = 0
+    for (reel_id, digest, _, _), subj, ctx in zip(todo, subj_vecs, ctx_vecs):
         if subj is None or ctx is None:
             failed += 1
             continue
