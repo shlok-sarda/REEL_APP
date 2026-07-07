@@ -48,6 +48,29 @@ def summarize_subprocess_output(stderr: str, stdout: str, limit: int = 300) -> s
     return combined[-limit:]
 
 
+# Signals in an OpenAI error that mean "you are out of credits" (not a transient
+# rate-limit). Used to turn a cryptic processor failure into a clear, actionable
+# message so a reel that failed only because billing ran out is obviously
+# recoverable — top up, press Retry.
+OPENAI_QUOTA_MARKERS = (
+    "insufficient_quota",
+    "exceeded your current quota",
+    "check your plan and billing",
+    "billing details",
+)
+
+WAITING_FOR_CREDITS_MESSAGE = (
+    "Waiting for OpenAI credits — your OpenAI API quota ran out, so this reel "
+    "could not be processed. Top up your OpenAI billing, then press Retry on "
+    "this reel and it will process normally."
+)
+
+
+def is_openai_quota_error(*texts: str) -> bool:
+    blob = " ".join(t for t in texts if t).lower()
+    return any(marker in blob for marker in OPENAI_QUOTA_MARKERS)
+
+
 def build_paths(storage_dir: Path):
     return SimpleNamespace(
         storage_dir=storage_dir,
@@ -348,6 +371,8 @@ def main(user_id="default", only_urls=None):
             stderr = getattr(exc, "stderr", "") or ""
             stdout = getattr(exc, "output", "") or getattr(exc, "stdout", "") or ""
             processor_failure_message = summarize_subprocess_output(stderr, stdout) or f"Processor exited with code {exc.returncode}"
+            if is_openai_quota_error(stderr, stdout, processor_failure_message):
+                processor_failure_message = WAITING_FOR_CREDITS_MESSAGE
         pending_input.unlink(missing_ok=True)
         pending_rows = []
         if pending_output.exists():
