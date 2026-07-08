@@ -269,6 +269,18 @@ SCHEMA_STATEMENTS = [
         executed_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS instagram_webhook_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        received_at TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT '',
+        sender_id TEXT NOT NULL DEFAULT '',
+        sender_username TEXT NOT NULL DEFAULT '',
+        link_code TEXT NOT NULL DEFAULT '',
+        outcome TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT ''
+    )
+    """,
 ]
 
 USER_EXTRA_COLUMNS = {

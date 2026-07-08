@@ -8,12 +8,46 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
-from app.services.auth import complete_instagram_link, get_user_by_instagram_user_id
+from app.db.database import get_connection
+from app.services.auth import complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, start_worker_if_needed
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
+
+
+def _log_webhook_event(
+    kind: str,
+    *,
+    sender_id: str = "",
+    sender_username: str = "",
+    link_code: str = "",
+    outcome: str = "",
+    detail: str = "",
+) -> None:
+    """Persist a webhook diagnostic row. Never let logging break the webhook."""
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO instagram_webhook_events
+                    (received_at, kind, sender_id, sender_username, link_code, outcome, detail)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (iso_now(), kind, sender_id, sender_username, link_code, outcome, detail[:500]),
+            )
+            # Keep the table small — retain the most recent 200 rows.
+            connection.execute(
+                """
+                DELETE FROM instagram_webhook_events
+                WHERE id NOT IN (
+                    SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
+                )
+                """
+            )
+    except Exception as exc:  # pragma: no cover - diagnostics must not crash ingest
+        print(f"[instagram] failed to log webhook event: {exc}")
 
 INSTAGRAM_URL_FINDER = re.compile(r"https?://(?:www\.)?instagram\.com/(?:reel|p)/[A-Za-z0-9_-]+/?(?:\?[^\s]+)?", re.IGNORECASE)
 LINK_CODE_RE = re.compile(r"\bREEL-\d{6}\b", re.IGNORECASE)
@@ -99,6 +133,7 @@ def instagram_webhook_verify(
 async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256")):
     raw_body = await request.body()
     if not _verify_signature(raw_body, x_hub_signature_256):
+        _log_webhook_event("delivery", outcome="rejected", detail="signature verification failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Instagram signature")
 
     payload = json.loads(raw_body.decode("utf-8") or "{}")
@@ -107,10 +142,20 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
     ignored_events = 0
     saved_reel_ids: list[str] = []
 
-    for event in _iter_message_events(payload):
+    events = list(_iter_message_events(payload))
+    # Always record that a delivery arrived, so an empty event list is
+    # distinguishable from "Instagram never called us at all".
+    _log_webhook_event(
+        "delivery",
+        outcome=f"{len(events)} message event(s)",
+        detail="top-level keys: " + ",".join(sorted(payload.keys())) if isinstance(payload, dict) else "non-dict payload",
+    )
+
+    for event in events:
         sender_id, sender_username = _extract_sender(event)
         if not sender_id:
             ignored_events += 1
+            _log_webhook_event("event", outcome="ignored", detail="no sender id in event")
             continue
 
         link_code = _extract_link_code(event)
@@ -118,20 +163,42 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             try:
                 complete_instagram_link(link_code, sender_id, instagram_username=sender_username)
                 linked_accounts += 1
-            except HTTPException:
+                _log_webhook_event(
+                    "link", sender_id=sender_id, sender_username=sender_username,
+                    link_code=link_code, outcome="linked",
+                )
+            except HTTPException as exc:
                 ignored_events += 1
+                _log_webhook_event(
+                    "link", sender_id=sender_id, sender_username=sender_username,
+                    link_code=link_code, outcome="link_failed", detail=str(exc.detail),
+                )
             continue
 
         user = get_user_by_instagram_user_id(sender_id)
         if not user:
             ignored_events += 1
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="ignored", detail="sender id not linked to any account",
+            )
             continue
 
-        for url in _extract_candidate_urls(event):
+        urls = _extract_candidate_urls(event)
+        if not urls:
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="ignored", detail="no instagram reel url found in message",
+            )
+        for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
             job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
             saved_reel_ids.append(reel["id"])
             reels_saved += 1
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="saved", detail=url,
+            )
 
     if linked_accounts or reels_saved:
         start_worker_if_needed()
@@ -143,5 +210,38 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             "reels_saved": reels_saved,
             "ignored_events": ignored_events,
             "saved_reel_ids": saved_reel_ids,
+        }
+    )
+
+
+@router.get("/debug/events")
+def instagram_debug_events(request: Request, limit: int = Query(default=40, ge=1, le=200)):
+    """Recent Instagram webhook activity, for diagnosing linking/ingest.
+
+    Requires a signed-in user. Returns the raw event log (most recent first)
+    plus the current config gates so we can tell whether Instagram is even
+    reaching the server.
+    """
+    if not current_user(request):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT received_at, kind, sender_id, sender_username, link_code, outcome, detail
+            FROM instagram_webhook_events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return JSONResponse(
+        {
+            "config": {
+                "app_username_set": bool(settings.instagram_app_username),
+                "verify_token_set": bool(settings.instagram_webhook_verify_token),
+                "app_secret_set": bool(settings.instagram_app_secret),
+            },
+            "event_count": len(rows),
+            "events": [dict(row) for row in rows],
         }
     )
