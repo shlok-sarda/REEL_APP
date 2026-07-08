@@ -39,8 +39,13 @@ def openai_health(request: Request):
 
     client = OpenAI(api_key=key, timeout=20, max_retries=0)
     try:
-        client.models.list()
+        # Raw response so we can read the org/project the key resolves to from
+        # the response headers — this is what tells us whether the key and the
+        # funded balance live in the same OpenAI organization.
+        raw = client.models.with_raw_response.list()
         info["auth_check"] = "ok — key is valid"
+        info["organization"] = raw.headers.get("openai-organization", "(not reported)")
+        info["project_scoped_key"] = key.startswith("sk-proj-")
     except Exception as exc:
         info["auth_check"] = f"FAILED: {exc}"[:400]
     try:
