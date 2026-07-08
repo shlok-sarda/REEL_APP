@@ -111,21 +111,33 @@ def is_demo_user(user_id: str | None) -> bool:
     return (user_id or "").strip().lower() == DEMO_USER_ID
 
 
+_DEMO_PALETTES = [
+    ("#1c2b4a", "#3d5a80", "#98c1d9"),
+    ("#2d1b3d", "#6d3b6e", "#c98bb9"),
+    ("#1b3a2d", "#3f7a5a", "#a3d9b1"),
+    ("#3a2a1b", "#7a5a3f", "#d9c1a3"),
+    ("#1b2d3a", "#3f5f7a", "#a3c1d9"),
+    ("#3a1b1f", "#7a3f4a", "#d9a3ad"),
+    ("#26203a", "#4f4478", "#b0a3d9"),
+    ("#33301b", "#6e683f", "#d9d3a3"),
+]
+
+
 def _demo_cover_url(title: str) -> str:
+    dark, mid, light = _DEMO_PALETTES[sum(ord(char) for char in title) % len(_DEMO_PALETTES)]
     svg = f"""
-    <svg xmlns='http://www.w3.org/2000/svg' width='1200' height='800'>
+    <svg xmlns='http://www.w3.org/2000/svg' width='900' height='1600'>
       <defs>
         <linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-          <stop offset='0%' stop-color='#131822'/>
-          <stop offset='55%' stop-color='#1d2532'/>
-          <stop offset='100%' stop-color='#745f36'/>
+          <stop offset='0%' stop-color='{dark}'/>
+          <stop offset='60%' stop-color='{mid}'/>
+          <stop offset='100%' stop-color='{dark}'/>
         </linearGradient>
       </defs>
       <rect width='100%' height='100%' fill='url(#g)'/>
-      <circle cx='1050' cy='160' r='160' fill='rgba(238,215,166,0.14)'/>
-      <circle cx='180' cy='650' r='220' fill='rgba(159,213,197,0.10)'/>
-      <text x='70' y='130' fill='#9fd5c5' font-size='34' font-family='Arial, sans-serif' font-weight='700'>REEL APP DEMO</text>
-      <text x='70' y='420' fill='#f4f6f8' font-size='74' font-family='Arial, sans-serif' font-weight='800'>{title}</text>
+      <circle cx='740' cy='300' r='260' fill='{light}' opacity='0.16'/>
+      <circle cx='160' cy='1280' r='340' fill='{light}' opacity='0.10'/>
+      <circle cx='450' cy='800' r='120' fill='{light}' opacity='0.12'/>
     </svg>
     """.strip()
     return "data:image/svg+xml;utf8," + quote(svg)
@@ -135,7 +147,7 @@ def _demo_rows_with_media() -> list[dict]:
     rows = []
     for row in DEMO_ROWS:
         clone = dict(row)
-        clone["Thumbnail URL"] = _demo_cover_url(clone["Primary Category"])
+        clone["Thumbnail URL"] = _demo_cover_url(clone["Item Name"])
         clone["Media Status"] = "demo"
         clone["Contains Product"] = "Yes" if clone.get("Best Buy Link") else "No"
         rows.append(clone)
@@ -155,7 +167,7 @@ def _demo_personalized_collections() -> list[dict]:
                     "url": row["URL"],
                     "best_buy_link": row.get("Best Buy Link", ""),
                     "media_status": "demo",
-                    "thumbnail_url": _demo_cover_url("Useful Products"),
+                    "thumbnail_url": _demo_cover_url(row["Item Name"]),
                 }
                 for row in DEMO_ROWS[:3]
             ],
@@ -171,7 +183,7 @@ def _demo_personalized_collections() -> list[dict]:
                     "url": row["URL"],
                     "best_buy_link": row.get("Best Buy Link", ""),
                     "media_status": "demo",
-                    "thumbnail_url": _demo_cover_url("Playable Hobby Finds"),
+                    "thumbnail_url": _demo_cover_url(row["Item Name"]),
                 }
                 for row in DEMO_ROWS[3:6]
             ],
@@ -186,7 +198,7 @@ def _demo_personalized_collections() -> list[dict]:
                     "summary": row["Summary"],
                     "url": row["URL"],
                     "media_status": "demo",
-                    "thumbnail_url": _demo_cover_url("Quick Laughs"),
+                    "thumbnail_url": _demo_cover_url(row["Item Name"]),
                 }
                 for row in DEMO_ROWS[6:9]
             ],
@@ -202,7 +214,7 @@ def _demo_personalized_collections() -> list[dict]:
                     "url": row["URL"],
                     "best_buy_link": row.get("Best Buy Link", ""),
                     "media_status": "demo",
-                    "thumbnail_url": _demo_cover_url("One-Tap Cravings"),
+                    "thumbnail_url": _demo_cover_url(row["Item Name"]),
                 }
                 for row in DEMO_ROWS[9:10]
             ],

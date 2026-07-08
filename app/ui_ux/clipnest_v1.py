@@ -5,17 +5,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>MyLife Library</title>
+  <title>ClipNest</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg:#fff;
-      --text:#111;
-      --muted:#777;
-      --border:#eee;
-      --soft:#f7f7f8;
-      --accent:#6c4dff;
-      --danger:#ff3b30;
+      color-scheme: dark;
+      --bg:#0a0a0b;
+      --card:#161619;
+      --soft:#1c1c20;
+      --line:#232327;
+      --text:#f4f4f5;
+      --muted:#8e8e96;
+      --faint:#5c5c64;
+      --accent:#8b7bff;
+      --danger:#ff5b4d;
+      --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
       --safe-top:env(safe-area-inset-top, 0px);
       --safe-bottom:env(safe-area-inset-bottom, 0px);
     }
@@ -26,11 +29,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:var(--bg);
       color:var(--text);
       font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-      letter-spacing:0;
     }
     body { overflow-x:hidden; }
     button, input, a { font:inherit; -webkit-tap-highlight-color:transparent; }
-    button { border:0; background:none; color:inherit; cursor:pointer; }
+    button { border:0; background:none; color:inherit; cursor:pointer; padding:0; }
     .phone-shell {
       width:min(430px, 100%);
       min-height:100vh;
@@ -40,517 +42,585 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .screen {
       min-height:100vh;
-      padding:calc(18px + var(--safe-top)) 16px calc(96px + var(--safe-bottom));
+      padding:calc(16px + var(--safe-top)) 18px calc(104px + var(--safe-bottom));
     }
-    .screen.search-mode {
-      background:
-        linear-gradient(180deg, #07070b 0%, #101018 48%, #050508 100%);
-      color:#fff;
-      transition:background 160ms ease, color 160ms ease;
-    }
-    .topbar {
+
+    /* ---------- header ---------- */
+    .home-head {
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:12px;
-      margin-bottom:20px;
+      margin:6px 0 18px;
     }
-    .brand-mark {
-      width:54px;
-      height:54px;
-      border-radius:50%;
-      display:grid;
-      place-items:center;
-      background:#000;
-      color:#fff;
-      font-size:.68rem;
-      font-weight:800;
-    }
-    .icon-row { display:flex; align-items:center; gap:10px; }
-    .icon-button, .back-button {
-      width:44px;
-      height:44px;
-      border:1px solid var(--border);
-      border-radius:50%;
-      display:grid;
-      place-items:center;
-      background:#fff;
-      color:var(--text);
-      font-size:1.05rem;
-      line-height:1;
-    }
-    .back-button { width:42px; height:42px; font-size:1.25rem; }
-    .page-title {
+    .greeting {
       margin:0;
-      font-size:2rem;
-      line-height:1;
-      font-weight:900;
-    }
-    .microcopy {
-      margin:8px 0 0;
-      color:var(--muted);
-      font-size:.88rem;
-      line-height:1.35;
-      font-weight:600;
-    }
-    .list-heading {
-      display:grid;
-      grid-template-columns:42px minmax(0,1fr) auto;
-      align-items:center;
-      gap:10px;
-      margin-bottom:18px;
-    }
-    .list-title-block h1 {
-      margin:0;
-      font-size:1.28rem;
+      font-family:var(--serif);
+      font-size:2.1rem;
       line-height:1.05;
-      font-weight:900;
+      font-weight:600;
+      letter-spacing:.2px;
     }
-    .count-text {
-      margin:3px 0 0;
-      color:var(--accent);
-      font-size:.78rem;
-      font-weight:700;
+    .icon-row { display:flex; align-items:center; gap:8px; }
+    .icon-button, .back-button {
+      width:40px;
+      height:40px;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      background:transparent;
+      color:var(--text);
     }
-    .search { position:relative; margin:14px 0 12px; }
+    .icon-button:active, .back-button:active { background:var(--soft); }
+    .icon-button svg, .back-button svg { width:22px; height:22px; }
+
+    .section-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin:26px 0 14px;
+    }
+    .section-title {
+      margin:0;
+      font-family:var(--serif);
+      font-size:1.42rem;
+      line-height:1.1;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .section-title .chev { color:var(--faint); font-family:var(--serif); }
+    .section-side { color:var(--muted); font-size:.82rem; font-weight:600; }
+
+    /* ---------- search bar ---------- */
+    .search { position:relative; margin:4px 0 18px; }
     .search input {
       width:100%;
-      height:46px;
+      height:50px;
       border:0;
-      border-radius:18px;
+      border-radius:25px;
       background:var(--soft);
       color:var(--text);
-      padding:0 44px;
+      padding:0 20px 0 48px;
       outline:none;
-      font-size:.92rem;
-      font-weight:600;
+      font-size:.98rem;
+      font-weight:500;
     }
-    .search input::placeholder { color:#9a9a9a; }
-    .search span {
+    .search input::placeholder { color:var(--muted); }
+    .search .glyph {
       position:absolute;
-      left:16px;
+      left:17px;
       top:50%;
       transform:translateY(-50%);
       color:var(--muted);
-      font-size:.95rem;
       pointer-events:none;
+      display:grid;
+      place-items:center;
     }
+    .search .glyph svg { width:18px; height:18px; }
+
+    /* ---------- category rail ---------- */
+    .cat-rail {
+      display:flex;
+      gap:16px;
+      overflow-x:auto;
+      padding:2px 2px 6px;
+      scrollbar-width:none;
+    }
+    .cat-rail::-webkit-scrollbar { display:none; }
+    .cat-tile {
+      flex:0 0 auto;
+      width:72px;
+      display:grid;
+      justify-items:center;
+      gap:8px;
+    }
+    .cat-icon {
+      position:relative;
+      width:60px;
+      height:60px;
+      border-radius:19px;
+      display:grid;
+      place-items:center;
+      font-size:27px;
+      background:var(--card);
+      border:1px solid var(--line);
+      transition:transform 120ms ease;
+    }
+    .cat-tile:active .cat-icon { transform:scale(.93); }
+    .cat-tile.active .cat-icon { border-color:#fff; }
+    .cat-count {
+      position:absolute;
+      top:-7px;
+      right:-7px;
+      min-width:22px;
+      height:22px;
+      padding:0 6px;
+      border-radius:11px;
+      display:grid;
+      place-items:center;
+      background:#fff;
+      color:#000;
+      font-size:.72rem;
+      font-weight:800;
+    }
+    .cat-label {
+      max-width:74px;
+      color:var(--muted);
+      font-size:.74rem;
+      font-weight:600;
+      text-align:center;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .cat-tile.active .cat-label { color:var(--text); }
+
+    /* ---------- recently saved rail ---------- */
+    .recent-rail {
+      display:flex;
+      gap:12px;
+      overflow-x:auto;
+      padding:2px 2px 6px;
+      scrollbar-width:none;
+    }
+    .recent-rail::-webkit-scrollbar { display:none; }
+    .recent-card {
+      flex:0 0 auto;
+      width:132px;
+      text-align:left;
+    }
+    .recent-thumb {
+      display:block;
+      position:relative;
+      width:132px;
+      aspect-ratio:9/15;
+      border-radius:18px;
+      overflow:hidden;
+      background:var(--card);
+      border:1px solid var(--line);
+    }
+    .recent-thumb img, .recent-thumb video {
+      width:100%; height:100%; object-fit:cover; display:block;
+    }
+    .recent-thumb .mini-badge {
+      position:absolute;
+      left:8px;
+      bottom:8px;
+      display:flex;
+      gap:4px;
+    }
+    .badge-dot {
+      width:26px;
+      height:26px;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      background:rgba(255,255,255,.92);
+      color:#000;
+      font-size:.78rem;
+    }
+    .recent-source {
+      margin:9px 0 0;
+      color:var(--muted);
+      font-size:.72rem;
+      font-weight:600;
+      letter-spacing:.02em;
+    }
+    .recent-title {
+      margin:3px 0 0;
+      color:var(--text);
+      font-size:.88rem;
+      line-height:1.22;
+      font-weight:700;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    /* ---------- library rows ---------- */
+    .lib-list { display:grid; }
+    .lib-row {
+      display:grid;
+      grid-template-columns:56px minmax(0,1fr) auto;
+      align-items:center;
+      gap:14px;
+      padding:12px 0;
+      text-align:left;
+      border-bottom:1px solid var(--line);
+    }
+    .lib-row:last-child { border-bottom:0; }
+    .lib-icon {
+      width:56px;
+      height:56px;
+      border-radius:16px;
+      overflow:hidden;
+      display:grid;
+      place-items:center;
+      font-size:25px;
+      background:var(--card);
+      border:1px solid var(--line);
+    }
+    .lib-icon img, .lib-icon video { width:100%; height:100%; object-fit:cover; }
+    .lib-name {
+      margin:0;
+      font-size:1rem;
+      font-weight:700;
+      line-height:1.2;
+      display:-webkit-box;
+      -webkit-line-clamp:1;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    .lib-meta {
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:.8rem;
+      font-weight:500;
+    }
+    .lib-meta .dot-sep { color:var(--faint); margin:0 4px; }
+    .row-chev { color:var(--faint); }
+    .row-chev svg { width:18px; height:18px; }
+
+    /* ---------- pipeline pill ---------- */
+    .sync-pill {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      border-radius:16px;
+      background:var(--card);
+      border:1px solid var(--line);
+      padding:11px 14px;
+      margin:0 0 18px;
+    }
+    .sync-dot {
+      flex:0 0 auto;
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#33c47f;
+    }
+    .sync-pill.active .sync-dot { background:var(--accent); animation:pulse 1.2s ease-in-out infinite; }
+    .sync-pill.issue .sync-dot { background:#e58f3a; }
+    @keyframes pulse {
+      0%, 100% { transform:scale(1); opacity:1; }
+      50% { transform:scale(.6); opacity:.5; }
+    }
+    .sync-text { margin:0; font-size:.82rem; font-weight:600; color:var(--muted); min-width:0; }
+    .sync-text b { color:var(--text); font-weight:700; }
+
+    /* ---------- chips (folder filters) ---------- */
     .chips {
       display:flex;
-      gap:9px;
+      gap:8px;
       overflow-x:auto;
-      padding:2px 0 14px;
+      padding:2px 0 16px;
       scrollbar-width:none;
     }
     .chips::-webkit-scrollbar { display:none; }
     .chip {
       flex:0 0 auto;
-      height:36px;
-      border-radius:18px;
-      padding:0 17px;
+      height:38px;
+      border-radius:19px;
+      padding:0 16px;
       background:var(--soft);
-      color:var(--text);
-      font-size:.82rem;
-      font-weight:750;
-      white-space:nowrap;
-    }
-    .chip.active { background:var(--accent); color:#fff; }
-    .list-grid {
-      display:grid;
-      grid-template-columns:1fr;
-      gap:12px;
-    }
-    .list-card {
-      position:relative;
-      min-height:210px;
-      overflow:hidden;
-      border-radius:10px;
-      background:linear-gradient(180deg, #efeff1, #bbb);
-      isolation:isolate;
-      text-align:left;
-    }
-    .list-card img, .list-card video {
-      position:absolute;
-      inset:0;
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      transform:scale(1.02);
-    }
-    .list-card::after {
-      content:"";
-      position:absolute;
-      inset:0;
-      background:linear-gradient(180deg, rgba(0,0,0,.02), rgba(0,0,0,.64));
-      z-index:1;
-    }
-    .list-card-content {
-      position:absolute;
-      left:12px;
-      right:12px;
-      bottom:12px;
-      z-index:2;
-      color:#fff;
-      display:grid;
-      gap:7px;
-      text-align:left;
-    }
-    .list-domain {
-      width:max-content;
-      max-width:100%;
-      min-height:25px;
-      border-radius:13px;
-      padding:5px 9px;
-      background:rgba(255,255,255,.9);
-      color:#111;
-      font-size:.68rem;
-      font-weight:850;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .list-card-title {
-      font-size:1.02rem;
-      line-height:1.12;
-      font-weight:850;
-    }
-    .list-preview {
-      margin:0;
-      color:rgba(255,255,255,.84);
-      font-size:.78rem;
-      line-height:1.32;
+      color:var(--muted);
+      font-size:.85rem;
       font-weight:650;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient:vertical;
-      overflow:hidden;
-    }
-    .count-badge {
-      position:absolute;
-      top:10px;
-      right:10px;
-      z-index:2;
-      min-width:27px;
-      height:27px;
-      padding:0 8px;
-      border-radius:14px;
-      display:inline-grid;
-      place-items:center;
-      background:#fff;
-      color:#111;
-      font-size:.78rem;
-      font-weight:850;
-    }
-    .item-grid {
-      display:grid;
-      grid-template-columns:1fr;
-      gap:12px;
-      align-items:start;
-    }
-    .item-card {
-      min-width:0;
-      border:1px solid var(--border);
-      border-radius:14px;
-      background:#fff;
-      padding:10px;
-      text-align:left;
-      box-shadow:0 10px 28px rgba(17,17,17,.05);
-    }
-    .item-open {
-      width:100%;
-      display:grid;
-      grid-template-columns:96px minmax(0,1fr);
-      gap:12px;
-      text-align:left;
-      align-items:start;
-    }
-    .thumb-wrap {
-      position:relative;
-      aspect-ratio:9 / 14;
-      overflow:hidden;
-      border-radius:8px;
-      background:#ececef;
-    }
-    .thumb-wrap img, .thumb-wrap video {
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      display:block;
-    }
-    .duration {
-      position:absolute;
-      top:6px;
-      right:6px;
-      height:20px;
-      border-radius:10px;
-      padding:0 6px;
+      white-space:nowrap;
       display:inline-flex;
       align-items:center;
-      background:rgba(0,0,0,.74);
-      color:#fff;
-      font-size:.7rem;
-      font-weight:800;
+      gap:6px;
     }
-    .play-dot {
-      position:absolute;
-      left:7px;
-      bottom:7px;
-      width:20px;
-      height:20px;
-      border-radius:50%;
+    .chip.active { background:#fff; color:#000; }
+
+    /* ---------- folder screen ---------- */
+    .list-heading {
       display:grid;
-      place-items:center;
-      background:rgba(0,0,0,.62);
-      color:#fff;
-      font-size:.64rem;
+      grid-template-columns:40px minmax(0,1fr) auto;
+      align-items:center;
+      gap:10px;
+      margin:2px 0 16px;
     }
-    .item-title-row {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) 18px;
-      gap:4px;
-      margin-top:1px;
-    }
-    .item-title {
+    .list-title-block h1 {
       margin:0;
-      min-width:0;
-      font-size:.95rem;
-      line-height:1.16;
-      font-weight:800;
+      font-family:var(--serif);
+      font-size:1.5rem;
+      line-height:1.08;
+      font-weight:600;
+    }
+    .count-text {
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:.78rem;
+      font-weight:600;
+    }
+    .masonry {
+      columns:2;
+      column-gap:12px;
+    }
+    .m-card {
+      break-inside:avoid;
+      margin:0 0 18px;
+      width:100%;
+      text-align:left;
+    }
+    .m-thumb {
+      display:block;
+      position:relative;
+      width:100%;
+      aspect-ratio:9/13;
+      border-radius:18px;
+      overflow:hidden;
+      background:var(--card);
+      border:1px solid var(--line);
+    }
+    .m-thumb img, .m-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    .m-badges {
+      position:absolute;
+      left:9px;
+      bottom:9px;
+      display:flex;
+      gap:5px;
+    }
+    .m-title-row {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 22px;
+      gap:6px;
+      align-items:start;
+      margin-top:9px;
+    }
+    .m-title {
+      margin:0;
+      font-size:.9rem;
+      line-height:1.22;
+      font-weight:700;
       display:-webkit-box;
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
     }
-    .more-dot { color:var(--muted); font-weight:900; line-height:1; }
-    .item-summary {
-      margin:7px 0 0;
-      color:#555;
-      font-size:.78rem;
-      line-height:1.34;
-      font-weight:600;
+    .m-kebab { color:var(--faint); font-weight:800; letter-spacing:1px; }
+    .m-summary {
+      margin:5px 0 0;
+      color:var(--muted);
+      font-size:.76rem;
+      line-height:1.35;
+      font-weight:500;
       display:-webkit-box;
-      -webkit-line-clamp:3;
+      -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
     }
-    .item-meta-row {
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      margin-top:9px;
-    }
-    .item-pill {
-      min-height:24px;
-      border-radius:12px;
-      padding:5px 8px;
-      background:var(--soft);
-      color:#555;
-      font-size:.68rem;
-      line-height:1;
-      font-weight:850;
-      max-width:100%;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-    .item-pill.product { background:#f0edff; color:#4f34d9; }
-    .buy-row {
-      display:flex;
-      flex-wrap:wrap;
-      gap:7px;
-      margin:10px 0 0 108px;
-    }
+    .buy-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
     .buy-link {
-      min-height:30px;
-      border-radius:15px;
-      padding:7px 10px;
-      background:#111;
-      color:#fff;
+      min-height:28px;
+      border-radius:14px;
+      padding:6px 11px;
+      background:var(--soft);
+      border:1px solid var(--line);
+      color:var(--text);
       text-decoration:none;
       font-size:.72rem;
       line-height:1;
-      font-weight:850;
-    }
-    .bottom-nav {
-      position:fixed;
-      left:50%;
-      bottom:0;
-      z-index:30;
-      width:min(430px, 100%);
-      transform:translateX(-50%);
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      border-top:1px solid var(--border);
-      background:rgba(255,255,255,.96);
-      padding:9px 18px calc(9px + var(--safe-bottom));
-    }
-    .bottom-nav.search-nav-mode {
-      border-top-color:rgba(255,255,255,.12);
-      background:rgba(6,6,10,.96);
-    }
-    .nav-button {
-      display:grid;
-      gap:3px;
-      place-items:center;
-      color:var(--muted);
-      font-size:.72rem;
-      font-weight:700;
-    }
-    .nav-icon {
-      width:24px;
-      height:22px;
-      display:grid;
-      place-items:center;
-      font-size:1.08rem;
-    }
-    .nav-button.active { color:var(--accent); }
-    .sync-banner {
-      display:grid;
-      grid-template-columns:10px minmax(0,1fr) auto;
-      gap:11px;
-      align-items:center;
-      border:1px solid var(--border);
-      border-radius:18px;
-      background:#fff;
-      padding:12px;
-      margin:14px 0;
-      box-shadow:0 10px 30px rgba(17,17,17,.05);
-    }
-    .sync-banner.idle { background:var(--soft); box-shadow:none; }
-    .sync-dot {
-      width:10px;
-      height:10px;
-      border-radius:50%;
-      background:#26b36d;
-      box-shadow:0 0 0 5px rgba(38,179,109,.12);
-    }
-    .sync-banner.active .sync-dot {
-      background:var(--accent);
-      box-shadow:0 0 0 5px rgba(108,77,255,.14);
-      animation:pulse 1.2s ease-in-out infinite;
-    }
-    .sync-banner.issue .sync-dot {
-      background:#d9822b;
-      box-shadow:0 0 0 5px rgba(217,130,43,.14);
-    }
-    @keyframes pulse {
-      0%, 100% { transform:scale(1); opacity:1; }
-      50% { transform:scale(.72); opacity:.62; }
-    }
-    .sync-title { margin:0; font-size:.86rem; font-weight:850; line-height:1.2; }
-    .sync-copy { margin:3px 0 0; color:var(--muted); font-size:.74rem; line-height:1.3; font-weight:650; }
-    .sync-count {
-      min-height:28px;
-      border-radius:14px;
-      padding:7px 10px;
-      background:#111;
-      color:#fff;
-      font-size:.7rem;
-      font-weight:850;
-      line-height:1;
-      white-space:nowrap;
-    }
-    .profile-panel { display:grid; gap:12px; margin-top:16px; }
-    .profile-row {
-      min-height:54px;
-      border-bottom:1px solid var(--border);
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
       font-weight:750;
     }
-    .profile-row span { color:var(--muted); font-size:.82rem; font-weight:700; }
-    .profile-grid {
+
+    /* ---------- search screen ---------- */
+    .search-stage {
+      min-height:calc(100vh - 150px - var(--safe-bottom));
+      display:grid;
+      align-content:start;
+      padding:8px 0 40px;
+    }
+    .magic-head { text-align:left; margin:14px 0 22px; }
+    .magic-title {
+      margin:0;
+      font-family:var(--serif);
+      font-size:2rem;
+      line-height:1.1;
+      font-weight:600;
+    }
+    .magic-copy {
+      margin:10px 0 0;
+      color:var(--muted);
+      font-size:.9rem;
+      line-height:1.45;
+      font-weight:500;
+      max-width:21rem;
+    }
+    .magic-bar { position:relative; }
+    .magic-bar input {
+      width:100%;
+      height:56px;
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:var(--soft);
+      color:var(--text);
+      outline:none;
+      padding:0 56px 0 20px;
+      font-size:1rem;
+      font-weight:550;
+    }
+    .magic-bar input::placeholder { color:var(--muted); }
+    .magic-bar input:focus { border-color:#3a3a40; }
+    .magic-submit {
+      position:absolute;
+      right:7px;
+      top:50%;
+      transform:translateY(-50%);
+      width:42px;
+      height:42px;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      background:#fff;
+      color:#000;
+    }
+    .magic-submit svg { width:18px; height:18px; }
+    .result-list { display:grid; gap:10px; width:100%; margin-top:20px; }
+    .result-card {
+      display:grid;
+      grid-template-columns:56px minmax(0,1fr);
+      gap:12px;
+      align-items:center;
+      padding:9px;
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:var(--card);
+      color:var(--text);
+      text-align:left;
+    }
+    .result-thumb {
+      width:56px;
+      height:56px;
+      border-radius:13px;
+      overflow:hidden;
+      background:var(--soft);
+    }
+    .result-thumb img, .result-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    .result-card h3 {
+      margin:0;
+      font-size:.9rem;
+      line-height:1.2;
+      font-weight:700;
+      overflow:hidden;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+    }
+    .result-card p {
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:.75rem;
+      line-height:1.3;
+      overflow:hidden;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+    }
+
+    /* ---------- profile / settings ---------- */
+    .metric-grid {
       display:grid;
       grid-template-columns:repeat(2, minmax(0,1fr));
       gap:10px;
-      margin-top:14px;
+      margin:6px 0 10px;
     }
     .metric-card {
-      border:1px solid var(--border);
-      border-radius:16px;
-      background:#fff;
-      padding:13px;
-      box-shadow:0 10px 26px rgba(17,17,17,.04);
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:var(--card);
+      padding:14px;
     }
     .metric-card span {
       display:block;
       color:var(--muted);
-      font-size:.69rem;
-      font-weight:800;
+      font-size:.68rem;
+      font-weight:700;
       text-transform:uppercase;
+      letter-spacing:.05em;
     }
     .metric-card b {
       display:block;
-      margin-top:7px;
-      font-size:1.3rem;
+      margin-top:8px;
+      font-family:var(--serif);
+      font-size:1.5rem;
       line-height:1;
-      font-weight:900;
+      font-weight:600;
     }
-    .profile-section-title {
-      margin:22px 0 10px;
-      font-size:.82rem;
-      line-height:1;
-      font-weight:900;
-      color:#444;
+    .set-section {
+      margin:22px 0 0;
+    }
+    .set-title {
+      margin:0 0 6px;
+      color:var(--muted);
+      font-size:.74rem;
+      font-weight:750;
       text-transform:uppercase;
+      letter-spacing:.06em;
     }
-    .logout-button {
-      margin-top:24px;
+    .set-card {
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:var(--card);
+      overflow:hidden;
+    }
+    .set-row {
       width:100%;
-      padding:14px;
-      border:1px solid var(--border);
-      border-radius:16px;
-      background:#fff;
-      color:#c0392b;
+      min-height:52px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:0 15px;
+      border-bottom:1px solid var(--line);
       font-size:.92rem;
-      font-weight:900;
-      cursor:pointer;
+      font-weight:600;
+      text-align:left;
+      color:var(--text);
+      text-decoration:none;
     }
-    .logout-button:active { transform:scale(.99); }
-    .action-button {
-      margin-top:12px;
-      width:100%;
-      padding:14px;
-      border:1px solid var(--border);
-      border-radius:16px;
-      background:#111;
-      color:#fff;
-      font-size:.92rem;
-      font-weight:900;
-      cursor:pointer;
+    .set-card .set-row:last-child { border-bottom:0; }
+    .set-row .value {
+      color:var(--muted);
+      font-size:.84rem;
+      font-weight:550;
+      max-width:55%;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
     }
-    .action-button:active { transform:scale(.99); }
-    .ig-link-panel {
-      margin-top:16px;
-      border:1px solid var(--border);
-      border-radius:16px;
-      background:#fff;
-      padding:16px;
-      display:grid;
-      gap:10px;
-      box-shadow:0 10px 26px rgba(17,17,17,.04);
-    }
-    .ig-link-panel b { font-size:.92rem; font-weight:900; }
-    .ig-link-panel p { margin:0; color:var(--muted); font-size:.84rem; font-weight:600; line-height:1.45; }
-    .ig-link-code {
-      font-size:1.45rem;
-      font-weight:900;
-      letter-spacing:.12em;
+    .set-row.danger { color:var(--danger); }
+    .set-row.action { color:var(--accent); }
+    .ig-code {
+      font-family:var(--serif);
+      font-size:1.5rem;
+      font-weight:600;
+      letter-spacing:.14em;
       text-align:center;
-      padding:12px;
-      border:1px dashed var(--border);
-      border-radius:12px;
+      padding:14px;
+      margin:12px 15px;
+      border:1px dashed var(--line);
+      border-radius:14px;
       user-select:all;
+    }
+    .ig-help {
+      margin:0 15px 14px;
+      color:var(--muted);
+      font-size:.82rem;
+      line-height:1.45;
+      font-weight:500;
     }
     .job-list { display:grid; gap:10px; }
     .job-card {
-      border:1px solid var(--border);
+      border:1px solid var(--line);
       border-radius:16px;
-      background:#fff;
-      padding:12px;
-      box-shadow:0 10px 26px rgba(17,17,17,.04);
+      background:var(--card);
+      padding:13px;
     }
     .job-head {
       display:grid;
@@ -562,7 +632,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       margin:0;
       font-size:.86rem;
       line-height:1.25;
-      font-weight:850;
+      font-weight:700;
       overflow:hidden;
       display:-webkit-box;
       -webkit-line-clamp:2;
@@ -571,38 +641,35 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .status-pill {
       min-height:24px;
       border-radius:12px;
-      padding:5px 8px;
+      padding:5px 9px;
       background:var(--soft);
-      color:#444;
-      font-size:.66rem;
+      color:var(--muted);
+      font-size:.64rem;
       line-height:1;
-      font-weight:900;
+      font-weight:800;
       text-transform:uppercase;
+      letter-spacing:.04em;
     }
-    .status-pill.running, .status-pill.queued, .status-pill.pending { background:#f0edff; color:#4f34d9; }
-    .status-pill.completed { background:#eaf8f0; color:#147d49; }
-    .status-pill.failed { background:#fff2e5; color:#a85512; }
+    .status-pill.running, .status-pill.queued, .status-pill.pending { color:var(--accent); }
+    .status-pill.completed { color:#33c47f; }
+    .status-pill.failed { color:#e58f3a; }
     .job-meta {
       margin:8px 0 0;
       color:var(--muted);
-      font-size:.72rem;
+      font-size:.74rem;
       line-height:1.35;
-      font-weight:650;
+      font-weight:500;
       word-break:break-word;
     }
     .json-box {
       margin-top:10px;
       border-radius:12px;
-      background:#111;
-      color:#e8e8e8;
+      background:#0f0f11;
+      border:1px solid var(--line);
+      color:#c9c9cf;
       overflow:hidden;
     }
-    .json-box summary {
-      cursor:pointer;
-      padding:10px 12px;
-      font-size:.72rem;
-      font-weight:850;
-    }
+    .json-box summary { cursor:pointer; padding:10px 12px; font-size:.72rem; font-weight:750; }
     .json-box pre {
       margin:0;
       max-height:260px;
@@ -613,166 +680,57 @@ def build_clipnest_v1_html(user_id: str) -> str:
       white-space:pre-wrap;
       word-break:break-word;
     }
-    .search-stage {
-      min-height:calc(100vh - 130px - var(--safe-bottom));
-      display:grid;
-      place-items:center;
-      padding:24px 0 60px;
-    }
-    .magic-search {
-      width:100%;
-      display:grid;
-      gap:18px;
-      text-align:center;
-    }
-    .magic-orb {
-      width:60px;
-      height:60px;
-      margin:0 auto;
-      border-radius:20px;
-      display:grid;
-      place-items:center;
-      color:#fff;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,0)),
-        linear-gradient(135deg, #12121a, #6c4dff 68%, #e5dcff);
-      box-shadow:0 18px 46px rgba(108,77,255,.34), inset 0 1px 0 rgba(255,255,255,.28);
-      font-weight:900;
-    }
-    .magic-title {
-      margin:0;
-      font-size:1.72rem;
-      line-height:1.05;
-      font-weight:900;
-    }
-    .magic-copy {
-      margin:0 auto;
-      max-width:19rem;
-      color:rgba(255,255,255,.64);
-      font-size:.9rem;
-      line-height:1.45;
-      font-weight:600;
-    }
-    .magic-bar {
-      position:relative;
-      margin-top:4px;
-    }
-    .magic-bar::before {
-      content:"";
-      position:absolute;
-      inset:-1px;
-      border-radius:26px;
-      background:linear-gradient(90deg, rgba(108,77,255,.95), rgba(255,255,255,.4), rgba(128,104,255,.82));
-      opacity:.92;
-      z-index:0;
-    }
-    .magic-bar::after {
-      content:"";
-      position:absolute;
-      inset:2px;
-      border-radius:23px;
-      background:#0d0d14;
-      z-index:0;
-    }
-    .magic-bar input {
-      position:relative;
-      z-index:1;
-      width:100%;
-      height:58px;
-      border:1px solid rgba(255,255,255,.12);
-      border-radius:24px;
-      background:rgba(12,12,20,.94);
-      color:#fff;
-      outline:none;
-      padding:0 54px 0 18px;
-      font-size:1rem;
-      font-weight:750;
-      box-shadow:0 18px 42px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.08);
-    }
-    .magic-bar input::placeholder {
-      color:rgba(255,255,255,.48);
-    }
-    .magic-bar input:focus {
-      border-color:rgba(255,255,255,.22);
-    }
-    .magic-submit {
-      position:absolute;
-      z-index:2;
-      right:8px;
-      top:50%;
-      transform:translateY(-50%);
-      width:42px;
-      height:42px;
-      border-radius:18px;
-      display:grid;
-      place-items:center;
-      background:var(--accent);
-      color:#fff;
-      font-weight:900;
-      box-shadow:0 10px 26px rgba(108,77,255,.36);
-    }
-    .result-list { display:grid; gap:10px; width:100%; margin-top:18px; }
-    .result-card {
-      display:grid;
-      grid-template-columns:58px minmax(0,1fr);
-      gap:12px;
-      align-items:center;
-      padding:9px;
-      border:1px solid rgba(255,255,255,.1);
-      border-radius:16px;
-      background:rgba(255,255,255,.07);
-      color:#fff;
-      text-align:left;
-      backdrop-filter:blur(14px);
-    }
-    .result-thumb {
-      width:58px;
-      height:58px;
-      border-radius:12px;
-      overflow:hidden;
-      background:#eee;
-    }
-    .result-thumb img, .result-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
-    .result-card h3 {
-      margin:0;
-      font-size:.9rem;
-      line-height:1.2;
-      font-weight:850;
-      overflow:hidden;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient:vertical;
-    }
-    .result-card p {
-      margin:4px 0 0;
-      color:rgba(255,255,255,.58);
-      font-size:.75rem;
-      line-height:1.25;
-      overflow:hidden;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient:vertical;
-    }
     .empty {
-      padding:48px 8px;
+      padding:44px 8px;
       text-align:center;
       color:var(--muted);
-      font-weight:700;
+      font-weight:600;
+      font-size:.9rem;
     }
+
+    /* ---------- bottom nav ---------- */
+    .bottom-nav {
+      position:fixed;
+      left:50%;
+      bottom:0;
+      z-index:30;
+      width:min(430px, 100%);
+      transform:translateX(-50%);
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      border-top:1px solid var(--line);
+      background:rgba(10,10,11,.86);
+      -webkit-backdrop-filter:blur(18px);
+      backdrop-filter:blur(18px);
+      padding:10px 26px calc(10px + var(--safe-bottom));
+    }
+    .nav-button {
+      display:grid;
+      gap:4px;
+      place-items:center;
+      color:var(--faint);
+      font-size:.68rem;
+      font-weight:650;
+    }
+    .nav-button svg { width:23px; height:23px; }
+    .nav-button.active { color:var(--text); }
+
+    /* ---------- mini player ---------- */
     .mini-player {
       position:fixed;
       left:50%;
-      bottom:calc(72px + var(--safe-bottom));
+      bottom:calc(76px + var(--safe-bottom));
       z-index:40;
       width:min(398px, calc(100% - 28px));
-      transform:translate(-50%, calc(100% + 110px));
-      border:1px solid var(--border);
-      border-radius:18px;
-      background:#fff;
+      transform:translate(-50%, calc(100% + 120px));
+      border:1px solid var(--line);
+      border-radius:20px;
+      background:#141417;
       overflow:hidden;
       opacity:0;
       pointer-events:none;
-      transition:transform 180ms ease, opacity 180ms ease;
+      transition:transform 200ms cubic-bezier(.32,.72,.35,1), opacity 200ms ease;
+      box-shadow:0 18px 50px rgba(0,0,0,.55);
     }
     .mini-player.visible {
       transform:translate(-50%, 0);
@@ -781,30 +739,30 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .mini-body {
       display:grid;
-      grid-template-columns:58px minmax(0,1fr) 44px 34px 34px;
+      grid-template-columns:54px minmax(0,1fr) 44px 34px 34px;
       align-items:center;
       gap:10px;
-      padding:12px;
+      padding:11px;
     }
     .mini-thumb {
-      width:58px;
-      height:58px;
-      border-radius:9px;
+      width:54px;
+      height:54px;
+      border-radius:12px;
       overflow:hidden;
-      background:#eee;
+      background:var(--soft);
     }
     .mini-thumb img, .mini-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
     .mini-title {
       margin:0;
-      font-size:.9rem;
+      font-size:.88rem;
       line-height:1.2;
-      font-weight:850;
+      font-weight:700;
       display:-webkit-box;
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
     }
-    .mini-time { margin-top:5px; color:var(--accent); font-size:.72rem; font-weight:800; }
+    .mini-time { margin-top:4px; color:var(--muted); font-size:.7rem; font-weight:650; }
     .mini-action {
       min-width:34px;
       height:34px;
@@ -812,19 +770,21 @@ def build_clipnest_v1_html(user_id: str) -> str:
       place-items:center;
       border-radius:50%;
       color:var(--text);
-      font-size:.88rem;
-      font-weight:750;
+      font-size:.82rem;
+      font-weight:650;
     }
-    .progress-track { height:3px; background:#e7e7e7; }
-    .progress-fill { width:0%; height:100%; background:var(--accent); }
+    .progress-track { height:3px; background:#232327; }
+    .progress-fill { width:0%; height:100%; background:#fff; }
+
+    /* ---------- action sheet ---------- */
     .sheet-backdrop {
       position:fixed;
       inset:0;
       z-index:50;
-      background:rgba(0,0,0,.22);
+      background:rgba(0,0,0,.5);
       opacity:0;
       pointer-events:none;
-      transition:opacity 160ms ease;
+      transition:opacity 180ms ease;
     }
     .sheet-backdrop.visible { opacity:1; pointer-events:auto; }
     .action-sheet {
@@ -834,14 +794,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
       z-index:60;
       width:min(430px,100%);
       transform:translate(-50%,104%);
-      border-radius:22px 22px 0 0;
-      background:#fff;
+      border-radius:24px 24px 0 0;
+      background:#141417;
+      border:1px solid var(--line);
+      border-bottom:0;
       overflow:hidden;
-      transition:transform 180ms ease;
+      transition:transform 220ms cubic-bezier(.32,.72,.35,1);
     }
     .action-sheet.visible { transform:translate(-50%,0); }
-    .sheet-media { position:relative; height:210px; background:#111; }
-    .sheet-media img, .sheet-media video { width:100%; height:100%; object-fit:cover; display:block; opacity:.9; }
+    .sheet-media { position:relative; height:200px; background:#0f0f11; }
+    .sheet-media img, .sheet-media video { width:100%; height:100%; object-fit:cover; display:block; opacity:.92; }
     .sheet-close {
       position:absolute;
       top:14px;
@@ -851,66 +813,70 @@ def build_clipnest_v1_html(user_id: str) -> str:
       border-radius:50%;
       display:grid;
       place-items:center;
-      background:rgba(0,0,0,.72);
+      background:rgba(0,0,0,.65);
       color:#fff;
+      font-size:.9rem;
     }
-    .sheet-body { padding:14px 18px calc(18px + var(--safe-bottom)); }
-    .sheet-handle { width:38px; height:4px; border-radius:3px; background:#d8d8d8; margin:0 auto 14px; }
+    .sheet-body { padding:14px 18px calc(20px + var(--safe-bottom)); }
+    .sheet-handle { width:38px; height:4px; border-radius:3px; background:#3a3a40; margin:0 auto 14px; }
     .sheet-title-row { display:flex; justify-content:space-between; gap:12px; align-items:start; margin-bottom:14px; }
-    .sheet-title { margin:0; font-size:1rem; line-height:1.25; font-weight:900; }
+    .sheet-title { margin:0; font-family:var(--serif); font-size:1.08rem; line-height:1.25; font-weight:600; }
     .type-badge {
       flex:0 0 auto;
       border-radius:12px;
-      background:rgba(108,77,255,.1);
-      color:var(--accent);
-      padding:5px 9px;
-      font-size:.72rem;
-      font-weight:850;
+      background:var(--soft);
+      border:1px solid var(--line);
+      color:var(--muted);
+      padding:5px 10px;
+      font-size:.7rem;
+      font-weight:750;
     }
     .quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:16px; }
-    .quick-action { display:grid; place-items:center; gap:6px; color:var(--text); font-size:.68rem; font-weight:700; }
+    .quick-action { display:grid; place-items:center; gap:6px; color:var(--muted); font-size:.68rem; font-weight:650; }
     .quick-action span {
-      width:38px;
-      height:38px;
-      border:1px solid var(--border);
+      width:40px;
+      height:40px;
+      border:1px solid var(--line);
       border-radius:50%;
       display:grid;
       place-items:center;
       font-size:1rem;
+      color:var(--text);
+      background:var(--soft);
     }
-    .sheet-list { border-top:1px solid var(--border); }
+    .sheet-list { border-top:1px solid var(--line); }
     .sheet-row {
-      min-height:49px;
-      border-bottom:1px solid var(--border);
+      min-height:50px;
+      border-bottom:1px solid var(--line);
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:12px;
       color:var(--text);
       text-decoration:none;
-      font-size:.88rem;
-      font-weight:750;
+      font-size:.9rem;
+      font-weight:600;
       width:100%;
     }
     .sheet-row .new {
       margin-left:7px;
       border-radius:9px;
-      background:rgba(108,77,255,.1);
+      background:rgba(139,123,255,.16);
       color:var(--accent);
       padding:2px 7px;
-      font-size:.66rem;
-      font-weight:850;
+      font-size:.64rem;
+      font-weight:800;
     }
     .sheet-row.danger { color:var(--danger); }
     .hidden { display:none !important; }
     @media (min-width:760px) {
-      body { background:#fafafa; }
+      body { background:#000; }
       .phone-shell {
         margin-top:24px;
         margin-bottom:24px;
         min-height:calc(100vh - 48px);
-        border:1px solid var(--border);
-        border-radius:28px;
+        border:1px solid var(--line);
+        border-radius:32px;
         overflow:hidden;
       }
     }
@@ -927,17 +893,26 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div id="miniTime" class="mini-time">0:00 / 0:12</div>
         </div>
         <button id="miniToggle" class="mini-action" type="button" aria-label="Play or pause">Pause</button>
-        <button id="miniMore" class="mini-action" type="button" aria-label="More actions">...</button>
-        <button id="miniClose" class="mini-action" type="button" aria-label="Close mini player">X</button>
+        <button id="miniMore" class="mini-action" type="button" aria-label="More actions">···</button>
+        <button id="miniClose" class="mini-action" type="button" aria-label="Close mini player">✕</button>
       </div>
       <div class="progress-track"><div id="miniProgress" class="progress-fill"></div></div>
     </section>
     <div id="sheetBackdrop" class="sheet-backdrop"></div>
     <section id="actionSheet" class="action-sheet" aria-label="Item actions"></section>
     <nav class="bottom-nav" aria-label="Primary">
-      <button id="searchNav" class="nav-button" type="button"><span class="nav-icon">⌕</span><span>Search</span></button>
-      <button id="libraryNav" class="nav-button active" type="button"><span class="nav-icon">□</span><span>Library</span></button>
-      <button id="profileNav" class="nav-button" type="button"><span class="nav-icon">○</span><span>Profile</span></button>
+      <button id="libraryNav" class="nav-button active" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+        <span>Home</span>
+      </button>
+      <button id="searchNav" class="nav-button" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Search</span>
+      </button>
+      <button id="profileNav" class="nav-button" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.8-3.4 4.5-5 8-5s6.2 1.6 8 5"/></svg>
+        <span>Profile</span>
+      </button>
     </nav>
   </div>
   <script>
@@ -982,6 +957,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const actionSheet = document.getElementById('actionSheet');
     const sheetBackdrop = document.getElementById('sheetBackdrop');
 
+    const SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+    const CHEV_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+    const BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+    const ARROW_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+    const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>';
+
     function escapeHtml(value) {
       return String(value ?? '')
         .replaceAll('&', '&amp;')
@@ -989,6 +970,45 @@ def build_clipnest_v1_html(user_id: str) -> str:
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+    }
+    function greeting() {
+      const hour = new Date().getHours();
+      if (hour < 5) return 'Late night';
+      if (hour < 12) return 'Morning';
+      if (hour < 17) return 'Afternoon';
+      return 'Evening';
+    }
+    const EMOJI_RULES = [
+      [/product|shop|buy|gadget|tech/i, '🛍️'],
+      [/recipe|food|cook|craving|snack|street/i, '🍲'],
+      [/place|travel|trip|city|location/i, '🗺️'],
+      [/fitness|workout|gym|sport|swim|exercise/i, '💪'],
+      [/meme|funny|laugh|humor|comedy/i, '😂'],
+      [/fashion|outfit|style|wear/i, '👕'],
+      [/software|code|app|ai|computer/i, '💻'],
+      [/film|movie|tv|show|series/i, '🎬'],
+      [/music|song|album/i, '🎵'],
+      [/book|read|learn|tutorial|study/i, '📘'],
+      [/car|bike|drive|auto/i, '🏎️'],
+      [/game|gaming|play/i, '🎮'],
+      [/beauty|skin|makeup/i, '✨'],
+      [/finance|money|invest|business/i, '💸'],
+      [/hobby|diy|craft|build/i, '🧩'],
+    ];
+    function emojiFor(name) {
+      const value = String(name || '');
+      for (const [pattern, emoji] of EMOJI_RULES) {
+        if (pattern.test(value)) return emoji;
+      }
+      return '📎';
+    }
+    function sourceFor(item) {
+      const url = String(item.url || '');
+      if (/instagram\\.com/i.test(url)) return 'Instagram';
+      if (/youtube\\.com|youtu\\.be/i.test(url)) return 'YouTube';
+      if (/tiktok\\.com/i.test(url)) return 'TikTok';
+      if (url) return 'Saved link';
+      return 'Saved';
     }
     function realItems(list) {
       return (list.items || []).filter((item) => {
@@ -1051,13 +1071,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
         count: 'Ready'
       };
     }
-    function renderSyncBanner(compact = false) {
+    function renderSyncPill(compact = false) {
       const status = pipelineStatus();
       if (compact && status.tone === 'idle') return '';
-      return `<section class="sync-banner ${status.tone}">
+      return `<section class="sync-pill ${status.tone}">
         <span class="sync-dot" aria-hidden="true"></span>
-        <div><p class="sync-title">${escapeHtml(status.title)}</p><p class="sync-copy">${escapeHtml(status.copy)}</p></div>
-        <span class="sync-count">${escapeHtml(status.count)}</span>
+        <p class="sync-text"><b>${escapeHtml(status.title)}.</b> ${escapeHtml(status.copy)}</p>
       </section>`;
     }
     function formatTime(value) {
@@ -1155,37 +1174,87 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function chips() {
       return ['All', ...Array.from(new Set(sortedCollections().map((list) => list.parent_title || list.list_title))).filter(Boolean)];
     }
-    function renderSearch(placeholder, value, id) {
-      return `<label class="search"><span>⌕</span><input id="${id}" type="search" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" /></label>`;
+    function categoryTiles() {
+      const groups = new Map();
+      for (const list of sortedCollections()) {
+        const key = list.parent_title || list.list_title;
+        if (!key) continue;
+        groups.set(key, (groups.get(key) || 0) + list.real_count);
+      }
+      return Array.from(groups.entries());
+    }
+    function flatItems() {
+      return sortedCollections().flatMap((list) =>
+        list.items.map((item) => ({ ...item, list_id: list.list_id, list_title: list.list_title, parent_title: list.parent_title })));
+    }
+    function recentItems(limit = 10) {
+      const seen = new Set();
+      const items = [];
+      for (const item of flatItems()) {
+        const key = item.reel_id || item.url || item.name;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+        if (items.length >= limit) break;
+      }
+      return items;
+    }
+    function renderSearchBox(placeholder, value, id) {
+      return `<label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="${id}" type="search" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" /></label>`;
     }
     function renderChips(values, active, kind) {
       return `<div class="chips" aria-label="${kind} filters">${values.map((chip) => `<button class="chip ${chip === active ? 'active' : ''}" type="button" data-chip-kind="${kind}" data-chip="${escapeHtml(chip)}">${escapeHtml(chip)}</button>`).join('')}</div>`;
     }
+
+    /* ---------- HOME ---------- */
     function renderLibrary() {
       const lists = sortedCollections().filter(listMatches);
+      const tiles = categoryTiles();
+      const recents = recentItems(10);
       app.innerHTML = `
-        <div class="topbar">
-          <div class="brand-mark">MyLife</div>
+        <div class="home-head">
+          <h1 class="greeting">${escapeHtml(greeting())}</h1>
           <div class="icon-row">
-            <button class="icon-button" type="button" aria-label="Filters">☷</button>
-            <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">↻</button>
+            <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
           </div>
         </div>
-        <h1 class="page-title">All Folders</h1>
-        <p class="microcopy">Sorted by most saved items first. Smaller noisy folders naturally settle lower.</p>
-        ${renderSyncBanner(true)}
-        ${renderSearch('Search folders...', state.query, 'librarySearch')}
-        ${renderChips(chips(), state.chip, 'library')}
+        ${renderSearchBox('Search saves...', state.query, 'librarySearch')}
+        ${renderSyncPill(true)}
+        ${tiles.length ? `<div class="cat-rail" aria-label="Categories">${tiles.map(([name, count]) => `
+          <button class="cat-tile ${state.chip === name ? 'active' : ''}" type="button" data-chip-kind="library" data-chip="${escapeHtml(name)}">
+            <span class="cat-icon">${emojiFor(name)}<span class="cat-count">${count}</span></span>
+            <span class="cat-label">${escapeHtml(name)}</span>
+          </button>`).join('')}</div>` : ''}
+        ${recents.length && !state.query.trim() && state.chip === 'All' ? `
+          <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
+          <div class="recent-rail">${recents.map((item, index) => `
+            <button class="recent-card" type="button" data-recent-item="${index}">
+              <span class="recent-thumb">${renderMedia(item, index < 4 ? 'eager' : 'lazy')}
+                <span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>
+              </span>
+              <p class="recent-source">${escapeHtml(sourceFor(item))}</p>
+              <p class="recent-title">${escapeHtml(item.name)}</p>
+            </button>`).join('')}</div>` : ''}
+        <div class="section-head">
+          <h2 class="section-title">Library <span class="chev">›</span></h2>
+          <span class="section-side">${lists.length} folders</span>
+        </div>
         ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
-        ${!state.loading && lists.length ? `<section class="list-grid">${lists.map(renderListCard).join('')}</section>` : ''}
-        ${!state.loading && !lists.length ? '<div class="empty">No real folders found yet</div>' : ''}
+        ${!state.loading && lists.length ? `<section class="lib-list">${lists.map(renderLibRow).join('')}</section>` : ''}
+        ${!state.loading && !lists.length ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
       `;
       document.getElementById('librarySearch')?.addEventListener('input', (event) => {
         state.query = event.target.value;
         render();
+        const input = document.getElementById('librarySearch');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
       });
       document.getElementById('refreshButton')?.addEventListener('click', loadData);
       bindChips();
+      const recentsData = recentItems(10);
+      app.querySelectorAll('[data-recent-item]').forEach((button) => {
+        button.addEventListener('click', () => openMiniPlayer(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem)));
+      });
       app.querySelectorAll('[data-open-list]').forEach((button) => {
         button.addEventListener('click', () => {
           state.currentListId = button.dataset.openList;
@@ -1197,22 +1266,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
         });
       });
     }
-    function renderListCard(list) {
-      const examples = (list.items || [])
-        .slice(0, 3)
-        .map((item) => item.name || item.product_name)
-        .filter(Boolean)
-        .join(' • ');
-      return `<button class="list-card" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
-        ${renderMedia(coverItem(list))}
-        <span class="count-badge">${list.real_count}</span>
-        <span class="list-card-content">
-          <span class="list-domain">${escapeHtml(list.parent_title || 'Strong interest')}</span>
-          <span class="list-card-title">${escapeHtml(list.list_title)}</span>
-          ${examples ? `<span class="list-preview">${escapeHtml(examples)}</span>` : ''}
+    function renderLibRow(list) {
+      const cover = coverItem(list);
+      const coverMedia = mediaFor(cover);
+      return `<button class="lib-row" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
+        <span class="lib-icon">${coverMedia ? renderMedia(cover) : emojiFor(list.parent_title || list.list_title)}</span>
+        <span>
+          <p class="lib-name">${escapeHtml(list.list_title)}</p>
+          <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(list.parent_title)}` : ''}</p>
         </span>
+        <span class="row-chev">${CHEV_SVG}</span>
       </button>`;
     }
+
+    /* ---------- FOLDER ---------- */
     function renderListScreen() {
       const list = currentList();
       if (!list) {
@@ -1224,16 +1291,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const items = list.items.filter(itemMatches);
       app.innerHTML = `
         <div class="list-heading">
-          <button id="backToLibrary" class="back-button" type="button" aria-label="Back to library">‹</button>
-          <div class="list-title-block"><h1>${escapeHtml(list.list_title)}</h1><p class="count-text">${items.length} items</p></div>
-          <div class="icon-row">
-            <button class="icon-button" type="button" aria-label="Filters">☷</button>
-            <button id="listMore" class="icon-button" type="button" aria-label="More list options">...</button>
-          </div>
+          <button id="backToLibrary" class="back-button" type="button" aria-label="Back to library">${BACK_SVG}</button>
+          <div class="list-title-block"><h1>${escapeHtml(list.list_title)}</h1><p class="count-text">${items.length} ${items.length === 1 ? 'item' : 'items'}</p></div>
+          <div class="icon-row"></div>
         </div>
-        ${renderSearch(`Search in ${list.list_title}...`, state.itemQuery, 'itemSearch')}
+        ${renderSearchBox(`Search in ${list.list_title}...`, state.itemQuery, 'itemSearch')}
         ${renderChips(['All', 'Video', 'Products', 'Saved'], state.itemChip, 'item')}
-        ${items.length ? `<section class="item-grid">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">No items found</div>'}
+        ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">No items found</div>'}
       `;
       document.getElementById('backToLibrary').addEventListener('click', () => {
         state.screen = 'library';
@@ -1243,6 +1307,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('itemSearch').addEventListener('input', (event) => {
         state.itemQuery = event.target.value;
         render();
+        const input = document.getElementById('itemSearch');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
       });
       bindChips();
       app.querySelectorAll('[data-open-item]').forEach((button) => {
@@ -1251,21 +1317,18 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderItemCard(item, index) {
       const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
-      return `<article class="item-card">
-        <button class="item-open" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
-          <div class="thumb-wrap">
+      return `<article class="m-card">
+        <button style="width:100%;text-align:left" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
+          <span class="m-thumb">
             ${renderMedia(item)}
-            <span class="duration">${escapeHtml(durationFor(item, index))}</span>
-            <span class="play-dot">▶</span>
-          </div>
-          <div>
-            <div class="item-title-row"><p class="item-title">${escapeHtml(item.name)}</p><span class="more-dot">...</span></div>
-            ${item.summary ? `<p class="item-summary">${escapeHtml(item.summary)}</p>` : ''}
-            <div class="item-meta-row">
-              ${hasProduct(item) ? '<span class="item-pill product">Product</span>' : ''}
-              ${productText ? `<span class="item-pill">${escapeHtml(productText)}</span>` : ''}
-            </div>
-          </div>
+            <span class="m-badges">
+              ${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}
+              ${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}
+            </span>
+          </span>
+          <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab">···</span></span>
+          ${item.summary ? `<p class="m-summary">${escapeHtml(item.summary)}</p>` : ''}
+          ${productText ? `<p class="m-summary">🛒 ${escapeHtml(productText)}</p>` : ''}
         </button>
         ${renderBuyLinks(item)}
       </article>`;
@@ -1280,9 +1343,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (!links.length) return '';
       return `<div class="buy-row">${links.map(([label, href]) => `<a class="buy-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`).join('')}</div>`;
     }
+
+    /* ---------- SEARCH ---------- */
     function searchTabResults() {
       const q = state.magicQuery.trim();
-      const allItems = sortedCollections().flatMap((list) => list.items.map((item) => ({ ...item, list_title: list.list_title, parent_title: list.parent_title })));
+      const allItems = flatItems();
       return q
         ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''} ${item.parent_title || ''}`, q)).slice(0, 24)
         : [];
@@ -1377,7 +1442,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (!resultList) return;
       resultList.innerHTML = `
         ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="empty">Searching captions, products, visuals, and transcripts...</div>' : ''}
-        ${q && state.deepSearch.error ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
+        ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
           <div class="result-thumb">${renderMedia(item)}</div>
@@ -1391,18 +1456,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function renderSearchTab() {
       app.innerHTML = `
         <section class="search-stage">
-          <div class="magic-search">
-            <div class="magic-orb">⌕</div>
-            <div>
-              <h1 class="magic-title">Find anything you saved.</h1>
-              <p class="magic-copy">Search products, places, ideas, captions, and folder names from your reel memory.</p>
-            </div>
-            <label class="magic-bar">
-              <input id="magicInput" value="${escapeHtml(state.magicQuery)}" placeholder="What are you trying to remember?" autocomplete="off" />
-              <button id="magicSubmit" class="magic-submit" type="button" aria-label="Search">↗</button>
-            </label>
-            <div id="magicResults" class="result-list"></div>
+          <div class="magic-head">
+            <h1 class="magic-title">Find anything<br/>you saved.</h1>
+            <p class="magic-copy">Search what was said, shown, or written in your reels — products, places, ideas, captions.</p>
           </div>
+          <label class="magic-bar">
+            <input id="magicInput" value="${escapeHtml(state.magicQuery)}" placeholder="What are you trying to remember?" autocomplete="off" />
+            <button id="magicSubmit" class="magic-submit" type="button" aria-label="Search">${ARROW_SVG}</button>
+          </label>
+          <div id="magicResults" class="result-list"></div>
         </section>
       `;
       const input = document.getElementById('magicInput');
@@ -1416,44 +1478,58 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (state.magicQuery.trim() && state.deepSearch.query !== state.magicQuery.trim()) scheduleDeepSearch();
       else renderSearchResults();
     }
+
+    /* ---------- PROFILE ---------- */
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
       const jobs = recentJobs();
       const diagnostics = recentDiagnostics();
       const dashboardJson = JSON.stringify(state.dashboard || {}, null, 2);
       app.innerHTML = `
-        <div class="topbar">
-          <div class="brand-mark">MyLife</div>
-          <div class="icon-row"><button class="icon-button" type="button" aria-label="Refresh diagnostics" id="profileRefresh">↻</button></div>
+        <div class="home-head">
+          <h1 class="greeting">Profile</h1>
+          <div class="icon-row"><button class="icon-button" type="button" aria-label="Refresh diagnostics" id="profileRefresh">${REFRESH_SVG}</button></div>
         </div>
-        <h1 class="page-title">Profile</h1>
-        ${renderSyncBanner(false)}
-        <section class="profile-grid">
-          <div class="metric-card"><span>Library Items</span><b>${totalItems}</b></div>
-          <div class="metric-card"><span>Processed Reels</span><b>${state.dashboard.processed_url_count || 0}</b></div>
+        ${renderSyncPill(true)}
+        <section class="metric-grid">
+          <div class="metric-card"><span>Library items</span><b>${totalItems}</b></div>
+          <div class="metric-card"><span>Processed reels</span><b>${state.dashboard.processed_url_count || 0}</b></div>
           <div class="metric-card"><span>Queued</span><b>${state.dashboard.queued_job_count || 0}</b></div>
           <div class="metric-card"><span>Running</span><b>${state.dashboard.running_job_count || 0}</b></div>
         </section>
-        <section class="profile-panel">
-          <div class="profile-row">Account <span>${USER_ID}</span></div>
-          <div class="profile-row">Instagram <span>${instagramStatusLabel()}</span></div>
-          <div class="profile-row">Sync Status <span>${escapeHtml(pipelineStatus().title)}</span></div>
-          <div class="profile-row">Pending Reels <span>${state.dashboard.pending_url_count || 0}</span></div>
-          <div class="profile-row">Failed Reels <span>${state.dashboard.failed_url_count || 0}</span></div>
-          <div class="profile-row">Storage Usage <span>${totalItems} items</span></div>
+        <section class="set-section">
+          <h2 class="set-title">Account</h2>
+          <div class="set-card">
+            <div class="set-row">Signed in as <span class="value">${escapeHtml(USER_ID)}</span></div>
+            <div class="set-row">Instagram <span class="value">${instagramStatusLabel()}</span></div>
+            ${renderInstagramRows()}
+            <button class="set-row danger" type="button" id="logoutButton">Log out</button>
+          </div>
         </section>
-        ${renderInstagramPanel()}
-        <button class="logout-button" type="button" id="logoutButton">Log out</button>
-        <h2 class="profile-section-title">Recent Reel Jobs</h2>
-        <section class="job-list">
-          ${jobs.length ? jobs.map(renderJobCard).join('') : '<div class="empty">No recent jobs found yet</div>'}
+        <section class="set-section">
+          <h2 class="set-title">Pipeline</h2>
+          <div class="set-card">
+            <div class="set-row">Sync status <span class="value">${escapeHtml(pipelineStatus().title)}</span></div>
+            <div class="set-row">Pending reels <span class="value">${state.dashboard.pending_url_count || 0}</span></div>
+            <div class="set-row">Failed reels <span class="value">${state.dashboard.failed_url_count || 0}</span></div>
+          </div>
         </section>
-        <h2 class="profile-section-title">Recent Stored Reels</h2>
-        <section class="job-list">
-          ${diagnostics.length ? diagnostics.map(renderReelDiagnosticCard).join('') : '<div class="empty">No stored reel diagnostics found yet</div>'}
+        <section class="set-section">
+          <h2 class="set-title">Recent reel jobs</h2>
+          <section class="job-list">
+            ${jobs.length ? jobs.map(renderJobCard).join('') : '<div class="empty">No recent jobs found yet</div>'}
+          </section>
         </section>
-        <h2 class="profile-section-title">Dashboard JSON</h2>
-        <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
+        <section class="set-section">
+          <h2 class="set-title">Recent stored reels</h2>
+          <section class="job-list">
+            ${diagnostics.length ? diagnostics.map(renderReelDiagnosticCard).join('') : '<div class="empty">No stored reel diagnostics found yet</div>'}
+          </section>
+        </section>
+        <section class="set-section">
+          <h2 class="set-title">Dashboard</h2>
+          <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
+        </section>
       `;
       document.getElementById('profileRefresh')?.addEventListener('click', loadData);
       document.getElementById('logoutButton')?.addEventListener('click', logout);
@@ -1470,30 +1546,21 @@ def build_clipnest_v1_html(user_id: str) -> str:
       }
       return 'Not connected';
     }
-    function renderInstagramPanel() {
+    function renderInstagramRows() {
       const session = state.session;
       if (!session || !session.authenticated) return '';
       if (session.instagram_connected) {
-        return `<button class="logout-button" type="button" id="unlinkInstagramButton">Unlink Instagram (start a fresh library)</button>`;
+        return `<button class="set-row" type="button" id="unlinkInstagramButton">Unlink Instagram <span class="value">Start a fresh library</span></button>`;
       }
       if (state.igLink) {
         return `
-          <section class="ig-link-panel">
-            <b>Finish linking Instagram</b>
-            <div class="ig-link-code">${escapeHtml(state.igLink.code)}</div>
-            <p>From your Instagram app, send this code as a direct message to <b>@${escapeHtml(state.igLink.instagram_username || '')}</b>. Reels you DM will only arrive here after this step.</p>
-            <button class="action-button" type="button" id="igLinkDoneButton">I sent the code — check status</button>
-            <button class="action-button" type="button" id="igNewCodeButton">Get a new code</button>
-          </section>
+          <div class="ig-code">${escapeHtml(state.igLink.code)}</div>
+          <p class="ig-help">From your Instagram app, send this code as a direct message to <b>@${escapeHtml(state.igLink.instagram_username || '')}</b>. Reels you DM will only arrive here after this step.</p>
+          <button class="set-row action" type="button" id="igLinkDoneButton">I sent the code — check status</button>
+          <button class="set-row" type="button" id="igNewCodeButton">Get a new code</button>
         `;
       }
-      return `
-        <section class="ig-link-panel">
-          <b>Instagram not connected</b>
-          <p>Reels you DM from Instagram will NOT show up in this library until you connect your Instagram account here.</p>
-          <button class="action-button" type="button" id="connectInstagramButton">Connect Instagram</button>
-        </section>
-      `;
+      return `<button class="set-row action" type="button" id="connectInstagramButton">Connect Instagram</button>`;
     }
     async function connectInstagram() {
       const button = document.getElementById('connectInstagramButton') || document.getElementById('igNewCodeButton');
@@ -1541,7 +1608,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function bindChips() {
       app.querySelectorAll('[data-chip-kind]').forEach((button) => {
         button.addEventListener('click', () => {
-          if (button.dataset.chipKind === 'library') state.chip = button.dataset.chip;
+          if (button.dataset.chipKind === 'library') {
+            state.chip = state.chip === button.dataset.chip ? 'All' : button.dataset.chip;
+          }
           if (button.dataset.chipKind === 'item') state.itemChip = button.dataset.chip;
           render();
         });
@@ -1606,7 +1675,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       actionSheet.innerHTML = `
         <div class="sheet-media">
           ${/\\.mp4($|[?#])/i.test(media) ? `<video src="${escapeHtml(media)}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(media)}" alt="" onerror="this.remove()" />`}
-          <button id="sheetClose" class="sheet-close" type="button" aria-label="Close actions">X</button>
+          <button id="sheetClose" class="sheet-close" type="button" aria-label="Close actions">✕</button>
         </div>
         <div class="sheet-body">
           <div class="sheet-handle"></div>
@@ -1615,7 +1684,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
             <button class="quick-action" type="button"><span>♡</span>Save</button>
             <button id="shareItem" class="quick-action" type="button"><span>⇧</span>Share</button>
             <button class="quick-action" type="button"><span>☷</span>Add To List</button>
-            <button class="quick-action" type="button"><span>...</span>More</button>
+            <button class="quick-action" type="button"><span>···</span>More</button>
           </div>
           <div class="sheet-list">
             <a class="sheet-row" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>Open Original Reel</span><span>›</span></a>
@@ -1655,22 +1724,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
       render();
     }
     function removeReelFromState(reelId) {
-      for (const bucket of ['standard', 'personalized']) {
-        state.data = state.data.map((list) => ({ ...list, items: (list.items || []).filter((item) => item.reel_id !== reelId) }));
-      }
+      state.data = state.data.map((list) => ({ ...list, items: (list.items || []).filter((item) => item.reel_id !== reelId) }));
     }
     function setNav(screen) {
       state.screen = screen;
       if (screen !== 'list') state.currentListId = '';
       closeActionSheet();
-      searchNav.classList.toggle('active', screen === 'search');
-      libraryNav.classList.toggle('active', screen === 'library' || screen === 'list');
-      profileNav.classList.toggle('active', screen === 'profile');
       render();
     }
     function render() {
-      app.classList.toggle('search-mode', state.screen === 'search');
-      document.querySelector('.bottom-nav')?.classList.toggle('search-nav-mode', state.screen === 'search');
       searchNav.classList.toggle('active', state.screen === 'search');
       libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list');
       profileNav.classList.toggle('active', state.screen === 'profile');
