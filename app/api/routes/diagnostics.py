@@ -1,13 +1,54 @@
 import json
+import os
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from app.db.database import get_connection
-from app.services.auth import ensure_user_access
+from app.services.auth import current_user, ensure_user_access
 
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
+
+
+@router.get("/openai")
+def openai_health(request: Request):
+    """Have the server test its own OpenAI key and report the verdict.
+
+    Splits "wrong key deployed" from "the key's account has no active billing":
+    - key_fingerprint: compare against the key you pasted in Render env.
+    - auth_check: does OpenAI accept the key at all (free call)?
+    - billing_check: does OpenAI accept a paid call (1-token embedding)?
+    """
+    if not current_user(request):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    info: dict[str, Any] = {
+        "key_set": bool(key),
+        "key_length": len(key),
+        "key_fingerprint": f"{key[:6]}...{key[-4:]}" if len(key) > 14 else "(too short)",
+    }
+    if not key:
+        info["auth_check"] = "skipped — no key in environment"
+        info["billing_check"] = "skipped"
+        return JSONResponse(info)
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=key, timeout=20, max_retries=0)
+    try:
+        client.models.list()
+        info["auth_check"] = "ok — key is valid"
+    except Exception as exc:
+        info["auth_check"] = f"FAILED: {exc}"[:400]
+    try:
+        client.embeddings.create(model="text-embedding-3-small", input="ping")
+        info["billing_check"] = "ok — OpenAI accepted a paid call, billing is active"
+    except Exception as exc:
+        info["billing_check"] = f"FAILED: {exc}"[:400]
+    return JSONResponse(info)
 
 
 def load_json(value: str, fallback: Any) -> Any:
