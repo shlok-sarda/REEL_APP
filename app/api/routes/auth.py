@@ -6,6 +6,7 @@ from app.services.auth import (
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
     create_instagram_link_code,
+    disconnect_instagram,
     build_telegram_link_url,
     complete_telegram_link,
     create_login_csrf,
@@ -84,6 +85,15 @@ def instagram_connect(request: Request):
         instagram_username=payload["instagram_username"],
         expires_at=payload["expires_at"],
     )
+
+
+@router.post("/instagram/disconnect")
+def instagram_disconnect(request: Request):
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    disconnect_instagram(user["id"])
+    return JSONResponse({"ok": True})
 
 
 @router.post("/telegram-link/complete")

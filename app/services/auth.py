@@ -351,3 +351,28 @@ def complete_instagram_link(code: str, instagram_user_id: str, instagram_usernam
             (now, normalized_ig_id, normalized_ig_username, normalized_code),
         )
     return get_user_by_id(token["user_id"]) or {}
+
+
+def disconnect_instagram(user_id: str) -> dict[str, Any]:
+    """Release the Instagram account linked to this user so it can be linked elsewhere.
+
+    Clears only the link fields on the users row — the user's reels, collections and
+    all other data remain keyed to their user_id and are left untouched.
+    """
+    normalized_user = normalize(user_id)
+    now = iso_now()
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET instagram_user_id = '', instagram_username = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (now, normalized_user),
+        )
+        # Drop any pending link codes for this user so stale codes can't re-link.
+        connection.execute(
+            "DELETE FROM instagram_link_tokens WHERE user_id = ?",
+            (normalized_user,),
+        )
+    return get_user_by_id(normalized_user) or {}

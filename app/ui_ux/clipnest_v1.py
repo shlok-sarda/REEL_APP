@@ -496,6 +496,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
       color:#444;
       text-transform:uppercase;
     }
+    .logout-button {
+      margin-top:24px;
+      width:100%;
+      padding:14px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      color:#c0392b;
+      font-size:.92rem;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .logout-button:active { transform:scale(.99); }
     .job-list { display:grid; gap:10px; }
     .job-card {
       border:1px solid var(--border);
@@ -1401,8 +1414,40 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </section>
         <h2 class="profile-section-title">Dashboard JSON</h2>
         <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
+        <button class="logout-button" type="button" id="unlinkInstagramButton">Unlink Instagram (start a fresh library)</button>
+        <button class="logout-button" type="button" id="logoutButton">Log out</button>
       `;
       document.getElementById('profileRefresh')?.addEventListener('click', loadData);
+      document.getElementById('logoutButton')?.addEventListener('click', logout);
+      document.getElementById('unlinkInstagramButton')?.addEventListener('click', unlinkInstagram);
+    }
+    async function unlinkInstagram() {
+      const confirmed = window.confirm(
+        'Unlink this Instagram account?\\n\\n' +
+        'Your current library stays saved on this account, but new reels will stop arriving here. ' +
+        'You can then sign in with another Google account and connect the same Instagram to build a fresh library.'
+      );
+      if (!confirmed) return;
+      const button = document.getElementById('unlinkInstagramButton');
+      if (button) { button.disabled = true; button.textContent = 'Unlinking…'; }
+      try {
+        const response = await fetch('/auth/instagram/disconnect', { method: 'POST', credentials: 'same-origin' });
+        if (!response.ok) throw new Error('Failed to unlink');
+        window.alert('Instagram unlinked. Log out, then sign in with your other Google account and connect Instagram there.');
+      } catch (error) {
+        window.alert('Could not unlink Instagram. Please try again.');
+      }
+      if (button) { button.disabled = false; button.textContent = 'Unlink Instagram (start a fresh library)'; }
+    }
+    async function logout() {
+      const button = document.getElementById('logoutButton');
+      if (button) { button.disabled = true; button.textContent = 'Logging out…'; }
+      try {
+        await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      } catch (error) {
+        // Ignore network errors — clear the session view regardless.
+      }
+      window.location.href = '/';
     }
     function bindChips() {
       app.querySelectorAll('[data-chip-kind]').forEach((button) => {

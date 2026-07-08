@@ -263,6 +263,12 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(reel_id) REFERENCES reels(id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS maintenance_flags (
+        flag TEXT PRIMARY KEY,
+        executed_at TEXT NOT NULL
+    )
+    """,
 ]
 
 USER_EXTRA_COLUMNS = {

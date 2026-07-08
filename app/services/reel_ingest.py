@@ -281,6 +281,86 @@ def delete_reel(reel_id: str) -> bool:
     return deleted
 
 
+def delete_failed_reels(user_id: str | None = None) -> dict:
+    """Delete every reel currently in the 'failed' state (optionally per user).
+
+    Removes the reel rows plus their dependent records (reel_items,
+    product_links, processing_jobs) and best-effort deletes any local media,
+    then syncs the CSV mirror once. Returns counts so callers can log/report.
+    """
+    normalized_user = normalize(user_id) if user_id else None
+    with get_connection() as connection:
+        query = "SELECT id, local_video_path, thumbnail_path FROM reels WHERE status = 'failed'"
+        params: list = []
+        if normalized_user:
+            query += " AND user_id = ?"
+            params.append(normalized_user)
+        rows = connection.execute(query, params).fetchall()
+        reel_ids = [row["id"] for row in rows]
+        media_paths = [
+            row[column]
+            for row in rows
+            for column in ("local_video_path", "thumbnail_path")
+        ]
+        deleted = 0
+        if reel_ids:
+            placeholders = ",".join("?" for _ in reel_ids)
+            item_ids = [
+                item_row["id"]
+                for item_row in connection.execute(
+                    f"SELECT id FROM reel_items WHERE reel_id IN ({placeholders})",
+                    reel_ids,
+                ).fetchall()
+            ]
+            if item_ids:
+                item_placeholders = ",".join("?" for _ in item_ids)
+                connection.execute(
+                    f"DELETE FROM product_links WHERE reel_item_id IN ({item_placeholders})",
+                    item_ids,
+                )
+            connection.execute(f"DELETE FROM reel_items WHERE reel_id IN ({placeholders})", reel_ids)
+            connection.execute(f"DELETE FROM processing_jobs WHERE reel_id IN ({placeholders})", reel_ids)
+            cursor = connection.execute(f"DELETE FROM reels WHERE id IN ({placeholders})", reel_ids)
+            deleted = cursor.rowcount
+
+    deleted_media_files = 0
+    if deleted:
+        for path_value in media_paths:
+            normalized_path = normalize(path_value)
+            if not normalized_path:
+                continue
+            path = Path(normalized_path)
+            if path.exists() and path.is_file():
+                path.unlink(missing_ok=True)
+                deleted_media_files += 1
+        sync_csv_from_db()
+    return {"deleted_reel_count": deleted, "deleted_media_files": deleted_media_files}
+
+
+def purge_failed_reels_once(flag: str = "purge_failed_reels_v1") -> dict:
+    """Run a one-time cleanup of all failed reels, guarded by a maintenance flag.
+
+    Safe to call on every startup: the delete happens only the first time a
+    given `flag` is seen (i.e. once per deploy that bumps the flag value), so
+    repeated Render restarts do not keep wiping newly-failed reels.
+    """
+    with get_connection() as connection:
+        already = connection.execute(
+            "SELECT 1 FROM maintenance_flags WHERE flag = ? LIMIT 1",
+            (flag,),
+        ).fetchone()
+    if already:
+        return {"ran": False, "deleted_reel_count": 0, "deleted_media_files": 0}
+
+    result = delete_failed_reels()
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO maintenance_flags (flag, executed_at) VALUES (?, ?)",
+            (flag, datetime.now().isoformat(timespec="seconds")),
+        )
+    return {"ran": True, **result}
+
+
 def _clear_user_storage_outputs(user_id: str) -> None:
     storage_dir = user_storage_dir(user_id)
     if not storage_dir.exists():

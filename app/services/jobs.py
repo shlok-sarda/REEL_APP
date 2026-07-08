@@ -278,7 +278,56 @@ def recover_orphaned_jobs() -> int:
             ,
             (MAX_PROCESS_REEL_ATTEMPTS, MAX_REBUILD_ATTEMPTS),
         )
-        return cursor.rowcount
+        recovered = cursor.rowcount
+        reconciled = reconcile_stuck_reels(connection)
+    if reconciled:
+        # Keep the CSV mirror in sync when reels leave the non-terminal state.
+        # Lazy import avoids a circular dependency with reel_ingest.
+        try:
+            from app.services.reel_ingest import sync_csv_from_db
+
+            sync_csv_from_db()
+        except Exception:
+            pass
+    return recovered
+
+
+def reconcile_stuck_reels(connection) -> int:
+    """Flip reels that are stranded in a non-terminal status to 'failed'.
+
+    A reel is set to 'processing' before its processor subprocess runs. If that
+    subprocess dies mid-run (timeout, container restart/redeploy, OOM) the code
+    that writes the reel's final status never executes, so the reel is left in
+    'processing'/'pending' forever while its job is already 'failed'. The
+    dashboard counts any reel that is not 'completed'/'failed' as "waiting",
+    which is the "always N reels waiting" bug. Here we reconcile only reels that
+    have a failed process_reel job and no still-active (pending/running) job, so
+    freshly-ingested reels awaiting their first run are never touched.
+
+    Must be called with the worker known to be idle (see recover_orphaned_jobs),
+    so a reel legitimately being processed right now is never marked failed.
+    """
+    cursor = connection.execute(
+        """
+        UPDATE reels
+        SET status = 'failed', updated_at = ?
+        WHERE status IN ('pending', 'processing')
+          AND EXISTS (
+              SELECT 1 FROM processing_jobs j
+              WHERE j.reel_id = reels.id
+                AND j.job_type = 'process_reel'
+                AND j.status = 'failed'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM processing_jobs j2
+              WHERE j2.reel_id = reels.id
+                AND j2.job_type = 'process_reel'
+                AND j2.status IN ('pending', 'running')
+          )
+        """,
+        (_now(),),
+    )
+    return cursor.rowcount
 
 
 def ensure_background_progress(user_id: str | None = None) -> None:

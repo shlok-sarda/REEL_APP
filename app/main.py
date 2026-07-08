@@ -40,6 +40,17 @@ def startup_event():
     settings.thumbnails_dir.mkdir(parents=True, exist_ok=True)
     settings.videos_dir.mkdir(parents=True, exist_ok=True)
     initialize_database()
+    # One-time cleanup: purge all failed reels so the queue starts clean.
+    # Guarded by a maintenance flag, so it runs once per deploy (bump the flag
+    # name to trigger it again), not on every container restart.
+    try:
+        from app.services.reel_ingest import purge_failed_reels_once
+
+        result = purge_failed_reels_once()
+        if result.get("ran"):
+            print(f"[startup] purged failed reels: {result}")
+    except Exception as exc:
+        print(f"[startup] failed-reel purge skipped: {exc}")
 
 
 app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")
