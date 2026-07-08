@@ -509,6 +509,41 @@ def build_clipnest_v1_html(user_id: str) -> str:
       cursor:pointer;
     }
     .logout-button:active { transform:scale(.99); }
+    .action-button {
+      margin-top:12px;
+      width:100%;
+      padding:14px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#111;
+      color:#fff;
+      font-size:.92rem;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .action-button:active { transform:scale(.99); }
+    .ig-link-panel {
+      margin-top:16px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      padding:16px;
+      display:grid;
+      gap:10px;
+      box-shadow:0 10px 26px rgba(17,17,17,.04);
+    }
+    .ig-link-panel b { font-size:.92rem; font-weight:900; }
+    .ig-link-panel p { margin:0; color:var(--muted); font-size:.84rem; font-weight:600; line-height:1.45; }
+    .ig-link-code {
+      font-size:1.45rem;
+      font-weight:900;
+      letter-spacing:.12em;
+      text-align:center;
+      padding:12px;
+      border:1px dashed var(--border);
+      border-radius:12px;
+      user-select:all;
+    }
     .job-list { display:grid; gap:10px; }
     .job-card {
       border:1px solid var(--border);
@@ -928,6 +963,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       progressTimer: null,
       pollTimer: null,
       progress: 0,
+      session: null,
+      igLink: null,
       loading: true
     };
     const app = document.getElementById('app');
@@ -1398,12 +1435,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="metric-card"><span>Running</span><b>${state.dashboard.running_job_count || 0}</b></div>
         </section>
         <section class="profile-panel">
-          <div class="profile-row">Connected Instagram <span>${USER_ID}</span></div>
+          <div class="profile-row">Account <span>${USER_ID}</span></div>
+          <div class="profile-row">Instagram <span>${instagramStatusLabel()}</span></div>
           <div class="profile-row">Sync Status <span>${escapeHtml(pipelineStatus().title)}</span></div>
           <div class="profile-row">Pending Reels <span>${state.dashboard.pending_url_count || 0}</span></div>
           <div class="profile-row">Failed Reels <span>${state.dashboard.failed_url_count || 0}</span></div>
           <div class="profile-row">Storage Usage <span>${totalItems} items</span></div>
         </section>
+        ${renderInstagramPanel()}
+        <button class="logout-button" type="button" id="logoutButton">Log out</button>
         <h2 class="profile-section-title">Recent Reel Jobs</h2>
         <section class="job-list">
           ${jobs.length ? jobs.map(renderJobCard).join('') : '<div class="empty">No recent jobs found yet</div>'}
@@ -1414,12 +1454,59 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </section>
         <h2 class="profile-section-title">Dashboard JSON</h2>
         <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
-        <button class="logout-button" type="button" id="unlinkInstagramButton">Unlink Instagram (start a fresh library)</button>
-        <button class="logout-button" type="button" id="logoutButton">Log out</button>
       `;
       document.getElementById('profileRefresh')?.addEventListener('click', loadData);
       document.getElementById('logoutButton')?.addEventListener('click', logout);
       document.getElementById('unlinkInstagramButton')?.addEventListener('click', unlinkInstagram);
+      document.getElementById('connectInstagramButton')?.addEventListener('click', connectInstagram);
+      document.getElementById('igNewCodeButton')?.addEventListener('click', connectInstagram);
+      document.getElementById('igLinkDoneButton')?.addEventListener('click', loadData);
+    }
+    function instagramStatusLabel() {
+      if (!state.session || !state.session.authenticated) return '—';
+      if (state.session.instagram_connected) {
+        const username = state.session.user?.instagram_username;
+        return username ? '@' + escapeHtml(username) : 'Connected';
+      }
+      return 'Not connected';
+    }
+    function renderInstagramPanel() {
+      const session = state.session;
+      if (!session || !session.authenticated) return '';
+      if (session.instagram_connected) {
+        return `<button class="logout-button" type="button" id="unlinkInstagramButton">Unlink Instagram (start a fresh library)</button>`;
+      }
+      if (state.igLink) {
+        return `
+          <section class="ig-link-panel">
+            <b>Finish linking Instagram</b>
+            <div class="ig-link-code">${escapeHtml(state.igLink.code)}</div>
+            <p>From your Instagram app, send this code as a direct message to <b>@${escapeHtml(state.igLink.instagram_username || '')}</b>. Reels you DM will only arrive here after this step.</p>
+            <button class="action-button" type="button" id="igLinkDoneButton">I sent the code — check status</button>
+            <button class="action-button" type="button" id="igNewCodeButton">Get a new code</button>
+          </section>
+        `;
+      }
+      return `
+        <section class="ig-link-panel">
+          <b>Instagram not connected</b>
+          <p>Reels you DM from Instagram will NOT show up in this library until you connect your Instagram account here.</p>
+          <button class="action-button" type="button" id="connectInstagramButton">Connect Instagram</button>
+        </section>
+      `;
+    }
+    async function connectInstagram() {
+      const button = document.getElementById('connectInstagramButton') || document.getElementById('igNewCodeButton');
+      if (button) { button.disabled = true; button.textContent = 'Getting code…'; }
+      try {
+        const response = await fetch('/auth/instagram/connect', { method: 'POST', credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Could not start Instagram linking');
+        state.igLink = payload;
+      } catch (error) {
+        window.alert(error.message || 'Could not start Instagram linking. Please try again.');
+      }
+      renderProfile();
     }
     async function unlinkInstagram() {
       const confirmed = window.confirm(
@@ -1433,11 +1520,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       try {
         const response = await fetch('/auth/instagram/disconnect', { method: 'POST', credentials: 'same-origin' });
         if (!response.ok) throw new Error('Failed to unlink');
+        state.igLink = null;
         window.alert('Instagram unlinked. Log out, then sign in with your other Google account and connect Instagram there.');
       } catch (error) {
         window.alert('Could not unlink Instagram. Please try again.');
+        if (button) { button.disabled = false; button.textContent = 'Unlink Instagram (start a fresh library)'; }
       }
-      if (button) { button.disabled = false; button.textContent = 'Unlink Instagram (start a fresh library)'; }
+      loadData();
     }
     async function logout() {
       const button = document.getElementById('logoutButton');
@@ -1594,17 +1683,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
       state.loading = true;
       render();
       try {
-        const [libraryRes, dashboardRes, jobsRes, diagnosticsRes] = await Promise.all([
+        const [libraryRes, dashboardRes, jobsRes, diagnosticsRes, sessionRes] = await Promise.all([
           fetch(`/library?user_id=${encodeURIComponent(USER_ID)}`),
           fetch(`/dashboard?user_id=${encodeURIComponent(USER_ID)}`),
           fetch(`/jobs?user_id=${encodeURIComponent(USER_ID)}&limit=50`),
-          fetch(`/diagnostics/reels?user_id=${encodeURIComponent(USER_ID)}&limit=12`)
+          fetch(`/diagnostics/reels?user_id=${encodeURIComponent(USER_ID)}&limit=12`),
+          fetch('/auth/session', { credentials: 'same-origin' })
         ]);
         const library = await libraryRes.json();
         state.data = normalizeCollections(library.personalized?.length ? library.personalized : library.standard || []);
         state.dashboard = await dashboardRes.json();
         state.jobs = await jobsRes.json();
         state.diagnostics = await diagnosticsRes.json();
+        state.session = await sessionRes.json();
+        if (state.session?.instagram_connected) state.igLink = null;
       } catch (error) {
         state.data = [];
         state.diagnostics = [];
