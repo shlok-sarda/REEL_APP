@@ -495,12 +495,22 @@ def build_clipnest_v1_html(user_id: str) -> str:
       text-align:left;
     }
     .result-thumb {
+      display:block;
       width:56px;
       height:56px;
       border-radius:13px;
       overflow:hidden;
       background:var(--soft);
     }
+    .ph-emoji {
+      display:grid;
+      place-items:center;
+      width:100%;
+      height:100%;
+      font-size:1.6em;
+      opacity:.9;
+    }
+    .m-thumb .ph-emoji, .recent-thumb .ph-emoji { font-size:2.6em; }
     .result-thumb img, .result-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
     .result-card h3 {
       margin:0;
@@ -978,7 +988,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (hour < 17) return 'Afternoon';
       return 'Evening';
     }
+    function prettyTitle(value) {
+      const raw = String(value || '').trim();
+      return /^(generic|miscellaneous|uncertain|general|personalized|unsorted)$/i.test(raw) ? 'Unsorted' : raw;
+    }
     const EMOJI_RULES = [
+      [/miscellaneous|generic|uncertain|unsorted/i, '🗂️'],
       [/product|shop|buy|gadget|tech/i, '🛍️'],
       [/recipe|food|cook|craving|snack|street/i, '🍲'],
       [/place|travel|trip|city|location/i, '🗺️'],
@@ -1158,6 +1173,25 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function mediaFor(item) {
       return item.item_thumbnail || item.reel_thumbnail || thumbnailFor(item) || videoFor(item);
     }
+    const PH_PALETTES = [
+      ['#1c2b4a', '#3d5a80'], ['#2d1b3d', '#6d3b6e'], ['#1b3a2d', '#3f7a5a'],
+      ['#3a2a1b', '#7a5a3f'], ['#1b2d3a', '#3f5f7a'], ['#3a1b1f', '#7a3f4a'],
+      ['#26203a', '#4f4478'], ['#33301b', '#6e683f'],
+    ];
+    function gradFor(name) {
+      let hash = 0;
+      for (const char of String(name || 'reel')) hash = (hash + char.codePointAt(0)) % 9973;
+      const [dark, mid] = PH_PALETTES[hash % PH_PALETTES.length];
+      return `linear-gradient(135deg, ${dark}, ${mid} 60%, ${dark})`;
+    }
+    function mediaBox(item, className, loading = 'lazy', inner = '') {
+      const src = mediaFor(item);
+      const label = item.name || item.list_title || 'reel';
+      const emoji = emojiFor(`${item.parent_title || ''} ${item.list_title || ''} ${label}`);
+      const fallback = `<span class="ph-emoji">${emoji}</span>`;
+      const media = src ? renderMedia(item, loading) : fallback;
+      return `<span class="${className}" style="background:${gradFor(label)}">${media}${inner}</span>`;
+    }
     function renderMedia(item, loading = 'lazy') {
       const src = mediaFor(item);
       if (!src) return '<div aria-hidden="true"></div>';
@@ -1203,7 +1237,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       return `<label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="${id}" type="search" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" /></label>`;
     }
     function renderChips(values, active, kind) {
-      return `<div class="chips" aria-label="${kind} filters">${values.map((chip) => `<button class="chip ${chip === active ? 'active' : ''}" type="button" data-chip-kind="${kind}" data-chip="${escapeHtml(chip)}">${escapeHtml(chip)}</button>`).join('')}</div>`;
+      return `<div class="chips" aria-label="${kind} filters">${values.map((chip) => `<button class="chip ${chip === active ? 'active' : ''}" type="button" data-chip-kind="${kind}" data-chip="${escapeHtml(chip)}">${escapeHtml(prettyTitle(chip))}</button>`).join('')}</div>`;
     }
 
     /* ---------- HOME ---------- */
@@ -1223,15 +1257,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${tiles.length ? `<div class="cat-rail" aria-label="Categories">${tiles.map(([name, count]) => `
           <button class="cat-tile ${state.chip === name ? 'active' : ''}" type="button" data-chip-kind="library" data-chip="${escapeHtml(name)}">
             <span class="cat-icon">${emojiFor(name)}<span class="cat-count">${count}</span></span>
-            <span class="cat-label">${escapeHtml(name)}</span>
+            <span class="cat-label">${escapeHtml(prettyTitle(name))}</span>
           </button>`).join('')}</div>` : ''}
         ${recents.length && !state.query.trim() && state.chip === 'All' ? `
           <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
           <div class="recent-rail">${recents.map((item, index) => `
             <button class="recent-card" type="button" data-recent-item="${index}">
-              <span class="recent-thumb">${renderMedia(item, index < 4 ? 'eager' : 'lazy')}
-                <span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>
-              </span>
+              ${mediaBox(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy', `<span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
               <p class="recent-source">${escapeHtml(sourceFor(item))}</p>
               <p class="recent-title">${escapeHtml(item.name)}</p>
             </button>`).join('')}</div>` : ''}
@@ -1268,12 +1300,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderLibRow(list) {
       const cover = coverItem(list);
-      const coverMedia = mediaFor(cover);
       return `<button class="lib-row" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
-        <span class="lib-icon">${coverMedia ? renderMedia(cover) : emojiFor(list.parent_title || list.list_title)}</span>
+        ${mediaBox({ ...cover, name: cover.name || list.list_title, parent_title: list.parent_title, list_title: list.list_title }, 'lib-icon')}
         <span>
-          <p class="lib-name">${escapeHtml(list.list_title)}</p>
-          <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(list.parent_title)}` : ''}</p>
+          <p class="lib-name">${escapeHtml(prettyTitle(list.list_title))}</p>
+          <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(prettyTitle(list.parent_title))}` : ''}</p>
         </span>
         <span class="row-chev">${CHEV_SVG}</span>
       </button>`;
@@ -1292,10 +1323,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       app.innerHTML = `
         <div class="list-heading">
           <button id="backToLibrary" class="back-button" type="button" aria-label="Back to library">${BACK_SVG}</button>
-          <div class="list-title-block"><h1>${escapeHtml(list.list_title)}</h1><p class="count-text">${items.length} ${items.length === 1 ? 'item' : 'items'}</p></div>
+          <div class="list-title-block"><h1>${escapeHtml(prettyTitle(list.list_title))}</h1><p class="count-text">${items.length} ${items.length === 1 ? 'item' : 'items'}</p></div>
           <div class="icon-row"></div>
         </div>
-        ${renderSearchBox(`Search in ${list.list_title}...`, state.itemQuery, 'itemSearch')}
+        ${renderSearchBox(`Search in ${prettyTitle(list.list_title)}...`, state.itemQuery, 'itemSearch')}
         ${renderChips(['All', 'Video', 'Products', 'Saved'], state.itemChip, 'item')}
         ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">No items found</div>'}
       `;
@@ -1319,13 +1350,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
       return `<article class="m-card">
         <button style="width:100%;text-align:left" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
-          <span class="m-thumb">
-            ${renderMedia(item)}
-            <span class="m-badges">
-              ${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}
-              ${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}
-            </span>
-          </span>
+          ${mediaBox(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
           <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab">···</span></span>
           ${item.summary ? `<p class="m-summary">${escapeHtml(item.summary)}</p>` : ''}
           ${productText ? `<p class="m-summary">🛒 ${escapeHtml(productText)}</p>` : ''}
@@ -1445,7 +1470,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
-          <div class="result-thumb">${renderMedia(item)}</div>
+          ${mediaBox(item, 'result-thumb')}
           <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.summary || item.list_title || '')}</p></div>
         </button>`).join('')}
       `;
