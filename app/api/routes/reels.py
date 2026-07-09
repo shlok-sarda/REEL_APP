@@ -23,6 +23,58 @@ from app.services.reel_ingest import (
 
 router = APIRouter(prefix="/reels", tags=["reels"])
 
+GENERIC_CATEGORY_LABELS = ("", "generic", "miscellaneous", "uncertain", "general", "unsorted")
+
+
+@router.post("/retry-unsorted")
+def retry_unsorted_reels(
+    request: Request,
+    user_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+):
+    """Requeue every reel that failed or only produced generic/unsorted items."""
+    resolved_user_id = ensure_user_access(request, user_id or "")
+    placeholders = ",".join("?" for _ in GENERIC_CATEGORY_LABELS)
+    from app.db.database import get_connection
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT DISTINCT r.id
+            FROM reels r
+            LEFT JOIN reel_items ri ON ri.reel_id = r.id
+            WHERE r.user_id = ?
+              AND r.status != 'pending'
+              AND (
+                r.status = 'failed'
+                OR ri.id IS NULL
+                OR LOWER(TRIM(ri.primary_category)) IN ({placeholders})
+              )
+            ORDER BY r.received_at DESC
+            LIMIT ?
+            """,
+            (resolved_user_id, *GENERIC_CATEGORY_LABELS, limit),
+        ).fetchall()
+    requeued = []
+    errors = []
+    for row in rows:
+        reel_id = row["id"]
+        try:
+            reset_reel_for_retry(reel_id)
+            job = enqueue_reel_job(reel_id, user_id=resolved_user_id)
+            requeued.append({"id": reel_id, "job_status": job["status"]})
+        except Exception as exc:
+            errors.append({"id": reel_id, "error": str(exc)[:200]})
+    if requeued:
+        start_worker_if_needed()
+    return {
+        "ok": True,
+        "user_id": resolved_user_id,
+        "requeued_count": len(requeued),
+        "error_count": len(errors),
+        "errors": errors[:10],
+    }
+
 
 def _read_csv_rows(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8") as infile:

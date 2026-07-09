@@ -75,11 +75,15 @@ def get_recent_reel_diagnostics(request: Request, user_id: str = Query(default="
     with get_connection() as connection:
         reel_rows = connection.execute(
             """
-            SELECT id, user_id, url, shortcode, received_at, status, media_status,
-                   local_video_path, thumbnail_path, source, created_at, updated_at
-            FROM reels
-            WHERE user_id = ?
-            ORDER BY received_at DESC, created_at DESC
+            SELECT r.id, r.user_id, r.url, r.shortcode, r.received_at, r.status, r.media_status,
+                   r.local_video_path, r.thumbnail_path, r.source, r.created_at, r.updated_at,
+                   rpd.transcript_status, rpd.transcript_error, rpd.audio_download_status,
+                   rpd.video_download_status, rpd.visual_status, rpd.visual_error,
+                   rpd.media_upload_status, rpd.processing_version
+            FROM reels r
+            LEFT JOIN reel_processing_diagnostics rpd ON rpd.reel_id = r.id
+            WHERE r.user_id = ?
+            ORDER BY r.received_at DESC, r.created_at DESC
             LIMIT ?
             """,
             (resolved_user_id, limit),

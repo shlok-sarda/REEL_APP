@@ -1138,6 +1138,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <span class="status-pill ${escapeHtml(status)}">${escapeHtml(status)}</span>
         </div>
         <p class="job-meta">${escapeHtml(counts)} · ${escapeHtml(formatTime(reel.updated_at || reel.received_at) || 'time unavailable')}</p>
+        ${reel.video_download_status || reel.transcript_status ? `<p class="job-meta">⬇ video: ${escapeHtml(reel.video_download_status || '—')} · 🎙 transcript: ${escapeHtml(reel.transcript_status || '—')} · 👁 visual: ${escapeHtml(reel.visual_status || '—')}</p>` : ''}
+        ${reel.transcript_error ? `<p class="job-meta">🎙 transcript error: ${escapeHtml(reel.transcript_error)}</p>` : ''}
+        ${reel.visual_error ? `<p class="job-meta">👁 visual error: ${escapeHtml(reel.visual_error)}</p>` : ''}
         ${firstItems ? `<p class="job-meta">${escapeHtml(firstItems)}</p>` : ''}
         ${reel.url ? `<p class="job-meta">${escapeHtml(reel.url)}</p>` : ''}
         <details class="json-box"><summary>View stored extraction JSON</summary><pre>${escapeHtml(json)}</pre></details>
@@ -1345,13 +1348,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
       app.querySelectorAll('[data-open-item]').forEach((button) => {
         button.addEventListener('click', () => openMiniPlayer(items[Number(button.dataset.openItem)], Number(button.dataset.openItem)));
       });
+      app.querySelectorAll('[data-item-menu]').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          state.miniItem = items[Number(el.dataset.itemMenu)];
+          openActionSheet();
+        });
+      });
     }
     function renderItemCard(item, index) {
       const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
       return `<article class="m-card">
         <button style="width:100%;text-align:left" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
           ${mediaBox(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
-          <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab">···</span></span>
+          <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab" data-item-menu="${index}">···</span></span>
           ${item.summary ? `<p class="m-summary">${escapeHtml(item.summary)}</p>` : ''}
           ${productText ? `<p class="m-summary">🛒 ${escapeHtml(productText)}</p>` : ''}
         </button>
@@ -1537,6 +1547,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
             <div class="set-row">Sync status <span class="value">${escapeHtml(pipelineStatus().title)}</span></div>
             <div class="set-row">Pending reels <span class="value">${state.dashboard.pending_url_count || 0}</span></div>
             <div class="set-row">Failed reels <span class="value">${state.dashboard.failed_url_count || 0}</span></div>
+            ${state.session?.authenticated ? '<button class="set-row action" type="button" id="retryUnsortedButton">Reprocess Unsorted &amp; failed reels</button>' : ''}
           </div>
         </section>
         <section class="set-section">
@@ -1557,11 +1568,30 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </section>
       `;
       document.getElementById('profileRefresh')?.addEventListener('click', loadData);
+      document.getElementById('retryUnsortedButton')?.addEventListener('click', retryUnsorted);
       document.getElementById('logoutButton')?.addEventListener('click', logout);
       document.getElementById('unlinkInstagramButton')?.addEventListener('click', unlinkInstagram);
       document.getElementById('connectInstagramButton')?.addEventListener('click', connectInstagram);
       document.getElementById('igNewCodeButton')?.addEventListener('click', connectInstagram);
       document.getElementById('igLinkDoneButton')?.addEventListener('click', loadData);
+    }
+    async function retryUnsorted() {
+      const confirmed = window.confirm(
+        'Reprocess every Unsorted or failed reel?\\n\\n' +
+        'Each reel will be downloaded and categorized again. If the AI key on the server is not working, they will come back as Unsorted again — fix the key first.'
+      );
+      if (!confirmed) return;
+      const button = document.getElementById('retryUnsortedButton');
+      if (button) { button.disabled = true; button.textContent = 'Requeuing…'; }
+      try {
+        const response = await fetch(`/reels/retry-unsorted?user_id=${encodeURIComponent(USER_ID)}`, { method: 'POST', credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Requeue failed');
+        window.alert(`Requeued ${payload.requeued_count} reels for reprocessing.` + (payload.error_count ? ` ${payload.error_count} could not be requeued.` : ''));
+      } catch (error) {
+        window.alert(error.message || 'Could not requeue reels. Please try again.');
+      }
+      loadData();
     }
     function instagramStatusLabel() {
       if (!state.session || !state.session.authenticated) return '—';
@@ -1714,8 +1744,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="sheet-list">
             <a class="sheet-row" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>Open Original Reel</span><span>›</span></a>
             ${productAction}
+            ${state.session?.authenticated && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
             <button class="sheet-row" type="button"><span>Notes</span><span>›</span></button>
-            <button class="sheet-row" type="button"><span>Related Items</span><span>›</span></button>
             <button id="deleteItem" class="sheet-row danger" type="button"><span>Delete Item</span><span>›</span></button>
           </div>
         </div>`;
@@ -1723,6 +1753,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       actionSheet.classList.add('visible');
       document.getElementById('sheetClose').addEventListener('click', closeActionSheet);
       document.getElementById('deleteItem').addEventListener('click', deleteCurrentItem);
+      document.getElementById('retryItem')?.addEventListener('click', retryCurrentItem);
       document.getElementById('shareItem').addEventListener('click', () => {
         if (navigator.share) navigator.share({ title: item.name, url: item.url || window.location.href }).catch(() => {});
       });
@@ -1730,6 +1761,25 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function closeActionSheet() {
       sheetBackdrop.classList.remove('visible');
       actionSheet.classList.remove('visible');
+    }
+    async function retryCurrentItem() {
+      const item = state.miniItem;
+      if (!item?.reel_id) {
+        window.alert('This item is missing a backend reel id, so it cannot be retried.');
+        return;
+      }
+      const button = document.getElementById('retryItem');
+      if (button) { button.disabled = true; button.firstElementChild.textContent = 'Requeuing…'; }
+      try {
+        const response = await fetch(`/reels/${encodeURIComponent(item.reel_id)}/retry`, { method: 'POST', credentials: 'same-origin' });
+        if (!response.ok) throw new Error('Retry failed');
+        window.alert('Reel requeued. It will be reprocessed and refiled in the next few minutes.');
+        closeMini();
+        loadData();
+      } catch (error) {
+        window.alert('Could not requeue this reel. Please try again.');
+        if (button) { button.disabled = false; button.firstElementChild.textContent = 'Retry Processing'; }
+      }
     }
     async function deleteCurrentItem() {
       const item = state.miniItem;
