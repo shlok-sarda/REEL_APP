@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import cv2
+import requests
 import yt_dlp
 
 from app.config import settings
@@ -15,6 +16,63 @@ from app.services.reel_ingest import (
 
 
 logger = logging.getLogger(__name__)
+
+APIFY_ACTOR = "apify~instagram-scraper"
+APIFY_RUN_TIMEOUT_SECONDS = 240
+
+
+def _download_via_apify(url: str, reel_id: str) -> Path | None:
+    """Fetch the reel video through the Apify Instagram scraper.
+
+    Returns the downloaded video path, or None when Apify is not configured or
+    the fetch fails (callers fall back to yt-dlp).
+    """
+    if not settings.apify_token:
+        return None
+
+    try:
+        response = requests.post(
+            f"https://api.apify.com/v2/acts/{APIFY_ACTOR}/run-sync-get-dataset-items",
+            params={"token": settings.apify_token},
+            json={
+                "directUrls": [url],
+                "resultsType": "posts",
+                "resultsLimit": 1,
+                "addParentData": False,
+            },
+            timeout=APIFY_RUN_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        items = response.json()
+    except Exception:
+        logger.exception("Apify run failed for url=%s", url)
+        return None
+
+    if not isinstance(items, list) or not items:
+        logger.warning("Apify returned no items for url=%s", url)
+        return None
+
+    video_url = (items[0] or {}).get("videoUrl") or ""
+    if not video_url:
+        logger.warning("Apify item has no videoUrl for url=%s (type=%s)", url, (items[0] or {}).get("type"))
+        return None
+
+    video_path = settings.videos_dir / f"{reel_id}.mp4"
+    try:
+        with requests.get(video_url, stream=True, timeout=120) as download:
+            download.raise_for_status()
+            with open(video_path, "wb") as handle:
+                for chunk in download.iter_content(chunk_size=1 << 20):
+                    handle.write(chunk)
+    except Exception:
+        logger.exception("Apify CDN download failed for url=%s", url)
+        video_path.unlink(missing_ok=True)
+        return None
+
+    if not video_path.exists() or video_path.stat().st_size == 0:
+        video_path.unlink(missing_ok=True)
+        return None
+    return video_path
 
 
 def _cleanup_existing_files(reel_id: str):
@@ -110,24 +168,28 @@ def ensure_reel_media(url: str) -> dict:
     update_reel_media(url, "downloading", "", "")
     _cleanup_existing_files(reel_id)
 
-    target_template = settings.videos_dir / f"{reel_id}.%(ext)s"
+    video_path = _download_via_apify(url, reel_id)
 
-    try:
-        with yt_dlp.YoutubeDL(
-            {
-                "outtmpl": str(target_template),
-                "format": "mp4/best",
-                "quiet": True,
-                "no_warnings": True,
-            }
-        ) as ydl:
-            ydl.download([url])
-    except Exception:
-        update_reel_media(url, "failed", "", "")
-        upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_failed"})
-        return {"ok": False, "media_status": "failed", "local_video_path": "", "thumbnail_path": ""}
+    if not video_path:
+        # Fallback: direct yt-dlp download (blocked by Instagram for logged-out
+        # requests since ~mid-2026, but kept for other sources / local cookies).
+        target_template = settings.videos_dir / f"{reel_id}.%(ext)s"
+        try:
+            with yt_dlp.YoutubeDL(
+                {
+                    "outtmpl": str(target_template),
+                    "format": "mp4/best",
+                    "quiet": True,
+                    "no_warnings": True,
+                }
+            ) as ydl:
+                ydl.download([url])
+        except Exception:
+            update_reel_media(url, "failed", "", "")
+            upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_failed"})
+            return {"ok": False, "media_status": "failed", "local_video_path": "", "thumbnail_path": ""}
 
-    video_path = _find_downloaded_video(reel_id)
+        video_path = _find_downloaded_video(reel_id)
     if not video_path or not video_path.exists():
         update_reel_media(url, "failed", "", "")
         upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_missing_output"})

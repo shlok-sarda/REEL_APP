@@ -22,6 +22,7 @@ class Settings:
     instagram_app_username: str = os.getenv("INSTAGRAM_APP_USERNAME", "").strip().lstrip("@")
     instagram_webhook_verify_token: str = os.getenv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "").strip()
     instagram_app_secret: str = os.getenv("INSTAGRAM_APP_SECRET", "").strip()
+    apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()
     meili_index: str = os.getenv("MEILI_INDEX", "clipnest_deep_search_reels_staging").strip()
