@@ -726,65 +726,100 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .nav-button.active { color:var(--text); }
 
     /* ---------- mini player ---------- */
-    .mini-player {
+    .reel-player {
       position:fixed;
-      left:50%;
-      bottom:calc(76px + var(--safe-bottom));
+      inset:0;
       z-index:40;
-      width:min(398px, calc(100% - 28px));
-      transform:translate(-50%, calc(100% + 120px));
-      border:1px solid var(--line);
-      border-radius:20px;
-      background:#141417;
-      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      background:rgba(9,9,11,.97);
       opacity:0;
       pointer-events:none;
-      transition:transform 200ms cubic-bezier(.32,.72,.35,1), opacity 200ms ease;
-      box-shadow:0 18px 50px rgba(0,0,0,.55);
+      transition:opacity 180ms ease;
     }
-    .mini-player.visible {
-      transform:translate(-50%, 0);
+    .reel-player.visible {
       opacity:1;
       pointer-events:auto;
     }
-    .mini-body {
-      display:grid;
-      grid-template-columns:54px minmax(0,1fr) 44px 34px 34px;
+    .player-top {
+      display:flex;
       align-items:center;
-      gap:10px;
-      padding:11px;
+      gap:12px;
+      padding:calc(12px + var(--safe-top)) 16px 10px;
     }
-    .mini-thumb {
-      width:54px;
-      height:54px;
-      border-radius:12px;
-      overflow:hidden;
-      background:var(--soft);
-    }
-    .mini-thumb img, .mini-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
-    .mini-title {
+    .player-title {
+      flex:1;
       margin:0;
-      font-size:.88rem;
-      line-height:1.2;
+      font-size:.95rem;
+      line-height:1.25;
       font-weight:700;
       display:-webkit-box;
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
     }
-    .mini-time { margin-top:4px; color:var(--muted); font-size:.7rem; font-weight:650; }
-    .mini-action {
-      min-width:34px;
-      height:34px;
+    .player-action {
+      min-width:38px;
+      height:38px;
       display:grid;
       place-items:center;
       border-radius:50%;
+      background:rgba(255,255,255,.08);
       color:var(--text);
-      font-size:.82rem;
+      font-size:.88rem;
       font-weight:650;
     }
-    .progress-track { height:3px; background:#232327; }
-    .progress-fill { width:0%; height:100%; background:#fff; }
+    .player-action[hidden] { display:none; }
+    .player-stage {
+      flex:1;
+      min-height:0;
+      display:grid;
+      place-items:center;
+      padding:0 12px;
+    }
+    .player-stage video {
+      max-width:100%;
+      max-height:100%;
+      height:100%;
+      border-radius:18px;
+      background:#000;
+      object-fit:contain;
+    }
+    .player-fallback {
+      display:grid;
+      justify-items:center;
+      gap:14px;
+      text-align:center;
+      padding:20px;
+    }
+    .player-fallback img {
+      max-width:min(300px, 70vw);
+      max-height:38vh;
+      border-radius:16px;
+      object-fit:cover;
+      opacity:.85;
+    }
+    .player-fallback p { margin:0; color:var(--muted); font-size:.88rem; font-weight:650; }
+    .player-fallback a {
+      color:var(--text);
+      font-size:.88rem;
+      font-weight:700;
+      text-decoration:underline;
+      text-underline-offset:3px;
+    }
+    .player-bottom { padding:12px 18px calc(18px + var(--safe-bottom)); }
+    .player-track { height:4px; border-radius:99px; background:#232327; overflow:hidden; }
+    .player-fill { width:0%; height:100%; background:#fff; }
+    .player-meta {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-top:12px;
+      color:var(--muted);
+      font-size:.78rem;
+      font-weight:650;
+    }
+    .player-meta span { flex:1; }
 
     /* ---------- action sheet ---------- */
     .sheet-backdrop {
@@ -895,18 +930,21 @@ def build_clipnest_v1_html(user_id: str) -> str:
 <body>
   <div class="phone-shell">
     <main id="app" class="screen"></main>
-    <section id="miniPlayer" class="mini-player" aria-label="Mini player">
-      <div class="mini-body">
-        <div id="miniThumb" class="mini-thumb"></div>
-        <div>
-          <p id="miniTitle" class="mini-title"></p>
-          <div id="miniTime" class="mini-time">0:00 / 0:12</div>
-        </div>
-        <button id="miniToggle" class="mini-action" type="button" aria-label="Play or pause">Pause</button>
-        <button id="miniMore" class="mini-action" type="button" aria-label="More actions">···</button>
-        <button id="miniClose" class="mini-action" type="button" aria-label="Close mini player">✕</button>
+    <section id="miniPlayer" class="reel-player" aria-label="Reel player">
+      <div class="player-top">
+        <button id="miniClose" class="player-action" type="button" aria-label="Close player">✕</button>
+        <p id="miniTitle" class="player-title"></p>
+        <button id="miniMore" class="player-action" type="button" aria-label="More actions">···</button>
       </div>
-      <div class="progress-track"><div id="miniProgress" class="progress-fill"></div></div>
+      <div id="miniThumb" class="player-stage"></div>
+      <div class="player-bottom">
+        <div class="player-track"><div id="miniProgress" class="player-fill"></div></div>
+        <div class="player-meta">
+          <span id="miniTime">0:00 / 0:00</span>
+          <button id="miniSound" class="player-action" type="button" aria-label="Toggle sound" hidden>🔇</button>
+          <button id="miniToggle" class="player-action" type="button" aria-label="Play or pause">⏸</button>
+        </div>
+      </div>
     </section>
     <div id="sheetBackdrop" class="sheet-backdrop"></div>
     <section id="actionSheet" class="action-sheet" aria-label="Item actions"></section>
@@ -945,9 +983,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       miniItem: null,
       miniIndex: 0,
       playing: false,
-      progressTimer: null,
       pollTimer: null,
-      progress: 0,
       session: null,
       igLink: null,
       loading: true
@@ -964,6 +1000,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const miniToggle = document.getElementById('miniToggle');
     const miniMore = document.getElementById('miniMore');
     const miniClose = document.getElementById('miniClose');
+    const miniSound = document.getElementById('miniSound');
     const actionSheet = document.getElementById('actionSheet');
     const sheetBackdrop = document.getElementById('sheetBackdrop');
 
@@ -1204,10 +1241,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function coverItem(list) {
       return list.items.find((item) => mediaFor(item)) || list.items[0] || {};
-    }
-    function durationFor(item, index) {
-      const seconds = 7 + ((index * 5 + String(item.name || '').length) % 16);
-      return `0:${String(seconds).padStart(2, '0')}`;
     }
     function chips() {
       return ['All', ...Array.from(new Set(sortedCollections().map((list) => list.parent_title || list.list_title))).filter(Boolean)];
@@ -1684,52 +1717,81 @@ def build_clipnest_v1_html(user_id: str) -> str:
         });
       });
     }
+    function fmtTime(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+      return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+    }
     function openMiniPlayer(item, index) {
       if (!item) return;
       state.miniItem = item;
       state.miniIndex = index || 0;
       state.playing = true;
-      state.progress = 0;
       const thumb = thumbnailFor(item);
       const video = videoFor(item);
-      miniThumb.innerHTML = video
-        ? `<video id="miniVideo" src="${escapeHtml(video)}" ${thumb ? `poster="${escapeHtml(thumb)}"` : ''} muted playsinline autoplay loop></video>`
-        : `<img src="${escapeHtml(thumb)}" alt="" onerror="this.remove()" />`;
+      miniSound.hidden = true;
       miniTitle.textContent = item.name || 'Untitled item';
-      miniTime.textContent = `0:00 / ${durationFor(item, state.miniIndex)}`;
-      miniToggle.textContent = 'Pause';
+      miniTime.textContent = '0:00 / 0:00';
+      miniProgress.style.width = '0%';
+      miniToggle.textContent = '⏸';
+      if (video) {
+        miniThumb.innerHTML = `<video id="miniVideo" src="${escapeHtml(video)}" ${thumb ? `poster="${escapeHtml(thumb)}"` : ''} playsinline loop></video>`;
+        const player = document.getElementById('miniVideo');
+        player.addEventListener('timeupdate', updateMiniTime);
+        player.addEventListener('loadedmetadata', updateMiniTime);
+        player.addEventListener('error', () => showPlayerFallback(item, 'This video could not be loaded.'));
+        // Opened from a tap, so playing with sound is usually allowed. If the
+        // browser refuses, fall back to muted playback with a tap-for-sound button.
+        player.muted = false;
+        player.play().catch(() => {
+          player.muted = true;
+          miniSound.hidden = false;
+          miniSound.textContent = '🔇';
+          player.play().catch(() => {});
+        });
+      } else {
+        showPlayerFallback(item, 'No video is saved for this reel yet.');
+      }
       miniPlayer.classList.add('visible');
-      startProgress();
     }
-    function startProgress() {
-      clearInterval(state.progressTimer);
-      state.progressTimer = setInterval(() => {
-        if (!state.playing) return;
-        const video = document.getElementById('miniVideo');
-        if (video && Number.isFinite(video.duration) && video.duration > 0) {
-          state.progress = Math.min(100, (video.currentTime / video.duration) * 100);
-        } else {
-          state.progress = (state.progress + 1.8) % 100;
-        }
-        miniProgress.style.width = `${state.progress}%`;
-      }, 350);
+    function showPlayerFallback(item, message) {
+      const thumb = thumbnailFor(item);
+      state.playing = false;
+      miniToggle.textContent = '▶';
+      miniSound.hidden = true;
+      miniThumb.innerHTML = `
+        <div class="player-fallback">
+          ${thumb ? `<img src="${escapeHtml(thumb)}" alt="" onerror="this.remove()" />` : ''}
+          <p>${escapeHtml(message)}</p>
+          ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Open original reel ↗</a>` : ''}
+        </div>`;
+    }
+    function updateMiniTime() {
+      const video = document.getElementById('miniVideo');
+      if (!video) return;
+      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+      miniTime.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(duration)}`;
+      miniProgress.style.width = duration ? `${Math.min(100, (video.currentTime / duration) * 100)}%` : '0%';
     }
     function toggleMini() {
       const video = document.getElementById('miniVideo');
+      if (!video) return;
       state.playing = !state.playing;
-      if (video) {
-        if (state.playing) video.play().catch(() => {});
-        else video.pause();
-      }
-      miniToggle.textContent = state.playing ? 'Pause' : 'Play';
+      if (state.playing) video.play().catch(() => {});
+      else video.pause();
+      miniToggle.textContent = state.playing ? '⏸' : '▶';
+    }
+    function toggleMiniSound() {
+      const video = document.getElementById('miniVideo');
+      if (!video) return;
+      video.muted = !video.muted;
+      miniSound.textContent = video.muted ? '🔇' : '🔊';
     }
     function closeMini() {
       miniPlayer.classList.remove('visible');
-      clearInterval(state.progressTimer);
       const video = document.getElementById('miniVideo');
       if (video) video.pause();
+      miniThumb.innerHTML = '';
       state.miniItem = null;
-      state.progress = 0;
       miniProgress.style.width = '0%';
       closeActionSheet();
     }
@@ -1873,9 +1935,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
     miniToggle.addEventListener('click', toggleMini);
     miniMore.addEventListener('click', openActionSheet);
     miniClose.addEventListener('click', closeMini);
+    miniSound.addEventListener('click', toggleMiniSound);
     miniPlayer.addEventListener('click', (event) => {
-      if (event.target.closest('.mini-action')) return;
-      openActionSheet();
+      if (event.target.closest('.player-action, .player-fallback a')) return;
+      toggleMini();
     });
     sheetBackdrop.addEventListener('click', closeActionSheet);
     loadData();
