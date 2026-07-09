@@ -502,15 +502,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
       overflow:hidden;
       background:var(--soft);
     }
-    .ph-emoji {
+    .ph-glyph {
       display:grid;
       place-items:center;
       width:100%;
       height:100%;
-      font-size:1.6em;
-      opacity:.9;
+      color:rgba(255,255,255,.5);
+      font-size:1.1em;
     }
-    .m-thumb .ph-emoji, .recent-thumb .ph-emoji { font-size:2.6em; }
+    .m-thumb .ph-glyph, .recent-thumb .ph-glyph { font-size:1.7em; }
     .result-thumb img, .result-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
     .result-card h3 {
       margin:0;
@@ -1187,12 +1187,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const [dark, mid] = PH_PALETTES[hash % PH_PALETTES.length];
       return `linear-gradient(135deg, ${dark}, ${mid} 60%, ${dark})`;
     }
-    function mediaBox(item, className, loading = 'lazy', inner = '') {
+    // Reels are always represented by their real thumbnail/video. When a reel has
+    // no stored media yet, we show a neutral "no preview" glyph over a gradient —
+    // never a topical emoji, which would misleadingly look like the reel's content.
+    function reelThumb(item, className, loading = 'lazy', inner = '') {
       const src = mediaFor(item);
       const label = item.name || item.list_title || 'reel';
-      const emoji = emojiFor(`${item.parent_title || ''} ${item.list_title || ''} ${label}`);
-      const fallback = `<span class="ph-emoji">${emoji}</span>`;
-      const media = src ? renderMedia(item, loading) : fallback;
+      const media = src ? renderMedia(item, loading) : '<span class="ph-glyph">▶</span>';
       return `<span class="${className}" style="background:${gradFor(label)}">${media}${inner}</span>`;
     }
     function renderMedia(item, loading = 'lazy') {
@@ -1211,9 +1212,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function chips() {
       return ['All', ...Array.from(new Set(sortedCollections().map((list) => list.parent_title || list.list_title))).filter(Boolean)];
     }
+    // A folder is "unsorted" when its category is one of the generic buckets the
+    // pipeline falls back to. These loose reels live only in Recently saved — they
+    // are NOT shown as real folders in the Library section.
+    function isUnsortedList(list) {
+      const key = String(list.parent_title || list.list_title || '').trim().toLowerCase();
+      return ['', 'generic', 'miscellaneous', 'uncertain', 'general', 'personalized', 'unsorted'].includes(key);
+    }
+    function realFolders() {
+      return sortedCollections().filter((list) => !isUnsortedList(list));
+    }
     function categoryTiles() {
       const groups = new Map();
-      for (const list of sortedCollections()) {
+      for (const list of realFolders()) {
         const key = list.parent_title || list.list_title;
         if (!key) continue;
         groups.set(key, (groups.get(key) || 0) + list.real_count);
@@ -1224,7 +1235,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       return sortedCollections().flatMap((list) =>
         list.items.map((item) => ({ ...item, list_id: list.list_id, list_title: list.list_title, parent_title: list.parent_title })));
     }
-    function recentItems(limit = 10) {
+    function recentItems(limit = 24) {
       const seen = new Set();
       const items = [];
       for (const item of flatItems()) {
@@ -1245,9 +1256,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
 
     /* ---------- HOME ---------- */
     function renderLibrary() {
-      const lists = sortedCollections().filter(listMatches);
+      const lists = realFolders().filter(listMatches);
       const tiles = categoryTiles();
-      const recents = recentItems(10);
+      const recents = recentItems(24);
+      const hasAnyItems = flatItems().length > 0;
       app.innerHTML = `
         <div class="home-head">
           <h1 class="greeting">${escapeHtml(greeting())}</h1>
@@ -1266,17 +1278,18 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
           <div class="recent-rail">${recents.map((item, index) => `
             <button class="recent-card" type="button" data-recent-item="${index}">
-              ${mediaBox(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy', `<span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
+              ${reelThumb(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy', `<span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
               <p class="recent-source">${escapeHtml(sourceFor(item))}</p>
               <p class="recent-title">${escapeHtml(item.name)}</p>
             </button>`).join('')}</div>` : ''}
         <div class="section-head">
           <h2 class="section-title">Library <span class="chev">›</span></h2>
-          <span class="section-side">${lists.length} folders</span>
+          <span class="section-side">${lists.length} ${lists.length === 1 ? 'folder' : 'folders'}</span>
         </div>
         ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
         ${!state.loading && lists.length ? `<section class="lib-list">${lists.map(renderLibRow).join('')}</section>` : ''}
-        ${!state.loading && !lists.length ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
+        ${!state.loading && !lists.length && hasAnyItems ? '<div class="empty">No folders yet. Your saved reels are in Recently saved above — folders appear here as they get organized.</div>' : ''}
+        ${!state.loading && !lists.length && !hasAnyItems ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
       `;
       document.getElementById('librarySearch')?.addEventListener('input', (event) => {
         state.query = event.target.value;
@@ -1286,7 +1299,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
       document.getElementById('refreshButton')?.addEventListener('click', loadData);
       bindChips();
-      const recentsData = recentItems(10);
+      const recentsData = recentItems(24);
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
         button.addEventListener('click', () => openMiniPlayer(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem)));
       });
@@ -1302,9 +1315,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
     }
     function renderLibRow(list) {
-      const cover = coverItem(list);
+      // Folders are represented by a clean logo (emoji), never a random reel frame.
       return `<button class="lib-row" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
-        ${mediaBox({ ...cover, name: cover.name || list.list_title, parent_title: list.parent_title, list_title: list.list_title }, 'lib-icon')}
+        <span class="lib-icon" style="background:${gradFor(list.parent_title || list.list_title)}">${emojiFor(list.parent_title || list.list_title)}</span>
         <span>
           <p class="lib-name">${escapeHtml(prettyTitle(list.list_title))}</p>
           <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(prettyTitle(list.parent_title))}` : ''}</p>
@@ -1360,7 +1373,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
       return `<article class="m-card">
         <button style="width:100%;text-align:left" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
-          ${mediaBox(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
+          ${reelThumb(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
           <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab" data-item-menu="${index}">···</span></span>
           ${item.summary ? `<p class="m-summary">${escapeHtml(item.summary)}</p>` : ''}
           ${productText ? `<p class="m-summary">🛒 ${escapeHtml(productText)}</p>` : ''}
@@ -1480,7 +1493,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
-          ${mediaBox(item, 'result-thumb')}
+          ${reelThumb(item, 'result-thumb')}
           <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.summary || item.list_title || '')}</p></div>
         </button>`).join('')}
       `;
