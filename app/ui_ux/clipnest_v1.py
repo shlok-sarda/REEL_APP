@@ -906,8 +906,24 @@ def build_clipnest_v1_html(user_id: str) -> str:
       transition:transform 220ms cubic-bezier(.32,.72,.35,1);
     }
     .action-sheet.visible { transform:translate(-50%,0); }
-    .sheet-media { position:relative; height:200px; background:#0f0f11; }
+    .sheet-media { position:relative; height:200px; background:#0f0f11; cursor:pointer; }
     .sheet-media img, .sheet-media video { width:100%; height:100%; object-fit:cover; display:block; opacity:.92; }
+    .sheet-play {
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%, -50%);
+      width:56px;
+      height:56px;
+      border-radius:50%;
+      background:rgba(0,0,0,.6);
+      border:1px solid rgba(255,255,255,.28);
+      display:grid;
+      place-items:center;
+      color:#fff;
+      font-size:1.15rem;
+      pointer-events:none;
+    }
     .sheet-close {
       position:absolute;
       top:14px;
@@ -1047,6 +1063,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       miniItem: null,
       miniIndex: 0,
       miniList: [],
+      sheetIndex: 0,
+      sheetList: [],
       playing: false,
       soundOn: (localStorage.getItem('clipnest_sound') ?? '1') === '1',
       bufferTimer: null,
@@ -1409,7 +1427,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       bindChips();
       const recentsData = recentItems(24);
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem), recentsData));
+        button.addEventListener('click', () => openActionSheet(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem), recentsData));
       });
       app.querySelectorAll('[data-open-list]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -1467,13 +1485,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
       bindChips();
       app.querySelectorAll('[data-open-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
+        button.addEventListener('click', () => openActionSheet(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
       });
       app.querySelectorAll('[data-item-menu]').forEach((el) => {
         el.addEventListener('click', (event) => {
           event.stopPropagation();
-          state.miniItem = items[Number(el.dataset.itemMenu)];
-          openActionSheet();
+          openActionSheet(items[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), items);
         });
       });
     }
@@ -1606,7 +1623,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </button>`).join('')}
       `;
       resultList.querySelectorAll('[data-search-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem), results));
+        button.addEventListener('click', () => openActionSheet(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem), results));
       });
     }
     function renderSearchTab() {
@@ -1943,16 +1960,23 @@ def build_clipnest_v1_html(user_id: str) -> str:
       miniProgress.style.width = '0%';
       closeActionSheet();
     }
-    function openActionSheet() {
-      const item = state.miniItem;
-      if (!item) return;
+    function openActionSheet(item, index, list) {
+      const target = item || state.miniItem;
+      if (!target) return;
+      state.miniItem = target;
+      state.sheetIndex = Number.isFinite(index) ? index : state.miniIndex;
+      state.sheetList = Array.isArray(list) && list.length ? list : (state.miniList.length ? state.miniList : [target]);
+      openSheetForItem(target);
+    }
+    function openSheetForItem(item) {
       const media = mediaFor(item);
       const productAction = hasProduct(item)
         ? `<a class="sheet-row" href="${escapeHtml(item.best_buy_link || item.amazon_link || '#')}" target="_blank" rel="noopener"><span>Buy Link <span class="new">New</span></span><span>›</span></a>`
         : '';
       actionSheet.innerHTML = `
-        <div class="sheet-media">
+        <div id="sheetMedia" class="sheet-media">
           ${/\\.mp4($|[?#])/i.test(media) ? `<video src="${escapeHtml(media)}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(media)}" alt="" onerror="this.remove()" />`}
+          <span class="sheet-play">▶</span>
           <button id="sheetClose" class="sheet-close" type="button" aria-label="Close actions">✕</button>
         </div>
         <div class="sheet-body">
@@ -1974,12 +1998,24 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </div>`;
       sheetBackdrop.classList.add('visible');
       actionSheet.classList.add('visible');
-      document.getElementById('sheetClose').addEventListener('click', closeActionSheet);
+      document.getElementById('sheetClose').addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeActionSheet();
+      });
+      document.getElementById('sheetMedia').addEventListener('click', playFromSheet);
       document.getElementById('deleteItem').addEventListener('click', deleteCurrentItem);
       document.getElementById('retryItem')?.addEventListener('click', retryCurrentItem);
       document.getElementById('shareItem').addEventListener('click', () => {
         if (navigator.share) navigator.share({ title: item.name, url: item.url || window.location.href }).catch(() => {});
       });
+    }
+    function playFromSheet() {
+      const item = state.miniItem;
+      if (!item) return;
+      closeActionSheet();
+      // If this reel is already open in the player behind the sheet, just reveal it.
+      if (miniPlayer.classList.contains('visible') && state.miniList[state.miniIndex] === item) return;
+      openMiniPlayer(item, state.sheetIndex, state.sheetList);
     }
     function closeActionSheet() {
       sheetBackdrop.classList.remove('visible');
@@ -2081,7 +2117,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     libraryNav.addEventListener('click', () => setNav('library'));
     profileNav.addEventListener('click', () => setNav('profile'));
     miniToggle.addEventListener('click', toggleMini);
-    miniMore.addEventListener('click', openActionSheet);
+    miniMore.addEventListener('click', () => openActionSheet());
     miniClose.addEventListener('click', closeMini);
     miniSound.addEventListener('click', toggleMiniSound);
     // Stage gestures: quick tap = pause/play, vertical swipe = next/previous reel.
