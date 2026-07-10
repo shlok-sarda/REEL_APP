@@ -97,6 +97,54 @@ def extract_metadata(url):
 # ----------------------------
 # DOWNLOAD
 # ----------------------------
+def app_media_video(url):
+    """Return the video already downloaded by the app's media pipeline, if any.
+
+    ensure_reel_media (Apify-backed) stores the reel's mp4 under the app's
+    videos dir. Instagram blocks logged-out yt-dlp downloads, so reusing that
+    file is the reliable path for transcript audio and visual frames alike.
+    """
+    try:
+        from app.config import settings
+        from app.services.reel_ingest import get_reel_by_url
+
+        reel = get_reel_by_url(url)
+        if not reel:
+            return None
+        candidate = (reel.get("local_video_path") or "").strip()
+        if candidate and os.path.exists(candidate):
+            return candidate
+        reel_id = (reel.get("id") or "").strip()
+        if reel_id:
+            for path in sorted(settings.videos_dir.glob(f"{reel_id}.*")):
+                if path.is_file():
+                    return str(path)
+        # Not on disk yet (fresh reel): fetch it now through the app's
+        # Apify-backed downloader so transcript/visual have media to work with.
+        from app.services.media import ensure_reel_media
+
+        outcome = ensure_reel_media(url) or {}
+        candidate = (outcome.get("local_video_path") or "").strip()
+        if candidate and os.path.exists(candidate):
+            return candidate
+    except Exception:
+        pass
+    return None
+
+
+def is_app_media(path):
+    """True when the path lives in the app's media store (must never be deleted)."""
+    if not path:
+        return False
+    try:
+        from app.config import settings
+
+        Path(path).resolve().relative_to(settings.media_dir.resolve())
+        return True
+    except Exception:
+        return False
+
+
 def download_reel(url, media_kind="video"):
     shortcode = get_shortcode_from_url(url)
     suffix = "audio" if media_kind == "audio" else "video"
@@ -104,6 +152,12 @@ def download_reel(url, media_kind="video"):
     existing_files = sorted(BASE_DIR.glob(pattern))
     if existing_files:
         return str(existing_files[0]), "reused_existing"
+
+    # The app pipeline already fetched this reel's video (with its audio track);
+    # the transcription API accepts video files directly, so reuse it for both kinds.
+    app_video = app_media_video(url)
+    if app_video:
+        return app_video, "reused_app_media"
 
     outtmpl = str(BASE_DIR / f"{shortcode}_{suffix}.%(ext)s")
     candidate_formats = ['bestaudio/best', 'best'] if media_kind == "audio" else [
@@ -174,6 +228,8 @@ def generate_transcript(video_path, retries=3, retry_delay=2):
 
 
 def cleanup_file(path):
+    if is_app_media(path):
+        return  # never delete the app's stored playback video
     if path and os.path.exists(path):
         try:
             os.remove(path)

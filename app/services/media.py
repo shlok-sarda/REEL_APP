@@ -52,9 +52,15 @@ def _download_via_apify(url: str, reel_id: str) -> Path | None:
         logger.warning("Apify returned no items for url=%s", url)
         return None
 
-    video_url = (items[0] or {}).get("videoUrl") or ""
+    item = items[0] or {}
+    video_url = item.get("videoUrl") or ""
     if not video_url:
-        logger.warning("Apify item has no videoUrl for url=%s (type=%s)", url, (items[0] or {}).get("type"))
+        logger.warning(
+            "Apify item has no videoUrl for url=%s (type=%s, error=%s)",
+            url,
+            item.get("type"),
+            item.get("errorDescription") or item.get("error") or "none",
+        )
         return None
 
     video_path = settings.videos_dir / f"{reel_id}.mp4"

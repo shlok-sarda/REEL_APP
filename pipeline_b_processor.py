@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from api_config import get_openai_client
-from data_preprocessing import download_reel, process_reel
+from data_preprocessing import download_reel, is_app_media, process_reel
 from finale import (
     extract_product_data,
     extract_visual_data,
@@ -203,7 +203,7 @@ def run_pipeline(url: str) -> dict:
             visual_status = "failed"
             visual_error = summarize_error(exc)
             video_path_path = Path(video_path)
-            if video_path_path.exists():
+            if video_path_path.exists() and not is_app_media(video_path):
                 try:
                     video_path_path.unlink()
                 except Exception:
