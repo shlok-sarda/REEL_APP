@@ -732,7 +732,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       z-index:40;
       display:flex;
       flex-direction:column;
-      background:rgba(9,9,11,.97);
+      background:#0a0a0c;
       opacity:0;
       pointer-events:none;
       transition:opacity 180ms ease;
@@ -771,13 +771,21 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .player-action[hidden] { display:none; }
     .player-stage {
+      position:relative;
       flex:1;
       min-height:0;
+      display:flex;
+      overflow:hidden;
+      touch-action:none;
+    }
+    .player-canvas {
+      flex:1;
+      min-width:0;
       display:grid;
       place-items:center;
       padding:0 12px;
     }
-    .player-stage video {
+    .player-canvas video {
       max-width:100%;
       max-height:100%;
       height:100%;
@@ -785,6 +793,57 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:#000;
       object-fit:contain;
     }
+    @keyframes reel-enter-up { from { opacity:.3; transform:translateY(28px); } to { opacity:1; transform:none; } }
+    @keyframes reel-enter-down { from { opacity:.3; transform:translateY(-28px); } to { opacity:1; transform:none; } }
+    .player-canvas.enter-up { animation:reel-enter-up 200ms ease; }
+    .player-canvas.enter-down { animation:reel-enter-down 200ms ease; }
+    .player-flash {
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%, -50%) scale(.86);
+      width:78px;
+      height:78px;
+      border-radius:50%;
+      background:rgba(0,0,0,.55);
+      display:grid;
+      place-items:center;
+      color:#fff;
+      font-size:1.7rem;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 160ms ease, transform 160ms ease;
+    }
+    .player-flash.showing { opacity:1; transform:translate(-50%, -50%) scale(1); }
+    @keyframes buffer-pulse { 0%, 100% { opacity:.55; } 50% { opacity:1; } }
+    .player-buffer {
+      position:absolute;
+      left:50%;
+      bottom:16px;
+      transform:translateX(-50%);
+      padding:6px 13px;
+      border-radius:99px;
+      background:rgba(0,0,0,.55);
+      color:#d6d6db;
+      font-size:.74rem;
+      font-weight:650;
+      pointer-events:none;
+      animation:buffer-pulse 1.1s ease infinite;
+    }
+    .player-buffer[hidden] { display:none; }
+    .player-counter {
+      color:var(--muted);
+      background:rgba(255,255,255,.07);
+      padding:5px 10px;
+      border-radius:99px;
+      font-size:.72rem;
+      font-weight:650;
+      white-space:nowrap;
+    }
+    .player-counter[hidden] { display:none; }
+    .player-scrub { padding:10px 0 6px; cursor:pointer; touch-action:none; }
+    .player-scrub .player-track { transition:height 120ms ease; }
+    .player-scrub.active .player-track { height:7px; }
     .player-fallback {
       display:grid;
       justify-items:center;
@@ -934,11 +993,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
       <div class="player-top">
         <button id="miniClose" class="player-action" type="button" aria-label="Close player">✕</button>
         <p id="miniTitle" class="player-title"></p>
+        <span id="playerCounter" class="player-counter" hidden></span>
         <button id="miniMore" class="player-action" type="button" aria-label="More actions">···</button>
       </div>
-      <div id="miniThumb" class="player-stage"></div>
+      <div id="playerStage" class="player-stage">
+        <div id="miniThumb" class="player-canvas"></div>
+        <div id="playerFlash" class="player-flash">▶</div>
+        <div id="playerBuffer" class="player-buffer" hidden>Loading…</div>
+      </div>
       <div class="player-bottom">
-        <div class="player-track"><div id="miniProgress" class="player-fill"></div></div>
+        <div id="playerScrub" class="player-scrub"><div class="player-track"><div id="miniProgress" class="player-fill"></div></div></div>
         <div class="player-meta">
           <span id="miniTime">0:00 / 0:00</span>
           <button id="miniSound" class="player-action" type="button" aria-label="Toggle sound" hidden>🔇</button>
@@ -982,7 +1046,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       deepSearchRequestId: 0,
       miniItem: null,
       miniIndex: 0,
+      miniList: [],
       playing: false,
+      soundOn: (localStorage.getItem('clipnest_sound') ?? '1') === '1',
+      bufferTimer: null,
+      scrubbing: false,
+      stageTouch: null,
+      preloadEl: null,
       pollTimer: null,
       session: null,
       igLink: null,
@@ -1001,6 +1071,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const miniMore = document.getElementById('miniMore');
     const miniClose = document.getElementById('miniClose');
     const miniSound = document.getElementById('miniSound');
+    const playerStage = document.getElementById('playerStage');
+    const playerFlash = document.getElementById('playerFlash');
+    const playerBuffer = document.getElementById('playerBuffer');
+    const playerCounter = document.getElementById('playerCounter');
+    const playerScrub = document.getElementById('playerScrub');
     const actionSheet = document.getElementById('actionSheet');
     const sheetBackdrop = document.getElementById('sheetBackdrop');
 
@@ -1334,7 +1409,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       bindChips();
       const recentsData = recentItems(24);
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem)));
+        button.addEventListener('click', () => openMiniPlayer(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem), recentsData));
       });
       app.querySelectorAll('[data-open-list]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -1392,7 +1467,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
       bindChips();
       app.querySelectorAll('[data-open-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(items[Number(button.dataset.openItem)], Number(button.dataset.openItem)));
+        button.addEventListener('click', () => openMiniPlayer(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
       });
       app.querySelectorAll('[data-item-menu]').forEach((el) => {
         el.addEventListener('click', (event) => {
@@ -1531,7 +1606,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </button>`).join('')}
       `;
       resultList.querySelectorAll('[data-search-item]').forEach((button) => {
-        button.addEventListener('click', () => openMiniPlayer(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem)));
+        button.addEventListener('click', () => openMiniPlayer(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem), results));
       });
     }
     function renderSearchTab() {
@@ -1721,43 +1796,102 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
       return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
     }
-    function openMiniPlayer(item, index) {
+    function openMiniPlayer(item, index, list) {
+      if (!item) return;
+      state.miniList = Array.isArray(list) && list.length ? list : [item];
+      state.miniIndex = Math.max(0, Math.min(index || 0, state.miniList.length - 1));
+      renderReel('none');
+      miniPlayer.classList.add('visible');
+    }
+    function renderReel(direction) {
+      const item = state.miniList[state.miniIndex];
       if (!item) return;
       state.miniItem = item;
-      state.miniIndex = index || 0;
-      state.playing = true;
-      const thumb = thumbnailFor(item);
-      const video = videoFor(item);
+      clearBufferHint();
       miniSound.hidden = true;
       miniTitle.textContent = item.name || 'Untitled item';
       miniTime.textContent = '0:00 / 0:00';
       miniProgress.style.width = '0%';
-      miniToggle.textContent = '⏸';
+      playerCounter.hidden = state.miniList.length < 2;
+      playerCounter.textContent = `${state.miniIndex + 1} / ${state.miniList.length}`;
+      const thumb = thumbnailFor(item);
+      const video = videoFor(item);
+      miniThumb.classList.remove('enter-up', 'enter-down');
+      if (direction !== 'none') {
+        void miniThumb.offsetWidth; // restart the enter animation
+        miniThumb.classList.add(direction === 'up' ? 'enter-up' : 'enter-down');
+      }
       if (video) {
-        miniThumb.innerHTML = `<video id="miniVideo" src="${escapeHtml(video)}" ${thumb ? `poster="${escapeHtml(thumb)}"` : ''} playsinline loop></video>`;
+        // Poster shows instantly while the file streams in — perceived speed.
+        miniThumb.innerHTML = `<video id="miniVideo" src="${escapeHtml(video)}" ${thumb ? `poster="${escapeHtml(thumb)}"` : ''} playsinline loop preload="auto"></video>`;
         const player = document.getElementById('miniVideo');
         player.addEventListener('timeupdate', updateMiniTime);
         player.addEventListener('loadedmetadata', updateMiniTime);
         player.addEventListener('error', () => showPlayerFallback(item, 'This video could not be loaded.'));
+        // Buffering hint appears only after a real stall — an instant spinner
+        // makes fast loads feel slower than they are.
+        player.addEventListener('waiting', queueBufferHint);
+        player.addEventListener('stalled', queueBufferHint);
+        player.addEventListener('playing', clearBufferHint);
+        player.addEventListener('canplay', clearBufferHint);
+        setPausedUI(false);
         // Opened from a tap, so playing with sound is usually allowed. If the
         // browser refuses, fall back to muted playback with a tap-for-sound button.
-        player.muted = false;
-        player.play().catch(() => {
-          player.muted = true;
+        player.muted = !state.soundOn;
+        if (player.muted) {
           miniSound.hidden = false;
           miniSound.textContent = '🔇';
-          player.play().catch(() => {});
+        }
+        player.play().catch(() => {
+          if (!player.muted) {
+            player.muted = true;
+            miniSound.hidden = false;
+            miniSound.textContent = '🔇';
+            player.play().catch(() => {});
+          }
         });
+        preloadNextReel();
       } else {
         showPlayerFallback(item, 'No video is saved for this reel yet.');
       }
-      miniPlayer.classList.add('visible');
+    }
+    function stepReel(delta) {
+      const nextIndex = state.miniIndex + delta;
+      if (nextIndex < 0 || nextIndex >= state.miniList.length) return;
+      state.miniIndex = nextIndex;
+      renderReel(delta > 0 ? 'up' : 'down');
+    }
+    function preloadNextReel() {
+      const next = state.miniList[state.miniIndex + 1];
+      const src = next ? videoFor(next) : '';
+      if (!src) return;
+      if (!state.preloadEl) {
+        state.preloadEl = document.createElement('video');
+        state.preloadEl.preload = 'metadata';
+        state.preloadEl.muted = true;
+      }
+      if (state.preloadEl.getAttribute('src') !== src) state.preloadEl.src = src;
+    }
+    function queueBufferHint() {
+      clearTimeout(state.bufferTimer);
+      state.bufferTimer = setTimeout(() => { playerBuffer.hidden = false; }, 450);
+    }
+    function clearBufferHint() {
+      clearTimeout(state.bufferTimer);
+      playerBuffer.hidden = true;
+    }
+    function setPausedUI(paused) {
+      state.playing = !paused;
+      miniToggle.textContent = paused ? '▶' : '⏸';
+      // Persistent centered ▶ while paused: instant, unmissable status feedback.
+      playerFlash.classList.toggle('showing', paused);
     }
     function showPlayerFallback(item, message) {
       const thumb = thumbnailFor(item);
-      state.playing = false;
-      miniToggle.textContent = '▶';
+      setPausedUI(true);
+      playerFlash.classList.remove('showing');
       miniSound.hidden = true;
+      clearBufferHint();
       miniThumb.innerHTML = `
         <div class="player-fallback">
           ${thumb ? `<img src="${escapeHtml(thumb)}" alt="" onerror="this.remove()" />` : ''}
@@ -1775,16 +1909,26 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function toggleMini() {
       const video = document.getElementById('miniVideo');
       if (!video) return;
-      state.playing = !state.playing;
-      if (state.playing) video.play().catch(() => {});
-      else video.pause();
-      miniToggle.textContent = state.playing ? '⏸' : '▶';
+      if (state.playing) video.pause();
+      else video.play().catch(() => {});
+      setPausedUI(state.playing);
     }
     function toggleMiniSound() {
       const video = document.getElementById('miniVideo');
       if (!video) return;
       video.muted = !video.muted;
+      miniSound.hidden = false;
       miniSound.textContent = video.muted ? '🔇' : '🔊';
+      state.soundOn = !video.muted;
+      localStorage.setItem('clipnest_sound', state.soundOn ? '1' : '0');
+    }
+    function seekFromEvent(event) {
+      const video = document.getElementById('miniVideo');
+      if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+      const rect = playerScrub.getBoundingClientRect();
+      const pct = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      video.currentTime = pct * video.duration;
+      updateMiniTime();
     }
     function closeMini() {
       miniPlayer.classList.remove('visible');
@@ -1792,6 +1936,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (video) video.pause();
       miniThumb.innerHTML = '';
       state.miniItem = null;
+      state.miniList = [];
+      state.stageTouch = null;
+      clearBufferHint();
+      playerFlash.classList.remove('showing');
       miniProgress.style.width = '0%';
       closeActionSheet();
     }
@@ -1936,9 +2084,45 @@ def build_clipnest_v1_html(user_id: str) -> str:
     miniMore.addEventListener('click', openActionSheet);
     miniClose.addEventListener('click', closeMini);
     miniSound.addEventListener('click', toggleMiniSound);
-    miniPlayer.addEventListener('click', (event) => {
-      if (event.target.closest('.player-action, .player-fallback a')) return;
-      toggleMini();
+    // Stage gestures: quick tap = pause/play, vertical swipe = next/previous reel.
+    playerStage.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('.player-fallback a')) return;
+      state.stageTouch = { x: event.clientX, y: event.clientY, t: Date.now() };
+    });
+    playerStage.addEventListener('pointerup', (event) => {
+      const start = state.stageTouch;
+      state.stageTouch = null;
+      if (!start || event.target.closest('.player-fallback a')) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) {
+        stepReel(dy < 0 ? 1 : -1);
+        return;
+      }
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && Date.now() - start.t < 400) toggleMini();
+    });
+    playerStage.addEventListener('pointercancel', () => { state.stageTouch = null; });
+    // Progress bar scrubbing (tap or drag to seek).
+    playerScrub.addEventListener('pointerdown', (event) => {
+      state.scrubbing = true;
+      playerScrub.classList.add('active');
+      playerScrub.setPointerCapture(event.pointerId);
+      seekFromEvent(event);
+    });
+    playerScrub.addEventListener('pointermove', (event) => {
+      if (state.scrubbing) seekFromEvent(event);
+    });
+    ['pointerup', 'pointercancel'].forEach((type) => playerScrub.addEventListener(type, () => {
+      state.scrubbing = false;
+      playerScrub.classList.remove('active');
+    }));
+    document.addEventListener('keydown', (event) => {
+      if (!miniPlayer.classList.contains('visible')) return;
+      if (event.key === ' ') { event.preventDefault(); toggleMini(); }
+      else if (event.key === 'Escape') closeMini();
+      else if (event.key === 'ArrowDown') { event.preventDefault(); stepReel(1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); stepReel(-1); }
+      else if (event.key.toLowerCase() === 'm') toggleMiniSound();
     });
     sheetBackdrop.addEventListener('click', closeActionSheet);
     loadData();
