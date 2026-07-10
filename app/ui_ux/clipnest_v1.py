@@ -312,6 +312,52 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .sync-text { margin:0; font-size:.82rem; font-weight:600; color:var(--muted); min-width:0; }
     .sync-text b { color:var(--text); font-weight:700; }
 
+    /* ---------- activity popover ---------- */
+    .icon-row { position:relative; }
+    .icon-button { position:relative; }
+    .notif-dot {
+      position:absolute;
+      top:7px;
+      right:7px;
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:var(--accent);
+      box-shadow:0 0 0 2px var(--bg);
+    }
+    .notif-dot.issue { background:#e58f3a; }
+    .notif-popover {
+      position:absolute;
+      top:calc(100% + 8px);
+      right:0;
+      z-index:60;
+      width:min(290px, 82vw);
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:12px 12px 4px;
+      box-shadow:0 18px 44px rgba(0,0,0,.5);
+    }
+    .notif-popover[hidden] { display:none; }
+    .notif-head {
+      margin:0 0 9px;
+      font-size:.7rem;
+      letter-spacing:.5px;
+      text-transform:uppercase;
+      font-weight:700;
+      color:var(--muted);
+    }
+    .notif-popover .sync-pill { margin:0 0 10px; }
+    .notif-stats {
+      display:flex;
+      gap:16px;
+      padding:2px 2px 10px;
+      font-size:.74rem;
+      font-weight:600;
+      color:var(--muted);
+    }
+    .notif-stats b { color:var(--text); font-weight:700; margin-left:3px; }
+
     /* ---------- chips (folder filters) ---------- */
     .chips {
       display:flex;
@@ -707,7 +753,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       width:min(430px, 100%);
       transform:translateX(-50%);
       display:grid;
-      grid-template-columns:repeat(3,1fr);
+      grid-template-columns:repeat(2,1fr);
       border-top:1px solid var(--line);
       background:rgba(10,10,11,.86);
       -webkit-backdrop-filter:blur(18px);
@@ -1033,10 +1079,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
         <span>Home</span>
       </button>
-      <button id="searchNav" class="nav-button" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <span>Search</span>
-      </button>
       <button id="profileNav" class="nav-button" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.8-3.4 4.5-5 8-5s6.2 1.6 8 5"/></svg>
         <span>Profile</span>
@@ -1060,6 +1102,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       deepSearch: { query: '', loading: false, error: '', results: [] },
       deepSearchTimer: null,
       deepSearchRequestId: 0,
+      notifOpen: false,
       miniItem: null,
       miniIndex: 0,
       miniList: [],
@@ -1077,7 +1120,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
       loading: true
     };
     const app = document.getElementById('app');
-    const searchNav = document.getElementById('searchNav');
     const libraryNav = document.getElementById('libraryNav');
     const profileNav = document.getElementById('profileNav');
     const miniPlayer = document.getElementById('miniPlayer');
@@ -1102,6 +1144,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
     const ARROW_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
     const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>';
+    const BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -1287,15 +1330,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function itemMatches(item) {
       const q = state.itemQuery.trim();
       const chipOk = state.itemChip === 'All'
-        || (state.itemChip === 'Products' && hasProduct(item))
         || (state.itemChip === 'Saved')
         || (state.itemChip === 'Video' && videoFor(item));
       if (!chipOk) return false;
       if (!q) return true;
-      return hasText(`${item.name} ${item.product_name || ''} ${item.summary || ''}`, q);
-    }
-    function hasProduct(item) {
-      return String(item.contains_product || '').toLowerCase() === 'yes' || Boolean(item.best_buy_link || item.product_name);
+      return hasText(`${item.name} ${item.summary || ''}`, q);
     }
     function thumbnailFor(item) {
       return item.item_thumbnail || item.reel_thumbnail || item.thumbnail_url || item.thumbnail_path || '';
@@ -1386,43 +1425,76 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const tiles = categoryTiles();
       const recents = recentItems(24);
       const hasAnyItems = flatItems().length > 0;
+      const searching = state.magicQuery.trim().length > 0;
+      const status = pipelineStatus();
       app.innerHTML = `
         <div class="home-head">
           <h1 class="greeting">${escapeHtml(greeting())}</h1>
           <div class="icon-row">
+            <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
+            <div id="notifPopover" class="notif-popover" ${state.notifOpen ? '' : 'hidden'}>
+              <p class="notif-head">Activity</p>
+              ${renderSyncPill()}
+              <div class="notif-stats">
+                <span>Queued <b>${state.dashboard.queued_job_count || 0}</b></span>
+                <span>Running <b>${state.dashboard.running_job_count || 0}</b></span>
+                <span>Failed <b>${state.dashboard.failed_url_count || 0}</b></span>
+              </div>
+            </div>
           </div>
         </div>
-        ${renderSearchBox('Search saves...', state.query, 'librarySearch')}
-        ${renderSyncPill(true)}
-        ${tiles.length ? `<div class="cat-rail" aria-label="Categories">${tiles.map(([name, count]) => `
-          <button class="cat-tile ${state.chip === name ? 'active' : ''}" type="button" data-chip-kind="library" data-chip="${escapeHtml(name)}">
-            <span class="cat-icon">${emojiFor(name)}<span class="cat-count">${count}</span></span>
-            <span class="cat-label">${escapeHtml(prettyTitle(name))}</span>
-          </button>`).join('')}</div>` : ''}
-        ${recents.length && !state.query.trim() && state.chip === 'All' ? `
-          <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
-          <div class="recent-rail">${recents.map((item, index) => `
-            <button class="recent-card" type="button" data-recent-item="${index}">
-              ${reelThumb(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy', `<span class="mini-badge">${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
-              <p class="recent-source">${escapeHtml(sourceFor(item))}</p>
-              <p class="recent-title">${escapeHtml(item.name)}</p>
+        <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /></label>
+        <section id="homeResults" ${searching ? '' : 'hidden'}></section>
+        <div id="homeBrowse" ${searching ? 'hidden' : ''}>
+          ${tiles.length ? `<div class="cat-rail" aria-label="Categories">${tiles.map(([name, count]) => `
+            <button class="cat-tile ${state.chip === name ? 'active' : ''}" type="button" data-chip-kind="library" data-chip="${escapeHtml(name)}">
+              <span class="cat-icon">${emojiFor(name)}<span class="cat-count">${count}</span></span>
+              <span class="cat-label">${escapeHtml(prettyTitle(name))}</span>
             </button>`).join('')}</div>` : ''}
-        <div class="section-head">
-          <h2 class="section-title">Library <span class="chev">›</span></h2>
-          <span class="section-side">${lists.length} ${lists.length === 1 ? 'folder' : 'folders'}</span>
+          ${recents.length && state.chip === 'All' ? `
+            <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
+            <div class="recent-rail">${recents.map((item, index) => `
+              <button class="recent-card" type="button" data-recent-item="${index}">
+                ${reelThumb(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy')}
+                <p class="recent-source">${escapeHtml(sourceFor(item))}</p>
+                <p class="recent-title">${escapeHtml(item.name)}</p>
+              </button>`).join('')}</div>` : ''}
+          <div class="section-head">
+            <h2 class="section-title">Library <span class="chev">›</span></h2>
+            <span class="section-side">${lists.length} ${lists.length === 1 ? 'folder' : 'folders'}</span>
+          </div>
+          ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
+          ${!state.loading && lists.length ? `<section class="lib-list">${lists.map(renderLibRow).join('')}</section>` : ''}
+          ${!state.loading && !lists.length && hasAnyItems ? '<div class="empty">No folders yet. Your saved reels are in Recently saved above — folders appear here as they get organized.</div>' : ''}
+          ${!state.loading && !lists.length && !hasAnyItems ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
         </div>
-        ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
-        ${!state.loading && lists.length ? `<section class="lib-list">${lists.map(renderLibRow).join('')}</section>` : ''}
-        ${!state.loading && !lists.length && hasAnyItems ? '<div class="empty">No folders yet. Your saved reels are in Recently saved above — folders appear here as they get organized.</div>' : ''}
-        ${!state.loading && !lists.length && !hasAnyItems ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
       `;
-      document.getElementById('librarySearch')?.addEventListener('input', (event) => {
-        state.query = event.target.value;
-        render();
-        const input = document.getElementById('librarySearch');
-        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      const deepInput = document.getElementById('deepSearchInput');
+      deepInput?.addEventListener('input', (event) => {
+        state.magicQuery = event.target.value;
+        const active = state.magicQuery.trim().length > 0;
+        document.getElementById('homeResults')?.toggleAttribute('hidden', !active);
+        document.getElementById('homeBrowse')?.toggleAttribute('hidden', active);
+        scheduleDeepSearch();
       });
+      const notifButton = document.getElementById('notifButton');
+      notifButton?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        state.notifOpen = !state.notifOpen;
+        document.getElementById('notifPopover')?.toggleAttribute('hidden', !state.notifOpen);
+      });
+      if (!window.__notifBound) {
+        window.__notifBound = true;
+        document.addEventListener('click', (ev) => {
+          if (!state.notifOpen) return;
+          const pop = document.getElementById('notifPopover');
+          if (pop && !pop.contains(ev.target) && !ev.target.closest('#notifButton')) {
+            state.notifOpen = false;
+            pop.setAttribute('hidden', '');
+          }
+        });
+      }
       document.getElementById('refreshButton')?.addEventListener('click', loadData);
       bindChips();
       const recentsData = recentItems(24);
@@ -1435,10 +1507,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
           state.itemQuery = '';
           state.itemChip = 'All';
           state.screen = 'list';
+          state.notifOpen = false;
           window.scrollTo({ top: 0, behavior: 'instant' });
           render();
         });
       });
+      if (searching) {
+        if (state.deepSearch.query !== state.magicQuery.trim()) scheduleDeepSearch();
+        else renderSearchResults();
+        if (deepInput) { deepInput.focus(); deepInput.setSelectionRange(deepInput.value.length, deepInput.value.length); }
+      }
     }
     function renderLibRow(list) {
       // Folders are represented by a clean logo (emoji), never a random reel frame.
@@ -1469,7 +1547,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="icon-row"></div>
         </div>
         ${renderSearchBox(`Search in ${prettyTitle(list.list_title)}...`, state.itemQuery, 'itemSearch')}
-        ${renderChips(['All', 'Video', 'Products', 'Saved'], state.itemChip, 'item')}
+        ${renderChips(['All', 'Video', 'Saved'], state.itemChip, 'item')}
         ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">No items found</div>'}
       `;
       document.getElementById('backToLibrary').addEventListener('click', () => {
@@ -1495,26 +1573,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
     }
     function renderItemCard(item, index) {
-      const productText = [item.product_brand, item.product_name || item.product_type].filter(Boolean).join(' ');
       return `<article class="m-card">
         <button style="width:100%;text-align:left" type="button" data-open-item="${index}" aria-label="Preview ${escapeHtml(item.name)}">
-          ${reelThumb(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}${hasProduct(item) ? '<span class="badge-dot">🛒</span>' : ''}</span>`)}
+          ${reelThumb(item, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(item) ? '<span class="badge-dot">▶</span>' : ''}</span>`)}
           <span class="m-title-row"><p class="m-title">${escapeHtml(item.name)}</p><span class="m-kebab" data-item-menu="${index}">···</span></span>
           ${item.summary ? `<p class="m-summary">${escapeHtml(item.summary)}</p>` : ''}
-          ${productText ? `<p class="m-summary">🛒 ${escapeHtml(productText)}</p>` : ''}
         </button>
-        ${renderBuyLinks(item)}
       </article>`;
-    }
-    function renderBuyLinks(item) {
-      const links = [
-        ['Best', item.best_buy_link],
-        ['Amazon', item.amazon_link],
-        ['Flipkart', item.flipkart_link],
-        ['Nykaa', item.nykaa_link],
-      ].filter((entry) => entry[1]);
-      if (!links.length) return '';
-      return `<div class="buy-row">${links.map(([label, href]) => `<a class="buy-link" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`).join('')}</div>`;
     }
 
     /* ---------- SEARCH ---------- */
@@ -1522,7 +1587,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const q = state.magicQuery.trim();
       const allItems = flatItems();
       return q
-        ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.product_name || ''} ${item.product_brand || ''} ${item.list_title || ''} ${item.parent_title || ''}`, q)).slice(0, 24)
+        ? allItems.filter((item) => hasText(`${item.name} ${item.summary || ''} ${item.list_title || ''} ${item.parent_title || ''}`, q)).slice(0, 24)
         : [];
     }
     function normalizeDeepSearchPayload(payload) {
@@ -1560,8 +1625,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         url: result.url || '',
         name: deepSearchTitle(result),
         summary: deepSearchSummary(result),
-        product_name: (result.product_names || [])[0] || '',
-        product_brand: (result.brands || [])[0] || '',
         local_video_url: media.local_video_url || '',
         thumbnail_url: media.thumbnail_url || '',
         reel_thumbnail: media.thumbnail_url || '',
@@ -1611,45 +1674,23 @@ def build_clipnest_v1_html(user_id: str) -> str:
         seen.add(key);
         return true;
       }).slice(0, 30);
-      const resultList = document.getElementById('magicResults');
+      const resultList = document.getElementById('homeResults');
       if (!resultList) return;
       resultList.innerHTML = `
-        ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="empty">Searching captions, products, visuals, and transcripts...</div>' : ''}
+        ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="empty">Searching captions, visuals, and transcripts...</div>' : ''}
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
-        ${results.map((item, index) => `<button class="result-card" type="button" data-search-item="${index}">
-          ${reelThumb(item, 'result-thumb')}
-          <div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.summary || item.list_title || '')}</p></div>
-        </button>`).join('')}
+        ${results.length ? `<section class="masonry">${results.map(renderItemCard).join('')}</section>` : ''}
       `;
-      resultList.querySelectorAll('[data-search-item]').forEach((button) => {
-        button.addEventListener('click', () => openActionSheet(results[Number(button.dataset.searchItem)], Number(button.dataset.searchItem), results));
+      resultList.querySelectorAll('[data-open-item]').forEach((button) => {
+        button.addEventListener('click', () => openActionSheet(results[Number(button.dataset.openItem)], Number(button.dataset.openItem), results));
       });
-    }
-    function renderSearchTab() {
-      app.innerHTML = `
-        <section class="search-stage">
-          <div class="magic-head">
-            <h1 class="magic-title">Find anything<br/>you saved.</h1>
-            <p class="magic-copy">Search what was said, shown, or written in your reels — products, places, ideas, captions.</p>
-          </div>
-          <label class="magic-bar">
-            <input id="magicInput" value="${escapeHtml(state.magicQuery)}" placeholder="What are you trying to remember?" autocomplete="off" />
-            <button id="magicSubmit" class="magic-submit" type="button" aria-label="Search">${ARROW_SVG}</button>
-          </label>
-          <div id="magicResults" class="result-list"></div>
-        </section>
-      `;
-      const input = document.getElementById('magicInput');
-      input?.focus();
-      if (input) input.setSelectionRange(input.value.length, input.value.length);
-      input?.addEventListener('input', (event) => {
-        state.magicQuery = event.target.value;
-        scheduleDeepSearch();
+      resultList.querySelectorAll('[data-item-menu]').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openActionSheet(results[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), results);
+        });
       });
-      document.getElementById('magicSubmit')?.addEventListener('click', scheduleDeepSearch);
-      if (state.magicQuery.trim() && state.deepSearch.query !== state.magicQuery.trim()) scheduleDeepSearch();
-      else renderSearchResults();
     }
 
     /* ---------- PROFILE ---------- */
@@ -1970,9 +2011,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function openSheetForItem(item) {
       const media = mediaFor(item);
-      const productAction = hasProduct(item)
-        ? `<a class="sheet-row" href="${escapeHtml(item.best_buy_link || item.amazon_link || '#')}" target="_blank" rel="noopener"><span>Buy Link <span class="new">New</span></span><span>›</span></a>`
-        : '';
       actionSheet.innerHTML = `
         <div id="sheetMedia" class="sheet-media">
           ${/\\.mp4($|[?#])/i.test(media) ? `<video src="${escapeHtml(media)}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(media)}" alt="" onerror="this.remove()" />`}
@@ -1981,7 +2019,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </div>
         <div class="sheet-body">
           <div class="sheet-handle"></div>
-          <div class="sheet-title-row"><h2 class="sheet-title">${escapeHtml(item.name)}</h2><span class="type-badge">${hasProduct(item) ? 'Product' : 'Video'}</span></div>
+          <div class="sheet-title-row"><h2 class="sheet-title">${escapeHtml(item.name)}</h2><span class="type-badge">${videoFor(item) ? 'Video' : 'Saved'}</span></div>
           <div class="quick-actions">
             <button class="quick-action" type="button"><span>♡</span>Save</button>
             <button id="shareItem" class="quick-action" type="button"><span>⇧</span>Share</button>
@@ -1990,7 +2028,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
           </div>
           <div class="sheet-list">
             <a class="sheet-row" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>Open Original Reel</span><span>›</span></a>
-            ${productAction}
             ${state.session?.authenticated && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
             <button class="sheet-row" type="button"><span>Notes</span><span>›</span></button>
             <button id="deleteItem" class="sheet-row danger" type="button"><span>Delete Item</span><span>›</span></button>
@@ -2063,15 +2100,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function setNav(screen) {
       state.screen = screen;
       if (screen !== 'list') state.currentListId = '';
+      state.notifOpen = false;
       closeActionSheet();
       render();
     }
     function render() {
-      searchNav.classList.toggle('active', state.screen === 'search');
       libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list');
       profileNav.classList.toggle('active', state.screen === 'profile');
-      if (state.screen === 'search') renderSearchTab();
-      else if (state.screen === 'profile') renderProfile();
+      if (state.screen === 'profile') renderProfile();
       else if (state.screen === 'list') renderListScreen();
       else renderLibrary();
     }
@@ -2113,7 +2149,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         items: (list.items || []).map((item) => ({ ...item }))
       }));
     }
-    searchNav.addEventListener('click', () => setNav('search'));
     libraryNav.addEventListener('click', () => setNav('library'));
     profileNav.addEventListener('click', () => setNav('profile'));
     miniToggle.addEventListener('click', toggleMini);
