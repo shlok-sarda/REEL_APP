@@ -52,7 +52,10 @@ EMBED_OBJECT_TYPE = "deep_search_reel"
 EMBED_VERSION = "hybrid_v1"
 
 RRF_K = 60
-ENGINE_WEIGHTS = {"semantic": 1.0, "phrase": 1.0, "and": 0.7, "or": 0.4, "focus": 0.9, "wide": 0.85}
+ENGINE_WEIGHTS = {
+    "semantic": 1.0, "phrase": 1.0, "and": 0.7, "or": 0.4, "focus": 0.9,
+    "wide": 0.85, "glue": 0.85,
+}
 SUBJECT_BLEND = 0.6
 
 # Gate thresholds — OpenAI text-embedding-3-small cosine scale. All values are
@@ -121,6 +124,16 @@ WIDE_COLUMNS = FOCUS_COLUMNS + [
 _SUBJECT_FIELDS = [
     "main_subject", "item_names", "categories", "entities", "product_names", "brands", "product_types",
 ]
+
+# Term-like trusted fields where compound words matter. Glued adjacent-word
+# forms are indexed here so "push up" also becomes searchable as "pushup"
+# (and vice-versa). Deliberately excludes prose (visual_summary/caption/
+# transcript) — gluing sentences just makes junk tokens.
+COMPOUND_COLUMNS = {
+    "main_subject", "item_names", "product_names", "brands", "models",
+    "collection_titles", "entities", "parent_titles", "categories",
+    "subdomains", "locations", "visual_entities", "item_summaries",
+}
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
@@ -379,6 +392,50 @@ def _quote(term: str) -> str:
     return '"' + term.replace('"', "") + '"'
 
 
+def _glue_forms(tokens: list[str]) -> list[str]:
+    """Compound-word bridge. 'pushup' is ONE token; 'push up' and 'push-up'
+    are two (push+up) — they never cross-match lexically. Emit concatenations
+    of adjacent alpha tokens (+ the full concat) so a query in any form finds a
+    document written in any other. Measured: 'pushup' scored the pushup reel at
+    cosine 0.545 yet returned nothing — no lexical anchor to clear the
+    grounding gate; this supplies it."""
+    words = [t for t in tokens if t.isalpha()]
+    forms = [a + b for a, b in zip(words, words[1:]) if len(a) + len(b) <= 24]
+    if len(words) > 2:
+        forms.append("".join(words))
+    return list(dict.fromkeys(forms))
+
+
+def _augment_compounds(text: str) -> str:
+    """Append glued adjacent-word forms to a field's text so 'push up' also
+    indexes as 'pushup'. Lexical index only — never touches embedding text, so
+    no re-embed is needed on deploy."""
+    words = [w for w in re.findall(r"[a-z0-9]+", text.casefold()) if w.isalpha()]
+    glued = _glue_forms(words)
+    return f"{text} {' '.join(glued)}" if glued else text
+
+
+def _edit_distance(a: str, b: str, max_dist: int) -> int:
+    """Levenshtein with early exit once the distance is certainly > max_dist —
+    cheap enough to scan the (small) per-user vocabulary per query token."""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > max_dist:
+        return max_dist + 1
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        cur = [i]
+        row_best = i
+        for j in range(1, lb + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            cur.append(v)
+            row_best = min(row_best, v)
+        if row_best > max_dist:
+            return max_dist + 1
+        prev = cur
+    return prev[lb]
+
+
 class _Index:
     """In-memory FTS + vector matrices built from one user's documents."""
 
@@ -402,12 +459,25 @@ class _Index:
         )
         names = ["reel_id"] + [n for n, _ in FTS_COLUMNS]
         placeholders = ", ".join("?" for _ in names)
+        wide_set = set(WIDE_COLUMNS)
+        self.vocab: set[str] = set()  # trusted-field words = did-you-mean targets
         for document in self.documents:
             rid = document.get("reel_id")
             if not rid:
                 continue
             fields = _fts_fields(document)
-            values = [rid] + [canonicalize(fields[n]) for n, _ in FTS_COLUMNS]
+            values = [rid]
+            for name, _ in FTS_COLUMNS:
+                text = canonicalize(fields[name])
+                if name in COMPOUND_COLUMNS:
+                    text = _augment_compounds(text)
+                if name in wide_set:
+                    # vocab is built from the AUGMENTED text so glued compounds
+                    # ("pushup") are valid did-you-mean targets too.
+                    for tok in re.findall(r"[a-z0-9]+", text.casefold()):
+                        if tok.isalpha() and len(tok) >= 3:
+                            self.vocab.add(tok)
+                values.append(text)
             self.db.execute(f"INSERT INTO fts ({', '.join(names)}) VALUES ({placeholders})", values)
 
     def _load_vectors(self):
@@ -433,31 +503,87 @@ class _Index:
             return []
         return [r[0] for r in rows]
 
+    def _correct(self, token: str) -> list[str]:
+        """Nearest correctly-spelled library word(s) for a query token that
+        matches NOTHING — typo tolerance, did-you-mean style. Fallback-only:
+        returns [] when the token is already in the vocabulary, so correctly
+        spelled queries are never altered. Short tokens (<4) are skipped (too
+        many false neighbours). Corrections feed grounding + semantic ranking
+        ONLY, never pure-lexical admission — so 'cats'→'cars' can't fabricate a
+        match unless the embedding also agrees."""
+        if len(token) < 4 or token in self.vocab:
+            return []
+        # If porter stemming already matches this token anywhere trusted, it's
+        # a real word (e.g. "restaurants" → a stored "restaurant") — no
+        # correction, and no wasted second embedding. Only genuine misspellings
+        # (match nothing at all) fall through to did-you-mean.
+        if self._fts("{" + " ".join(WIDE_COLUMNS) + "}: (" + _quote(token) + ")"):
+            return []
+        max_dist = 1 if len(token) <= 6 else 2
+        scored = []
+        for word in self.vocab:
+            dist = _edit_distance(token, word, max_dist)
+            if dist <= max_dist:
+                scored.append((dist, len(word), word))
+        scored.sort()
+        return [w for _, _, w in scored[:3]]
+
+    def corrected_query(self, query: str) -> str:
+        """Query with each unknown (typo'd) word swapped for its nearest library
+        word — the 'did you mean' string. Empty when nothing was corrected.
+        Embedded alongside the raw query so the semantic layer understands the
+        typo too, not just the lexical grounding."""
+        changed = False
+        out = []
+        for t in _tokens(query):
+            if t in STOPWORDS:
+                out.append(t)
+                continue
+            correction = self._correct(t)
+            out.append(correction[0] if correction else t)
+            changed = changed or bool(correction)
+        return " ".join(out) if changed else ""
+
     def lexical_ranks(self, query: str) -> dict[str, list[str]]:
-        """Ranked lists per lexical pass. Beyond the original four:
-          wide     : every meaningful term (or a synonym) present in the
-                     TRUSTED fields (WIDE_COLUMNS) — vision-grounded coverage,
-                     immune to caption keyword-stuffing. Admission-grade.
-          wide_any : ANY meaningful term (or synonym) present in trusted
-                     fields of ANY doc — the corpus-grounding probe that keeps
-                     nonsense queries from surfacing semantic outliers."""
+        """Ranked lists per lexical pass:
+          phrase/and : exact multi-word evidence (admission-grade).
+          focus/wide : query terms (or synonyms) in identity / trusted fields
+                       (admission-grade — vision-grounded, immune to caption
+                       keyword-stuffing).
+          glue       : compound-word bridge, e.g. 'push up'→'pushup'
+                       (admission-grade).
+          wide_any   : grounding probe — ANY term, synonym, glue OR typo
+                       correction present anywhere trusted. Gates nonsense out
+                       of the semantic paths; typo corrections reach only here.
+          or         : full recall net (ranking only, not admission)."""
         tokens = _tokens(query)
         meaningful = [t for t in tokens if t not in STOPWORDS] or tokens
         out: dict[str, list[str]] = {
-            "phrase": [], "and": [], "or": [], "focus": [], "wide": [], "wide_any": [],
+            "phrase": [], "and": [], "or": [], "focus": [], "wide": [], "wide_any": [], "glue": [],
         }
         if not tokens:
             return out
-        variant_groups = [_variants(t) for t in meaningful]
-        flat = list(dict.fromkeys(v for group in variant_groups for v in group))
-        or_expr = " OR ".join(_quote(v) for v in flat)
+
+        admit_groups = [_variants(t) for t in meaningful]   # token + synonyms
+        admit_flat = list(dict.fromkeys(v for group in admit_groups for v in group))
+        glue = _glue_forms(meaningful)
+        corrections = list(dict.fromkeys(c for t in meaningful for c in self._correct(t)))
+        # grounding/recall terms are broader than admission terms: corrections
+        # and glue help a doc qualify for the SEMANTIC paths but do not, by
+        # themselves, admit it lexically.
+        ground_flat = list(dict.fromkeys(admit_flat + glue + corrections))
+
         wide_cols = "{" + " ".join(WIDE_COLUMNS) + "}"
-        out["wide_any"] = self._fts(f"{wide_cols}: ({or_expr})")
+        out["wide_any"] = self._fts(f"{wide_cols}: (" + " OR ".join(_quote(v) for v in ground_flat) + ")")
+        out["or"] = self._fts(" OR ".join(_quote(v) for v in ground_flat))
+        if glue:
+            out["glue"] = self._fts(f"{wide_cols}: (" + " OR ".join(_quote(g) for g in glue) + ")")
+
         if len(meaningful) == 1:
             cols = "{" + " ".join(FOCUS_COLUMNS) + "}"
-            out["focus"] = self._fts(f"{cols}: ({or_expr})")
-            out["wide"] = out["wide_any"]
-            out["or"] = self._fts(or_expr)
+            admit_expr = " OR ".join(_quote(v) for v in admit_flat)
+            out["focus"] = self._fts(f"{cols}: ({admit_expr})")
+            out["wide"] = self._fts(f"{wide_cols}: ({admit_expr})")
             return out
         if len(tokens) >= 2:
             out["phrase"] = self._fts('"' + " ".join(tokens) + '"')
@@ -465,19 +591,26 @@ class _Index:
         out["wide"] = self._fts(
             " AND ".join(
                 f"({wide_cols}: ({' OR '.join(_quote(v) for v in group)}))"
-                for group in variant_groups
+                for group in admit_groups
             )
         )
-        out["or"] = self._fts(or_expr)
         return out
 
-    def semantic_ranks(self, query_vec: list[float] | None) -> tuple[list[str], dict[str, float]]:
-        if query_vec is None or self.subject_matrix is None:
-            return [], {}
-        vector = np.asarray(query_vec, dtype=np.float32)
+    def _blend(self, vector: np.ndarray) -> np.ndarray:
         ctx_sims = self.context_matrix @ vector
         subj_sims = self.subject_matrix @ vector
-        sims = np.maximum(SUBJECT_BLEND * subj_sims + (1 - SUBJECT_BLEND) * ctx_sims, ctx_sims * 0.96)
+        return np.maximum(SUBJECT_BLEND * subj_sims + (1 - SUBJECT_BLEND) * ctx_sims, ctx_sims * 0.96)
+
+    def semantic_ranks(
+        self, query_vec: list[float] | None, alt_vec: list[float] | None = None
+    ) -> tuple[list[str], dict[str, float]]:
+        if query_vec is None or self.subject_matrix is None:
+            return [], {}
+        sims = self._blend(np.asarray(query_vec, dtype=np.float32))
+        if alt_vec is not None:
+            # typo-corrected query vector — take the better score per reel so a
+            # misspelling scores like the word the user meant.
+            sims = np.maximum(sims, self._blend(np.asarray(alt_vec, dtype=np.float32)))
         order = np.argsort(-sims)
         ranked = [self.vector_ids[i] for i in order]
         similarity = {self.vector_ids[i]: float(sims[i]) for i in range(len(sims))}
@@ -504,12 +637,17 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
         return None
 
     lex = index.lexical_ranks(query)
-    sem_ranked, sims = index.semantic_ranks(query_vec)
+    # Embed the typo-corrected query too (only when a correction fired — usually
+    # never), so a misspelling scores semantically like the intended word.
+    corrected = index.corrected_query(query)
+    alt_vec = embed_remote(corrected) if corrected else None
+    sem_ranked, sims = index.semantic_ranks(query_vec, alt_vec)
 
     rank_of: dict[str, dict[str, int]] = defaultdict(dict)
     for engine, ranked in [
         ("phrase", lex["phrase"]), ("and", lex["and"]), ("or", lex["or"]),
-        ("focus", lex["focus"]), ("wide", lex["wide"]), ("semantic", sem_ranked),
+        ("focus", lex["focus"]), ("wide", lex["wide"]), ("glue", lex["glue"]),
+        ("semantic", sem_ranked),
     ]:
         for rank, rid in enumerate(ranked):
             rank_of[rid][engine] = rank
@@ -519,7 +657,7 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
         for engine, rank in engines.items():
             fused[rid] += ENGINE_WEIGHTS[engine] / (RRF_K + rank + 1)
 
-    strong_lexical = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"])
+    strong_lexical = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"]) | set(lex["glue"])
     wide = set(lex["wide"])
     grounded = bool(lex["wide_any"])
     if sims:
@@ -589,7 +727,7 @@ def search_documents_fts(documents: list[dict], query: str, limit: int = 20) -> 
     rank_of: dict[str, dict[str, int]] = defaultdict(dict)
     for engine, ranked in [
         ("phrase", lex["phrase"]), ("and", lex["and"]), ("or", lex["or"]),
-        ("focus", lex["focus"]), ("wide", lex["wide"]),
+        ("focus", lex["focus"]), ("wide", lex["wide"]), ("glue", lex["glue"]),
     ]:
         for rank, rid in enumerate(ranked):
             rank_of[rid][engine] = rank
@@ -599,7 +737,7 @@ def search_documents_fts(documents: list[dict], query: str, limit: int = 20) -> 
         for engine, rank in engines.items():
             fused[rid] += ENGINE_WEIGHTS[engine] / (RRF_K + rank + 1)
 
-    trusted = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"]) | set(lex["wide"])
+    trusted = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"]) | set(lex["wide"]) | set(lex["glue"])
     ordered = sorted(fused, key=fused.get, reverse=True)
     admitted = [rid for rid in ordered if rid in trusted] or ordered
 
