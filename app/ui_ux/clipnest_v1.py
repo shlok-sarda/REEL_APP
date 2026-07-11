@@ -1280,7 +1280,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const status = String(job.status || 'unknown').toLowerCase();
       const url = job.reel_url || '';
       const time = job.finished_at || job.started_at || job.created_at || '';
-      const json = JSON.stringify(job, null, 2);
       return `<article class="job-card">
         <div class="job-head">
           <h3 class="job-title">${escapeHtml(jobTitle(job))}</h3>
@@ -1289,7 +1288,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <p class="job-meta">${escapeHtml(job.job_type || 'processing')} · ${escapeHtml(formatTime(time) || 'time unavailable')} · attempts ${escapeHtml(job.attempts ?? 0)}</p>
         ${url ? `<p class="job-meta">${escapeHtml(url)}</p>` : ''}
         ${job.error_message ? `<p class="job-meta">${escapeHtml(job.error_message)}</p>` : ''}
-        <details class="json-box"><summary>View job JSON</summary><pre>${escapeHtml(json)}</pre></details>
       </article>`;
     }
     function recentDiagnostics() {
@@ -1297,7 +1295,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderReelDiagnosticCard(reel) {
       const status = String(reel.status || 'unknown').toLowerCase();
-      const json = JSON.stringify(reel, null, 2);
       const title = reel.shortcode || reel.id || reel.url || 'Recent reel';
       const counts = `${reel.item_count || 0} items · ${reel.feature_count || 0} features · ${reel.product_count || 0} products`;
       const firstItems = (reel.items || [])
@@ -1316,7 +1313,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${reel.visual_error ? `<p class="job-meta">👁 visual error: ${escapeHtml(reel.visual_error)}</p>` : ''}
         ${firstItems ? `<p class="job-meta">${escapeHtml(firstItems)}</p>` : ''}
         ${reel.url ? `<p class="job-meta">${escapeHtml(reel.url)}</p>` : ''}
-        <details class="json-box"><summary>View stored extraction JSON</summary><pre>${escapeHtml(json)}</pre></details>
       </article>`;
     }
     function listMatches(list) {
@@ -1709,7 +1705,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
       const jobs = recentJobs();
       const diagnostics = recentDiagnostics();
-      const dashboardJson = JSON.stringify(state.dashboard || {}, null, 2);
       app.innerHTML = `
         <div class="home-head">
           <h1 class="greeting">Profile</h1>
@@ -1751,10 +1746,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <section class="job-list">
             ${diagnostics.length ? diagnostics.map(renderReelDiagnosticCard).join('') : '<div class="empty">No stored reel diagnostics found yet</div>'}
           </section>
-        </section>
-        <section class="set-section">
-          <h2 class="set-title">Dashboard</h2>
-          <details class="json-box"><summary>View dashboard JSON</summary><pre>${escapeHtml(dashboardJson)}</pre></details>
         </section>
       `;
       document.getElementById('profileRefresh')?.addEventListener('click', loadData);
