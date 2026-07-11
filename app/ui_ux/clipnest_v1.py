@@ -997,8 +997,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-size:.7rem;
       font-weight:750;
     }
-    .quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:16px; }
-    .quick-action { display:grid; place-items:center; gap:6px; color:var(--muted); font-size:.68rem; font-weight:650; }
+    .quick-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
+    .quick-action { display:grid; place-items:center; gap:6px; color:var(--muted); font-size:.68rem; font-weight:650; text-decoration:none; }
     .quick-action span {
       width:40px;
       height:40px;
@@ -2038,15 +2038,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="sheet-handle"></div>
           <div class="sheet-title-row"><h2 class="sheet-title">${escapeHtml(item.name)}</h2><span class="type-badge">${videoFor(item) ? 'Video' : 'Saved'}</span></div>
           <div class="quick-actions">
-            <button class="quick-action" type="button"><span>♡</span>Save</button>
             <button id="shareItem" class="quick-action" type="button"><span>⇧</span>Share</button>
-            <button class="quick-action" type="button"><span>☷</span>Add To List</button>
-            <button class="quick-action" type="button"><span>···</span>More</button>
+            <button id="copyLinkItem" class="quick-action" type="button"><span>⧉</span>Copy Link</button>
+            <a class="quick-action" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>↗</span>Open</a>
           </div>
           <div class="sheet-list">
-            <a class="sheet-row" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>Open Original Reel</span><span>›</span></a>
             ${state.session?.authenticated && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
-            <button class="sheet-row" type="button"><span>Notes</span><span>›</span></button>
             <button id="deleteItem" class="sheet-row danger" type="button"><span>Delete Item</span><span>›</span></button>
           </div>
         </div>`;
@@ -2059,9 +2056,44 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('sheetMedia').addEventListener('click', playFromSheet);
       document.getElementById('deleteItem').addEventListener('click', deleteCurrentItem);
       document.getElementById('retryItem')?.addEventListener('click', retryCurrentItem);
-      document.getElementById('shareItem').addEventListener('click', () => {
-        if (navigator.share) navigator.share({ title: item.name, url: item.url || window.location.href }).catch(() => {});
+      document.getElementById('shareItem').addEventListener('click', (event) => {
+        const link = item.url || window.location.href;
+        if (navigator.share) { navigator.share({ title: item.name, url: link }).catch(() => {}); return; }
+        // No native share sheet (e.g. desktop): fall back to copying the link.
+        copyItemLink(link, event.currentTarget, 'Share');
       });
+      document.getElementById('copyLinkItem').addEventListener('click', (event) => {
+        copyItemLink(item.url, event.currentTarget, 'Copy Link');
+      });
+    }
+    function setQuickActionLabel(button, text) {
+      for (const node of button.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) { node.textContent = text; return; }
+      }
+    }
+    function copyItemLink(url, button, restoreLabel) {
+      const flash = (text) => {
+        if (!button) return;
+        setQuickActionLabel(button, text);
+        setTimeout(() => setQuickActionLabel(button, restoreLabel), 1200);
+      };
+      if (!url) { flash('No link'); return; }
+      const done = () => flash('Copied');
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(url).then(done).catch(() => legacyCopy(url, done, () => flash('Copy failed')));
+      } else {
+        legacyCopy(url, done, () => flash('Copy failed'));
+      }
+    }
+    function legacyCopy(text, onOk, onErr) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        ok ? onOk() : onErr();
+      } catch (_) { onErr(); }
     }
     function playFromSheet() {
       const item = state.miniItem;
