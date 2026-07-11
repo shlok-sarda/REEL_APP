@@ -1422,7 +1422,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     /* ---------- HOME ---------- */
     function renderLibrary() {
       const lists = realFolders().filter(listMatches);
-      const tiles = categoryTiles();
       const recents = recentItems(24);
       const hasAnyItems = flatItems().length > 0;
       const searching = state.magicQuery.trim().length > 0;
@@ -1447,12 +1446,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /></label>
         <section id="homeResults" ${searching ? '' : 'hidden'}></section>
         <div id="homeBrowse" ${searching ? 'hidden' : ''}>
-          ${tiles.length ? `<div class="cat-rail" aria-label="Categories">${tiles.map(([name, count]) => `
-            <button class="cat-tile ${state.chip === name ? 'active' : ''}" type="button" data-chip-kind="library" data-chip="${escapeHtml(name)}">
-              <span class="cat-icon">${emojiFor(name)}<span class="cat-count">${count}</span></span>
-              <span class="cat-label">${escapeHtml(prettyTitle(name))}</span>
-            </button>`).join('')}</div>` : ''}
-          ${recents.length && state.chip === 'All' ? `
+          ${recents.length ? `
             <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
             <div class="recent-rail">${recents.map((item, index) => `
               <button class="recent-card" type="button" data-recent-item="${index}">
