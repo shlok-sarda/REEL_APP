@@ -1539,17 +1539,37 @@ def build_clipnest_v1_html(user_id: str) -> str:
         render();
         return;
       }
-      const items = list.items.filter(itemMatches);
       app.innerHTML = `
         <div class="list-heading">
           <button id="backToLibrary" class="back-button" type="button" aria-label="Back to library">${BACK_SVG}</button>
-          <div class="list-title-block"><h1>${escapeHtml(prettyTitle(list.list_title))}</h1><p class="count-text">${items.length} ${items.length === 1 ? 'item' : 'items'}</p></div>
+          <div class="list-title-block"><h1>${escapeHtml(prettyTitle(list.list_title))}</h1><p class="count-text" id="folderCount"></p></div>
           <div class="icon-row"></div>
         </div>
         ${renderSearchBox(`Search in ${prettyTitle(list.list_title)}...`, state.itemQuery, 'itemSearch')}
-        ${renderChips(['All', 'Video', 'Saved'], state.itemChip, 'item')}
-        ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">No items found</div>'}
+        ${renderChips(['All', 'Video'], state.itemChip, 'item')}
+        <section id="folderResults"></section>
       `;
+      // Re-render only the results grid (never the whole screen) so the search
+      // input keeps focus and the header doesn't flicker on every keystroke.
+      function renderFolderResults() {
+        const items = list.items.filter(itemMatches);
+        const count = document.getElementById('folderCount');
+        if (count) count.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+        const results = document.getElementById('folderResults');
+        if (!results) return;
+        results.innerHTML = items.length
+          ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>`
+          : '<div class="empty">No items found</div>';
+        results.querySelectorAll('[data-open-item]').forEach((button) => {
+          button.addEventListener('click', () => openActionSheet(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
+        });
+        results.querySelectorAll('[data-item-menu]').forEach((el) => {
+          el.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openActionSheet(items[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), items);
+          });
+        });
+      }
       document.getElementById('backToLibrary').addEventListener('click', () => {
         state.screen = 'library';
         state.currentListId = '';
@@ -1557,20 +1577,17 @@ def build_clipnest_v1_html(user_id: str) -> str:
       });
       document.getElementById('itemSearch').addEventListener('input', (event) => {
         state.itemQuery = event.target.value;
-        render();
-        const input = document.getElementById('itemSearch');
-        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+        renderFolderResults();
       });
-      bindChips();
-      app.querySelectorAll('[data-open-item]').forEach((button) => {
-        button.addEventListener('click', () => openActionSheet(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
-      });
-      app.querySelectorAll('[data-item-menu]').forEach((el) => {
-        el.addEventListener('click', (event) => {
-          event.stopPropagation();
-          openActionSheet(items[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), items);
+      app.querySelectorAll('[data-chip-kind="item"]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.itemChip = button.dataset.chip;
+          app.querySelectorAll('[data-chip-kind="item"]').forEach((chip) =>
+            chip.classList.toggle('active', chip.dataset.chip === state.itemChip));
+          renderFolderResults();
         });
       });
+      renderFolderResults();
     }
     function renderItemCard(item, index) {
       return `<article class="m-card">
@@ -2098,11 +2115,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
       state.data = state.data.map((list) => ({ ...list, items: (list.items || []).filter((item) => item.reel_id !== reelId) }));
     }
     function setNav(screen) {
+      // Tapping Home always returns to a clean browse: drop any active search
+      // query and category filter so the tab acts as a "reset to top".
+      if (screen === 'library') {
+        state.magicQuery = '';
+        state.chip = 'All';
+        state.deepSearch = { query: '', loading: false, error: '', results: [] };
+      }
       state.screen = screen;
       if (screen !== 'list') state.currentListId = '';
       state.notifOpen = false;
       closeActionSheet();
       render();
+      if (screen === 'library') window.scrollTo({ top: 0, behavior: 'instant' });
     }
     function render() {
       libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list');
