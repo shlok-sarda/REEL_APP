@@ -8,9 +8,19 @@ Layers (all validated in deep_search_lab, 21/21 eval on OpenAI + local):
               persisted in embedding_store. Dual vector per reel (subject +
               context), subject-weighted blend.
   fusion    : weighted Reciprocal Rank Fusion across the passes.
-  gate      : per-query statistical margin (z-score) + loose absolute floor,
-              so rare/keyword-stuffed lexical hits and nonsense queries don't
-              surface. Model-agnostic.
+  gate      : multi-path admission (see search_documents_hybrid), calibrated
+              2026-07-11 against real prod data. A pure z-score gate fails in
+              BOTH directions — measured: on a small homogeneous library
+              ("girls" over a mostly-girls library) every true match clusters
+              together so nothing reaches z>=2.35 and search returns ZERO;
+              on a diverse library, nonsense queries ("blorptastic frimble")
+              produce lone statistical outliers that z ADMITS (sim 0.350 —
+              higher than a true "makeup" match at 0.337, proving absolute
+              cosine can't separate either). The separator that DOES hold in
+              every measured case: true matches carry the query term (or a
+              synonym) in vision-grounded fields — text the vision model
+              observed — while junk never does. Captions/hashtags/transcript
+              stay untrusted (keyword-stuffing).
 
 Design constraints for production safety:
   * Reuses embed_text / upsert_embedding / _result_payload — no new infra.
@@ -19,10 +29,10 @@ Design constraints for production safety:
   * If OpenAI is unavailable the caller falls back to lexical-only search;
     this module never raises for a missing/failed embedding.
 
-NOTE: production documents have no `main_subject` field yet (that is the v2
-extraction change, applied only in the lab). The subject vector and focus pass
-degrade gracefully to item_names/categories/entities until it lands; when it
-does, add it to _SUBJECT_FIELDS, FTS_COLUMNS and FOCUS_COLUMNS at top weight.
+`main_subject` (the v2 extraction field: "what is this video actually about,
+visually") is wired at top weight in _SUBJECT_FIELDS, FTS_COLUMNS and
+FOCUS_COLUMNS. Reels processed before it shipped simply have it empty and are
+carried by the vision-grounded wide pass over visual_summary/visual_entities.
 """
 
 from __future__ import annotations
@@ -42,18 +52,34 @@ EMBED_OBJECT_TYPE = "deep_search_reel"
 EMBED_VERSION = "hybrid_v1"
 
 RRF_K = 60
-ENGINE_WEIGHTS = {"semantic": 1.0, "phrase": 1.0, "and": 0.7, "or": 0.4, "focus": 0.9}
+ENGINE_WEIGHTS = {"semantic": 1.0, "phrase": 1.0, "and": 0.7, "or": 0.4, "focus": 0.9, "wide": 0.85}
 SUBJECT_BLEND = 0.6
 
-# OpenAI text-embedding-3-small cosine scale (validated in the lab). The z-gate
-# is the primary, model-agnostic filter; the absolute floor is a loose backstop.
+# Gate thresholds — OpenAI text-embedding-3-small cosine scale. All values are
+# MEASURED (2026-07-11 calibration on the real 9-reel prod library replica +
+# the 51-reel lab set through this exact code), not guessed:
+#   SEM_ABS_MIN   loose noise floor. Nonsense tops out ~0.17 on small sets;
+#                 true matches can sit as low as 0.16 (admitted via the wide
+#                 pass instead, never semantic-only).
+#   SEM_Z_MIN     standout path for diverse libraries (unchanged from lab).
+#   SEM_TOP_FLOOR relative path arms only when the best hit is genuinely
+#                 strong. 0.30 sits between the strongest measured off-topic
+#                 top (travel@9 second-place 0.274 / cricket@51 top 0.272) and
+#                 the weakest measured on-topic top ("makeup"@9 = 0.337).
+#   SEM_REL       within-query band. Needs <=0.834 (makeup's #2 true match at
+#                 0.281/0.337) and >0.674 (makeup's first FALSE match at
+#                 0.227/0.337). 0.80 has margin on both sides.
 SEM_ABS_MIN = 0.20
 SEM_Z_MIN = 2.35
+SEM_TOP_FLOOR = 0.30
+SEM_REL = 0.80
 
-# FTS columns → production document fields, with BM25 weights. Names/products/
-# entities rank highest; transcript/caption lowest. (main_subject: add at ~14
-# once the v2 extraction populates it in production.)
+# FTS columns → production document fields, with BM25 weights. main_subject
+# ("what is this video actually about, visually" — v2 extraction) outranks
+# everything; empty on reels processed before it shipped, which is harmless.
+# Names/products/entities rank next; transcript/caption lowest.
 FTS_COLUMNS: list[tuple[str, float]] = [
+    ("main_subject", 14.0),
     ("item_names", 12.0),
     ("product_names", 11.0),
     ("brands", 11.0),
@@ -76,13 +102,24 @@ FTS_COLUMNS: list[tuple[str, float]] = [
 # Single-word queries: a hit in an identity field is strong evidence; a hit in
 # caption/transcript is only a recall net.
 FOCUS_COLUMNS = [
-    "item_names", "product_names", "brands", "models",
+    "main_subject", "item_names", "product_names", "brands", "models",
     "collection_titles", "entities", "categories", "parent_titles",
+]
+
+# Vision-grounded / trusted fields for the "wide" admission pass: identity
+# fields plus text the VISION MODEL produced about the reel (visual_summary
+# saying "a young woman films a selfie" is observed evidence that survives a
+# "girls" query even when no identity field mentions a person). Deliberately
+# excludes caption/hashtags/transcript — creator-typed text, the
+# keyword-stuffing vector the old gate existed to block.
+WIDE_COLUMNS = FOCUS_COLUMNS + [
+    "locations", "subdomains", "item_summaries",
+    "visual_summary", "visual_entities", "visible_text",
 ]
 
 # Fields that describe what the reel IS (tight subject vector).
 _SUBJECT_FIELDS = [
-    "item_names", "categories", "entities", "product_names", "brands", "product_types",
+    "main_subject", "item_names", "categories", "entities", "product_names", "brands", "product_types",
 ]
 
 STOPWORDS = {
@@ -132,6 +169,7 @@ def _fts_fields(document: dict) -> dict[str, str]:
     categories = _join([document.get("primary_category"), document.get("secondary_category")])
     subdomains = _join(document.get("subdomains"))
     return {
+        "main_subject": _join(document.get("main_subject")),
         "item_names": _join(document.get("item_names")),
         "product_names": _join(document.get("product_names")),
         "brands": _join(document.get("brands")),
@@ -316,14 +354,45 @@ def _tokens(query: str) -> list[str]:
     return [canonicalize(t) for t in re.findall(r"[a-z0-9]+", query.casefold())]
 
 
+def _synonyms_for(token: str) -> list[str]:
+    """Synonym lookup that survives regular plurals. Measured bug this fixes:
+    'girls' never matched SYNONYMS['girl'], so the girl→woman expansion only
+    fired for the singular — the plural query lost all its true matches.
+    (Irregular plurals are already canonicalized by _tokens; FTS porter
+    stemming handles plural/singular *within* the index, but the synonym dict
+    lookup happens before FTS and needs its own fallback.)"""
+    if token in SYNONYMS:
+        return SYNONYMS[token]
+    for suffix in ("es", "s"):
+        stem = token[: -len(suffix)]
+        if token.endswith(suffix) and stem in SYNONYMS:
+            return SYNONYMS[stem]
+    return []
+
+
+def _variants(token: str) -> list[str]:
+    return list(dict.fromkeys([token] + _synonyms_for(token)))
+
+
+def _quote(term: str) -> str:
+    # Quoted FTS5 phrase: neutralizes operator characters, tokenizer still runs.
+    return '"' + term.replace('"', "") + '"'
+
+
 class _Index:
     """In-memory FTS + vector matrices built from one user's documents."""
 
-    def __init__(self, documents: list[dict]):
+    def __init__(self, documents: list[dict], load_vectors: bool = True):
         self.documents = documents
         self.by_id = {d["reel_id"]: d for d in documents if d.get("reel_id")}
         self._build_fts()
-        self._load_vectors()
+        if load_vectors:
+            self._load_vectors()
+        else:
+            # lexical-only mode (degraded search when OpenAI is unavailable)
+            self.vector_ids = []
+            self.subject_matrix = None
+            self.context_matrix = None
 
     def _build_fts(self):
         self.db = sqlite3.connect(":memory:")
@@ -365,24 +434,41 @@ class _Index:
         return [r[0] for r in rows]
 
     def lexical_ranks(self, query: str) -> dict[str, list[str]]:
+        """Ranked lists per lexical pass. Beyond the original four:
+          wide     : every meaningful term (or a synonym) present in the
+                     TRUSTED fields (WIDE_COLUMNS) — vision-grounded coverage,
+                     immune to caption keyword-stuffing. Admission-grade.
+          wide_any : ANY meaningful term (or synonym) present in trusted
+                     fields of ANY doc — the corpus-grounding probe that keeps
+                     nonsense queries from surfacing semantic outliers."""
         tokens = _tokens(query)
         meaningful = [t for t in tokens if t not in STOPWORDS] or tokens
-        out: dict[str, list[str]] = {"phrase": [], "and": [], "or": [], "focus": []}
+        out: dict[str, list[str]] = {
+            "phrase": [], "and": [], "or": [], "focus": [], "wide": [], "wide_any": [],
+        }
         if not tokens:
             return out
-        expanded = list(meaningful)
-        for term in meaningful:
-            expanded.extend(SYNONYMS.get(term, []))
-        expanded = list(dict.fromkeys(expanded))
+        variant_groups = [_variants(t) for t in meaningful]
+        flat = list(dict.fromkeys(v for group in variant_groups for v in group))
+        or_expr = " OR ".join(_quote(v) for v in flat)
+        wide_cols = "{" + " ".join(WIDE_COLUMNS) + "}"
+        out["wide_any"] = self._fts(f"{wide_cols}: ({or_expr})")
         if len(meaningful) == 1:
-            cols = " ".join(FOCUS_COLUMNS)
-            out["focus"] = self._fts("{" + cols + "}: (" + " OR ".join(expanded) + ")")
-            out["or"] = self._fts(" OR ".join(expanded))
+            cols = "{" + " ".join(FOCUS_COLUMNS) + "}"
+            out["focus"] = self._fts(f"{cols}: ({or_expr})")
+            out["wide"] = out["wide_any"]
+            out["or"] = self._fts(or_expr)
             return out
         if len(tokens) >= 2:
             out["phrase"] = self._fts('"' + " ".join(tokens) + '"')
-        out["and"] = self._fts(" AND ".join(meaningful))
-        out["or"] = self._fts(" OR ".join(expanded))
+        out["and"] = self._fts(" AND ".join(_quote(t) for t in meaningful))
+        out["wide"] = self._fts(
+            " AND ".join(
+                f"({wide_cols}: ({' OR '.join(_quote(v) for v in group)}))"
+                for group in variant_groups
+            )
+        )
+        out["or"] = self._fts(or_expr)
         return out
 
     def semantic_ranks(self, query_vec: list[float] | None) -> tuple[list[str], dict[str, float]]:
@@ -423,7 +509,7 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
     rank_of: dict[str, dict[str, int]] = defaultdict(dict)
     for engine, ranked in [
         ("phrase", lex["phrase"]), ("and", lex["and"]), ("or", lex["or"]),
-        ("focus", lex["focus"]), ("semantic", sem_ranked),
+        ("focus", lex["focus"]), ("wide", lex["wide"]), ("semantic", sem_ranked),
     ]:
         for rank, rid in enumerate(ranked):
             rank_of[rid][engine] = rank
@@ -434,18 +520,42 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
             fused[rid] += ENGINE_WEIGHTS[engine] / (RRF_K + rank + 1)
 
     strong_lexical = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"])
+    wide = set(lex["wide"])
+    grounded = bool(lex["wide_any"])
     if sims:
         vals = np.array(list(sims.values()), dtype=np.float32)
         mean, std = float(vals.mean()), float(vals.std()) or 1e-6
+        top_sim = float(vals.max())
     else:
-        mean, std = 0.0, 1e-6
+        mean, std, top_sim = 0.0, 1e-6, 0.0
 
+    # Admission: a doc surfaces if ANY path accepts it (all calibrated —
+    # see the threshold comments at the top of this module):
+    #   P1 strong lexical    phrase / all-words / identity-field hit
+    #   P2 vision-grounded   all query terms (or synonyms) in trusted fields
+    #   P3 z-standout        statistical outlier, only for corpus-grounded
+    #                        queries (kills nonsense that z alone admitted)
+    #   P4 relative-to-top   within SEM_REL of a genuinely strong best hit —
+    #                        rescues homogeneous libraries where no doc can
+    #                        stand out from its lookalikes (the "girls over a
+    #                        girls library returns zero" failure)
     ordered = sorted(fused, key=fused.get, reverse=True)
     results = []
     for rid in ordered:
         sim = sims.get(rid, 0.0)
         z = (sim - mean) / std
-        if rid not in strong_lexical and (sim < SEM_ABS_MIN or z < SEM_Z_MIN):
+        admitted = (
+            rid in strong_lexical
+            or rid in wide
+            or (grounded and sim >= SEM_ABS_MIN and z >= SEM_Z_MIN)
+            or (
+                grounded
+                and top_sim >= SEM_TOP_FLOOR
+                and sim >= SEM_ABS_MIN
+                and sim >= SEM_REL * top_sim
+            )
+        )
+        if not admitted:
             continue
         document = index.by_id.get(rid)
         if not document:
@@ -458,6 +568,48 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
         results.append(payload)
         if len(results) >= limit:
             break
+    return results
+
+
+def search_documents_fts(documents: list[dict], query: str, limit: int = 20) -> list[dict]:
+    """Degraded-mode lexical search for when OpenAI is unavailable: porter-
+    stemmed BM25 FTS with synonym + plural handling, no embeddings required.
+    Strictly stronger than the legacy literal matcher in deep_search.py —
+    'girls' still finds reels whose visual summary says 'woman'. Trusted-field
+    hits rank; the OR recall net only surfaces when nothing trusted matches
+    (recall beats a blank screen in a degraded mode)."""
+    from app.services.deep_search import _result_payload
+
+    query = (query or "").strip()
+    if not query or not documents:
+        return []
+
+    index = _Index(documents, load_vectors=False)
+    lex = index.lexical_ranks(query)
+    rank_of: dict[str, dict[str, int]] = defaultdict(dict)
+    for engine, ranked in [
+        ("phrase", lex["phrase"]), ("and", lex["and"]), ("or", lex["or"]),
+        ("focus", lex["focus"]), ("wide", lex["wide"]),
+    ]:
+        for rank, rid in enumerate(ranked):
+            rank_of[rid][engine] = rank
+
+    fused: dict[str, float] = defaultdict(float)
+    for rid, engines in rank_of.items():
+        for engine, rank in engines.items():
+            fused[rid] += ENGINE_WEIGHTS[engine] / (RRF_K + rank + 1)
+
+    trusted = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"]) | set(lex["wide"])
+    ordered = sorted(fused, key=fused.get, reverse=True)
+    admitted = [rid for rid in ordered if rid in trusted] or ordered
+
+    results = []
+    for rid in admitted[:limit]:
+        document = index.by_id.get(rid)
+        if not document:
+            continue
+        score = int(round(fused[rid] * 100000))
+        results.append(_result_payload(document, score, _matched_fields(document, query)))
     return results
 
 
@@ -475,6 +627,7 @@ def _matched_fields(document: dict, query: str) -> list[str]:
 # Map FTS column names to the field keys _match_reasons() in deep_search.py
 # recognizes, so the existing reason-rendering keeps working.
 _MATCH_FIELD_ALIAS = {
+    "main_subject": "main_subject",
     "categories": "primary_category",
     "item_names": "item_names",
     "product_names": "product_names",

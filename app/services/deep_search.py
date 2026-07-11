@@ -15,6 +15,7 @@ from app.services.library import _media_url_from_path
 
 SEARCHABLE_ATTRIBUTES = [
     "search_terms",
+    "main_subject",
     "item_names",
     "product_names",
     "brands",
@@ -59,6 +60,7 @@ DISPLAYED_ATTRIBUTES = [
     "shortcode",
     "received_at",
     "creator",
+    "main_subject",
     "item_names",
     "product_names",
     "brands",
@@ -78,6 +80,7 @@ DISPLAYED_ATTRIBUTES = [
 ]
 
 FIELD_WEIGHTS = [
+    ("main_subject", 130),
     ("item_names", 120),
     ("product_names", 115),
     ("brands", 110),
@@ -105,6 +108,21 @@ FIELD_WEIGHTS = [
 ]
 
 SYNONYMS = {
+    # Person words — the top real-user query class ("girls") returned ZERO
+    # results without these (measured 2026-07-11: the vision model tags reels
+    # as "woman"/"lady", never "girls"). This engine has no stemming, so
+    # plural keys are listed explicitly. meili_synonyms() derives from this
+    # dict too, so Meilisearch inherits the same mappings.
+    "girl": ["woman", "lady"],
+    "girls": ["girl", "woman", "women", "lady"],
+    "woman": ["girl", "lady"],
+    "women": ["woman", "girl", "lady"],
+    "lady": ["woman", "girl"],
+    "ladies": ["lady", "woman", "girl"],
+    "guy": ["man"],
+    "guys": ["guy", "man", "men"],
+    "man": ["guy"],
+    "men": ["man", "guy"],
     "coffee": ["cafe", "espresso", "latte", "cappuccino"],
     "cafe": ["coffee", "espresso", "latte", "cappuccino"],
     "sneakers": ["shoes", "nike", "jordan", "adidas"],
@@ -248,6 +266,7 @@ def _metadata_text(metadata: dict, *keys: str) -> str:
 def _build_match_context(document: dict[str, Any]) -> str:
     parts = []
     for field in (
+        "main_subject",
         "item_names",
         "product_names",
         "brands",
@@ -509,6 +528,9 @@ def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
             "caption": _metadata_text(diagnostics_metadata, "caption"),
             "hashtags": _metadata_list(diagnostics_metadata, "hashtags"),
             "transcript": _metadata_text(diagnostics_metadata, "transcript"),
+            # v2 extraction: "what is this video actually about, visually".
+            # Empty for reels processed before it shipped — harmless.
+            "main_subject": _metadata_text(diagnostics_metadata, "main_subject"),
             "visible_text": visible_text,
             "visual_entities": visual_entities,
             "visual_supporting_points": visual_supporting_points,
@@ -689,6 +711,8 @@ def backfill_reel_visual_search(
     )
     merged_metadata = {
         **metadata,
+        "main_subject": visual_data.get("main_subject", ""),
+        "main_subject_type": visual_data.get("main_subject_type", ""),
         "inferred_main_theme": visual_data.get("inferred_main_theme", ""),
         "relevant_visible_text": visual_data.get("relevant_visible_text", []),
         "relevant_visual_entities": visual_data.get("relevant_visual_entities", []),
@@ -876,6 +900,8 @@ def _match_reasons(document: dict[str, Any], matches: list[str]) -> list[str]:
         if items:
             reasons.append(f"{label}: {', '.join(items)}")
 
+    if fields & {"main_subject"} and document.get("main_subject"):
+        reasons.append(f"About: {_normalize(document.get('main_subject'))}")
     if fields & {"visual_entities", "visual_summary", "visual_theme", "visible_text", "visual_supporting_points"}:
         add("Seen", document.get("visual_entities"))
         add("On-screen text", document.get("visible_text"))
@@ -910,6 +936,7 @@ def _result_payload(document: dict[str, Any], score: int, matches: list[str]) ->
         "shortcode": document.get("shortcode", ""),
         "url": document.get("url", ""),
         "received_at": document.get("received_at", ""),
+        "main_subject": document.get("main_subject", ""),
         "item_names": document.get("item_names", []),
         "product_names": document.get("product_names", []),
         "brands": document.get("brands", []),
@@ -1067,25 +1094,32 @@ def index_user_documents(user_id: str, index_name: str | None = None) -> dict[st
     }
 
 
+def _try_hybrid(documents: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]] | None:
+    """None → semantic unavailable (no OpenAI / no embeddings); caller degrades."""
+    try:
+        from app.services.deep_search_hybrid import search_documents_hybrid
+
+        return search_documents_hybrid(documents, query, limit=limit)
+    except Exception:
+        return None
+
+
 def search_user_documents(user_id: str, query: str, limit: int = 20, backend: str = "auto") -> dict[str, Any]:
     documents = load_deep_search_documents(user_id)
-    local_results = search_documents_locally(documents, query, limit=limit)
     rebuilt_for_empty_results = None
-    if not local_results and documents:
-        rebuilt_for_empty_results = rebuild_deep_search_documents(user_id)
-        documents = load_deep_search_documents(user_id)
-        local_results = search_documents_locally(documents, query, limit=limit)
 
-    # Hybrid semantic search is the default. It returns None when OpenAI is
-    # unavailable or no embeddings exist yet, in which case we fall through to
-    # the proven lexical (and optional Meili) paths below — never a hard break.
+    # Hybrid semantic search is the default and runs FIRST — the old flow ran
+    # the legacy lexical engine and a full document rebuild before ever trying
+    # hybrid, which meant every no-lexical-hit query ("girls") paid a rebuild.
     if backend in ("auto", "hybrid"):
-        try:
-            from app.services.deep_search_hybrid import search_documents_hybrid
-
-            hybrid_results = search_documents_hybrid(documents, query, limit=limit)
-        except Exception:
-            hybrid_results = None
+        hybrid_results = _try_hybrid(documents, query, limit)
+        if hybrid_results == [] and documents:
+            # Self-heal once: documents may be stale (reels processed since
+            # the last build). Rebuild refreshes docs + embeddings (cached by
+            # content hash — unchanged reels cost no API calls) and retries.
+            rebuilt_for_empty_results = rebuild_deep_search_documents(user_id)
+            documents = load_deep_search_documents(user_id)
+            hybrid_results = _try_hybrid(documents, query, limit)
         if hybrid_results is not None:
             return {
                 "user_id": user_id,
@@ -1095,6 +1129,27 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
                 "rebuilt_for_empty_results": rebuilt_for_empty_results,
                 "results": hybrid_results,
             }
+
+        # OpenAI unavailable → degraded lexical FTS (porter stemming +
+        # synonyms + BM25). Far more forgiving than the legacy literal
+        # matcher; keeps conceptual queries alive during API outages.
+        try:
+            from app.services.deep_search_hybrid import search_documents_fts
+
+            fts_results = search_documents_fts(documents, query, limit=limit)
+        except Exception:
+            fts_results = None
+        if fts_results:
+            return {
+                "user_id": user_id,
+                "query": query,
+                "backend": "lexical_fts",
+                "document_count": len(documents),
+                "rebuilt_for_empty_results": rebuilt_for_empty_results,
+                "results": fts_results,
+            }
+
+    local_results = search_documents_locally(documents, query, limit=limit)
 
     if backend == "local" or backend == "hybrid" or not settings.meili_host:
         return {

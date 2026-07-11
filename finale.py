@@ -120,8 +120,18 @@ Pay special attention to visible clothing, fashion, accessories, products, place
 For clothing, name the exact garment when visible or strongly likely, such as saree/sari, lehenga, kurta, dupatta, blazer, dress, sneakers, watch, or jewelry.
 Do not rely only on the caption. If an object or garment is visible but never mentioned in text, still include it in relevant_visual_entities.
 
+MAIN SUBJECT:
+Answer: what is this video actually about, visually? Not everything visible — the one thing the video centers on.
+- A woman dancing or modeling an outfit -> the main subject is the woman (describe her briefly: "young woman modeling a white summer dress").
+- A woman cooking a dish -> the main subject is the dish, NOT the woman.
+- A dog incidentally in a home tour -> main subject is the home, not the dog.
+- Be concrete and descriptive, one short phrase.
+Also set main_subject_type: person | food | place | product | activity | animal | other.
+
 OUTPUT STRICT JSON:
 {{
+  "main_subject": "",
+  "main_subject_type": "",
   "inferred_main_theme": "",
   "relevant_visible_text": [],
   "relevant_visual_entities": [],

@@ -728,6 +728,8 @@ def sync_reel_diagnostics_from_accumulated(user_id: str, accumulated_csv_path: s
             "Caption": "caption",
             "Hashtags": "hashtags",
             "Transcript": "transcript",
+            "Main Subject": "main_subject",
+            "Main Subject Type": "main_subject_type",
             "Inferred Main Theme": "inferred_main_theme",
             "Relevant Visible Text": "relevant_visible_text",
             "Relevant Visual Entities": "relevant_visual_entities",
