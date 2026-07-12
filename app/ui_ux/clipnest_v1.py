@@ -1946,13 +1946,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
       } catch (e) { state.folderDetail = null; }
       renderFolderDetail();
     }
-    function folderItemRow(m, suggested) {
-      return `<article class="m-card"><button style="width:100%;text-align:left" type="button" data-open-url="${escapeHtml(m.url || '')}">`
-        + `<span class="m-title-row"><p class="m-title">${escapeHtml(m.item_name || m.name || 'Saved reel')}${suggested ? '<span class="sug-chip">suggested</span>' : ''}</p></span>`
+    // Folder reels render as real thumbnail cards (same look as search/recents).
+    function folderItemRow(m, suggested, index) {
+      return `<article class="m-card" data-reel="${escapeHtml(m.reel_id || '')}">`
+        + `<button style="width:100%;text-align:left" type="button" data-fitem="${suggested ? 's' : 'm'}-${index}" aria-label="Preview ${escapeHtml(m.name || 'reel')}">`
+        + reelThumb(m, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(m) ? '<span class="badge-dot">▶</span>' : ''}</span>`)
+        + `<span class="m-title-row"><p class="m-title">${escapeHtml(m.name || 'Saved reel')}${suggested ? '<span class="sug-chip">suggested</span>' : ''}</p></span>`
         + (m.summary ? `<p class="m-summary">${escapeHtml(m.summary)}</p>` : '') + '</button>'
-        + (suggested ? '<div style="display:flex;gap:8px;padding:0 4px 10px">'
+        + (suggested ? '<div style="display:flex;gap:8px;padding:8px 4px 4px">'
           + `<button class="newlist-btn" type="button" data-accept="${escapeHtml(m.reel_id)}">Add</button>`
-          + `<button class="newlist-btn ghost" type="button" data-reject="${escapeHtml(m.reel_id)}">No</button></div>` : '')
+          + `<button class="newlist-btn ghost" type="button" data-reject="${escapeHtml(m.reel_id)}">Skip</button></div>` : '')
         + '</article>';
     }
     function renderFolderDetail() {
@@ -1964,25 +1967,32 @@ def build_clipnest_v1_html(user_id: str) -> str:
         document.getElementById('folderBack').addEventListener('click', backTo);
         return;
       }
-      const memberCount = (f.members || []).length;
+      const norm = (m) => ({ ...m, name: m.name || m.item_name || 'Saved reel' });
+      const members = (f.members || []).map(norm);
+      const suggestions = (f.suggestions || []).map(norm);
+      const memberCount = members.length;
       app.innerHTML = '<div class="list-heading">'
         + '<button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG + '</button>'
         + `<div class="list-title-block"><h1>${escapeHtml(f.name)}</h1><p class="count-text">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</p></div>`
         + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
         + (f.description ? `<p style="color:var(--muted);font-size:.85rem;margin:2px 2px 12px">${escapeHtml(f.description)}</p>` : '')
-        + ((f.suggestions || []).length ? '<div class="section-head"><h2 class="section-title">Suggested &mdash; auto-routed, needs your yes</h2></div>'
-          + `<section class="masonry">${f.suggestions.map((m) => folderItemRow(m, true)).join('')}</section>` : '')
+        + (suggestions.length ? '<div class="section-head"><h2 class="section-title">Suggested &mdash; auto-routed, needs your yes</h2></div>'
+          + `<section class="masonry">${suggestions.map((m, i) => folderItemRow(m, true, i)).join('')}</section>` : '')
         + '<div class="section-head"><h2 class="section-title">In this folder</h2></div>'
-        + (memberCount ? `<section class="masonry">${f.members.map((m) => folderItemRow(m, false)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
+        + (memberCount ? `<section class="masonry">${members.map((m, i) => folderItemRow(m, false, i)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
       document.getElementById('folderBack').addEventListener('click', backTo);
       document.getElementById('folderDelete').addEventListener('click', async () => {
         if (!confirm('Delete "' + f.name + '"? Your reels stay saved — only the folder is removed.')) return;
         try { await fetch(`/folders/${f.id}?user_id=${encodeURIComponent(USER_ID)}`, { method: 'DELETE', credentials: 'same-origin' }); } catch (e) {}
         state.folderDetail = null; state.foldersLoaded = false; state.screen = 'library'; await loadFolders(); render();
       });
-      app.querySelectorAll('[data-open-url]').forEach((b) => b.addEventListener('click', () => { const u = b.dataset.openUrl; if (u) window.open(u, '_blank'); }));
-      app.querySelectorAll('[data-accept]').forEach((b) => b.addEventListener('click', () => folderDecide(f.id, b.dataset.accept, 'accept')));
-      app.querySelectorAll('[data-reject]').forEach((b) => b.addEventListener('click', () => folderDecide(f.id, b.dataset.reject, 'reject')));
+      app.querySelectorAll('[data-fitem]').forEach((b) => b.addEventListener('click', () => {
+        const [kind, idx] = b.dataset.fitem.split('-');
+        const arr = kind === 's' ? suggestions : members;
+        openActionSheet(arr[Number(idx)], Number(idx), arr);
+      }));
+      app.querySelectorAll('[data-accept]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); folderDecide(f.id, b.dataset.accept, 'accept'); }));
+      app.querySelectorAll('[data-reject]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); folderDecide(f.id, b.dataset.reject, 'reject'); }));
     }
     async function folderDecide(id, reel, action) {
       await fetch(`/folders/${id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',

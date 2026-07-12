@@ -30,6 +30,7 @@ import re
 import time
 
 from app.db.database import get_connection
+from app.services.library import _media_url_from_path
 from app.services.personalization_v2.embeddings import (
     EMBEDDING_MODEL,
     cosine_similarity,
@@ -372,12 +373,20 @@ def _refresh_profile(conn, user_id: str, folder_id: int) -> None:
 
 def _reel_card(conn, reel_id: str) -> dict:
     row = conn.execute(
-        "SELECT r.id AS reel_id, r.url, COALESCE(ri.item_name,'') item_name, "
+        "SELECT r.id AS reel_id, r.url, r.thumbnail_path AS thumbnail_path, "
+        "r.local_video_path AS local_video_path, COALESCE(ri.item_name,'') item_name, "
         "COALESCE(ri.summary,'') summary, COALESCE(ri.primary_category,'') primary_category "
         "FROM reels r LEFT JOIN reel_items ri ON ri.reel_id=r.id WHERE r.id=? LIMIT 1",
         (reel_id,),
     ).fetchone()
-    return dict(row) if row else {"reel_id": reel_id}
+    if not row:
+        return {"reel_id": reel_id}
+    card = dict(row)
+    # Surface served media URLs so folder cards render real thumbnails/video,
+    # matching the rest of the app.
+    card["thumbnail_url"] = _media_url_from_path(card.get("thumbnail_path") or "")
+    card["local_video_url"] = _media_url_from_path(card.get("local_video_path") or "")
+    return card
 
 
 def folder_detail(user_id: str, folder_id: int) -> dict | None:
