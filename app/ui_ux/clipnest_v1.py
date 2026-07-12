@@ -103,7 +103,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       border-radius:25px;
       background:var(--soft);
       color:var(--text);
-      padding:0 20px 0 48px;
+      padding:0 54px 0 48px;
       outline:none;
       font-size:.98rem;
       font-weight:500;
@@ -120,6 +120,22 @@ def build_clipnest_v1_html(user_id: str) -> str:
       place-items:center;
     }
     .search .glyph svg { width:18px; height:18px; }
+    .search-plus {
+      position:absolute; right:7px; top:50%; transform:translateY(-50%);
+      width:36px; height:36px; border-radius:50%; border:0; padding:0;
+      background:#a9744a; color:#fff; font-size:1.5rem; line-height:1;
+      display:grid; place-items:center; cursor:pointer;
+    }
+    .search-plus:active { filter:brightness(1.1); }
+    .search-plus.active { background:#e0736b; }
+    /* loading spinner for search */
+    .load-wrap { display:flex; justify-content:center; padding:44px 0; }
+    .spinner { width:34px; height:34px; border-radius:50%; border:3px solid var(--line);
+      border-top-color:#a9744a; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    /* tappable section header (Recently saved) */
+    .section-head-btn { width:100%; background:none; border:0; padding:0; cursor:pointer;
+      text-align:left; color:inherit; }
 
     /* ---------- category rail ---------- */
     .cat-rail {
@@ -275,11 +291,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
       -webkit-box-orient:vertical;
       overflow:hidden;
     }
+    .lib-text { min-width:0; }
     .lib-meta {
       margin:4px 0 0;
       color:var(--muted);
       font-size:.8rem;
       font-weight:500;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
     }
     .lib-meta .dot-sep { color:var(--faint); margin:0 4px; }
     .row-chev { color:var(--faint); }
@@ -405,12 +426,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-weight:600;
     }
     .masonry {
-      columns:2;
-      column-gap:12px;
+      display:grid;
+      grid-template-columns:repeat(2,1fr);
+      gap:16px 12px;
+      align-items:start;
     }
     .m-card {
-      break-inside:avoid;
-      margin:0 0 18px;
+      margin:0;
       width:100%;
       text-align:left;
     }
@@ -1112,10 +1134,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
         <span>Home</span>
       </button>
-      <button id="foldersNav" class="nav-button" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span>Folders</span>
-      </button>
       <button id="profileNav" class="nav-button" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.8-3.4 4.5-5 8-5s6.2 1.6 8 5"/></svg>
         <span>Profile</span>
@@ -1165,7 +1183,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const app = document.getElementById('app');
     const libraryNav = document.getElementById('libraryNav');
     const profileNav = document.getElementById('profileNav');
-    const foldersNav = document.getElementById('foldersNav');
     const miniPlayer = document.getElementById('miniPlayer');
     const miniThumb = document.getElementById('miniThumb');
     const miniTitle = document.getElementById('miniTitle');
@@ -1461,9 +1478,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
 
     /* ---------- HOME ---------- */
     function renderLibrary() {
-      const lists = realFolders().filter(listMatches);
+      const folders = state.folders || [];
       const recents = recentItems(24);
-      const hasAnyItems = flatItems().length > 0;
       const searching = state.magicQuery.trim().length > 0;
       const status = pipelineStatus();
       app.innerHTML = `
@@ -1483,16 +1499,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
             </div>
           </div>
         </div>
-        <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /></label>
-        <div class="folder-toolbar" ${searching ? '' : 'hidden'}>
-          ${state.selecting
-            ? '<button class="newlist-btn ghost" id="cancelSelectBtn" type="button">Cancel</button>'
-            : '<button class="newlist-btn" id="startSelectBtn" type="button">＋ New list</button>'}
-        </div>
+        <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /><button id="newListBtn" class="search-plus${state.selecting ? ' active' : ''}" type="button" aria-label="New list from search">+</button></label>
         <section id="homeResults" ${searching ? '' : 'hidden'}></section>
         <div id="homeBrowse" ${searching ? 'hidden' : ''}>
           ${recents.length ? `
-            <div class="section-head"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></div>
+            <button class="section-head section-head-btn" id="openRecents" type="button"><h2 class="section-title">Recently saved <span class="chev">›</span></h2></button>
             <div class="recent-rail">${recents.map((item, index) => `
               <button class="recent-card" type="button" data-recent-item="${index}">
                 ${reelThumb(item, 'recent-thumb', index < 4 ? 'eager' : 'lazy')}
@@ -1500,13 +1511,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
                 <p class="recent-title">${escapeHtml(item.name)}</p>
               </button>`).join('')}</div>` : ''}
           <div class="section-head">
-            <h2 class="section-title">Library <span class="chev">›</span></h2>
-            <span class="section-side">${lists.length} ${lists.length === 1 ? 'folder' : 'folders'}</span>
+            <h2 class="section-title">Library</h2>
+            <span class="section-side">${folders.length} ${folders.length === 1 ? 'list' : 'lists'}</span>
           </div>
-          ${state.loading ? '<div class="empty">Loading your library...</div>' : ''}
-          ${!state.loading && lists.length ? `<section class="lib-list">${lists.map(renderLibRow).join('')}</section>` : ''}
-          ${!state.loading && !lists.length && hasAnyItems ? '<div class="empty">No folders yet. Your saved reels are in Recently saved above — folders appear here as they get organized.</div>' : ''}
-          ${!state.loading && !lists.length && !hasAnyItems ? '<div class="empty">Nothing here yet. Save a reel to get started.</div>' : ''}
+          ${!state.foldersLoaded ? '<div class="empty">Loading your lists…</div>' : ''}
+          ${state.foldersLoaded && folders.length ? `<section class="lib-list">${folders.map(renderFolderLibRow).join('')}</section>` : ''}
+          ${state.foldersLoaded && !folders.length ? '<div class="empty">No lists yet. Search your reels and tap the ＋ in the search bar to make one.</div>' : ''}
         </div>
       `;
       const deepInput = document.getElementById('deepSearchInput');
@@ -1515,11 +1525,18 @@ def build_clipnest_v1_html(user_id: str) -> str:
         const active = state.magicQuery.trim().length > 0;
         document.getElementById('homeResults')?.toggleAttribute('hidden', !active);
         document.getElementById('homeBrowse')?.toggleAttribute('hidden', active);
-        document.querySelector('.folder-toolbar')?.toggleAttribute('hidden', !active);
         scheduleDeepSearch();
       });
-      document.getElementById('startSelectBtn')?.addEventListener('click', enterSelect);
-      document.getElementById('cancelSelectBtn')?.addEventListener('click', exitSelect);
+      document.getElementById('newListBtn')?.addEventListener('click', () => {
+        if (state.selecting) { exitSelect(); return; }
+        if (!state.magicQuery.trim()) { document.getElementById('deepSearchInput')?.focus(); return; }
+        enterSelect();
+      });
+      document.getElementById('openRecents')?.addEventListener('click', () => {
+        state.screen = 'recents';
+        window.scrollTo({ top: 0, behavior: 'instant' });
+        render();
+      });
       const notifButton = document.getElementById('notifButton');
       notifButton?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1543,15 +1560,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
         button.addEventListener('click', () => openActionSheet(recentsData[Number(button.dataset.recentItem)], Number(button.dataset.recentItem), recentsData));
       });
-      app.querySelectorAll('[data-open-list]').forEach((button) => {
+      app.querySelectorAll('[data-open-folder]').forEach((button) => {
         button.addEventListener('click', () => {
-          state.currentListId = button.dataset.openList;
-          state.itemQuery = '';
-          state.itemChip = 'All';
-          state.screen = 'list';
           state.notifOpen = false;
           window.scrollTo({ top: 0, behavior: 'instant' });
-          render();
+          openFolderDetail(Number(button.dataset.openFolder));
         });
       });
       if (searching) {
@@ -1570,6 +1583,55 @@ def build_clipnest_v1_html(user_id: str) -> str:
         </span>
         <span class="row-chev">${CHEV_SVG}</span>
       </button>`;
+    }
+    // Library rows are now the user's created smart-folders (lists).
+    function renderFolderLibRow(folder) {
+      const count = folder.item_count || 0;
+      return `<button class="lib-row" type="button" data-open-folder="${escapeHtml(String(folder.id))}" aria-label="Open ${escapeHtml(folder.name)}">
+        <span class="lib-icon" style="background:${gradFor(folder.name)}">${emojiFor(folder.name)}</span>
+        <span class="lib-text">
+          <p class="lib-name">${escapeHtml(folder.name)}</p>
+          <p class="lib-meta">${count} ${count === 1 ? 'reel' : 'reels'}${folder.description ? `<span class="dot-sep">·</span>${escapeHtml(folder.description)}` : ''}</p>
+        </span>
+        <span class="row-chev">${CHEV_SVG}</span>
+      </button>`;
+    }
+
+    /* ---------- RECENTLY SAVED (full view) ---------- */
+    function allRecentsSorted() {
+      const seen = new Set();
+      const items = [];
+      for (const item of flatItems()) {
+        const key = item.reel_id || item.url || item.name;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+      }
+      // Newest first. received_at is surfaced by the library API; when it is
+      // missing the original order is kept as a stable fallback.
+      items.sort((a, b) => (Date.parse(b.received_at || '') || 0) - (Date.parse(a.received_at || '') || 0));
+      return items;
+    }
+    function renderRecents() {
+      const items = allRecentsSorted();
+      app.innerHTML = `
+        <div class="list-heading">
+          <button id="recentsBack" class="back-button" type="button" aria-label="Back to home">${BACK_SVG}</button>
+          <div class="list-title-block"><h1>Recently saved</h1><p class="count-text">${items.length} ${items.length === 1 ? 'reel' : 'reels'}</p></div>
+          <div class="icon-row"></div>
+        </div>
+        ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">Nothing saved yet.</div>'}
+      `;
+      document.getElementById('recentsBack').addEventListener('click', () => { state.screen = 'library'; render(); });
+      app.querySelectorAll('[data-open-item]').forEach((button) => {
+        button.addEventListener('click', () => openActionSheet(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
+      });
+      app.querySelectorAll('[data-item-menu]').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.stopPropagation();
+          openActionSheet(items[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), items);
+        });
+      });
     }
 
     /* ---------- FOLDER ---------- */
@@ -1739,7 +1801,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const resultList = document.getElementById('homeResults');
       if (!resultList) return;
       resultList.innerHTML = `
-        ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="empty">Searching captions, visuals, and transcripts...</div>' : ''}
+        ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="load-wrap"><div class="spinner"></div></div>' : ''}
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.length ? `<section class="masonry">${results.map(renderItemCard).join('')}</section>` : ''}
@@ -1847,7 +1909,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         exitSelect();
         state.foldersLoaded = false;
         await loadFolders();
-        setNav('folders');
+        setNav('library');
       } catch (e) {
         if (hintEl) hintEl.textContent = 'Could not create the list (' + (e.message || 'error') + '). Try again.';
       } finally {
@@ -1861,7 +1923,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
         state.folders = d.folders || [];
       } catch (e) { state.folders = []; }
       state.foldersLoaded = true;
-      if (state.screen === 'folders') renderFolders();
+      // Library (Home) lists these folders, so refresh whatever screen is showing.
+      if (state.screen === 'library' || state.screen === 'folderDetail') render();
     }
     function renderFolders() {
       if (state.folderDetail) { renderFolderDetail(); return; }
@@ -1874,10 +1937,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       app.querySelectorAll('[data-folder]').forEach((el) => el.addEventListener('click', () => openFolderDetail(Number(el.dataset.folder))));
     }
     async function openFolderDetail(id) {
+      state.screen = 'folderDetail';
+      state.folderDetail = null;
+      render();
       try {
         const r = await fetch(`/folders/${id}?user_id=${encodeURIComponent(USER_ID)}`, { credentials: 'same-origin' });
         state.folderDetail = await r.json();
-      } catch (e) { return; }
+      } catch (e) { state.folderDetail = null; }
       renderFolderDetail();
     }
     function folderItemRow(m, suggested) {
@@ -1891,20 +1957,28 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderFolderDetail() {
       const f = state.folderDetail;
-      app.innerHTML = '<div class="home-head" style="justify-content:space-between">'
-        + '<button class="newlist-btn ghost" id="folderBack" type="button">← Folders</button>'
+      const backTo = () => { state.folderDetail = null; state.screen = 'library'; render(); window.scrollTo({ top: 0, behavior: 'instant' }); };
+      if (!f) {
+        app.innerHTML = '<div class="list-heading"><button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG
+          + '</button><div class="list-title-block"><h1>Loading…</h1></div><div class="icon-row"></div></div>';
+        document.getElementById('folderBack').addEventListener('click', backTo);
+        return;
+      }
+      const memberCount = (f.members || []).length;
+      app.innerHTML = '<div class="list-heading">'
+        + '<button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG + '</button>'
+        + `<div class="list-title-block"><h1>${escapeHtml(f.name)}</h1><p class="count-text">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</p></div>`
         + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
-        + `<h1 class="greeting" style="margin-top:6px">${escapeHtml(f.name)}</h1>`
-        + `<p style="color:var(--muted);font-size:.85rem;margin:4px 0 8px">${escapeHtml(f.description || '')}</p>`
+        + (f.description ? `<p style="color:var(--muted);font-size:.85rem;margin:2px 2px 12px">${escapeHtml(f.description)}</p>` : '')
         + ((f.suggestions || []).length ? '<div class="section-head"><h2 class="section-title">Suggested &mdash; auto-routed, needs your yes</h2></div>'
           + `<section class="masonry">${f.suggestions.map((m) => folderItemRow(m, true)).join('')}</section>` : '')
         + '<div class="section-head"><h2 class="section-title">In this folder</h2></div>'
-        + ((f.members || []).length ? `<section class="masonry">${f.members.map((m) => folderItemRow(m, false)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
-      document.getElementById('folderBack').addEventListener('click', () => { state.folderDetail = null; renderFolders(); });
+        + (memberCount ? `<section class="masonry">${f.members.map((m) => folderItemRow(m, false)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
+      document.getElementById('folderBack').addEventListener('click', backTo);
       document.getElementById('folderDelete').addEventListener('click', async () => {
         if (!confirm('Delete "' + f.name + '"? Your reels stay saved — only the folder is removed.')) return;
         try { await fetch(`/folders/${f.id}?user_id=${encodeURIComponent(USER_ID)}`, { method: 'DELETE', credentials: 'same-origin' }); } catch (e) {}
-        state.folderDetail = null; state.foldersLoaded = false; await loadFolders(); renderFolders();
+        state.folderDetail = null; state.foldersLoaded = false; state.screen = 'library'; await loadFolders(); render();
       });
       app.querySelectorAll('[data-open-url]').forEach((b) => b.addEventListener('click', () => { const u = b.dataset.openUrl; if (u) window.open(u, '_blank'); }));
       app.querySelectorAll('[data-accept]').forEach((b) => b.addEventListener('click', () => folderDecide(f.id, b.dataset.accept, 'accept')));
@@ -2363,12 +2437,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (screen === 'library') window.scrollTo({ top: 0, behavior: 'instant' });
     }
     function render() {
-      libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list');
+      libraryNav.classList.toggle('active', state.screen === 'library' || state.screen === 'list' || state.screen === 'folderDetail' || state.screen === 'recents');
       profileNav.classList.toggle('active', state.screen === 'profile');
-      foldersNav.classList.toggle('active', state.screen === 'folders');
       if (state.screen === 'profile') renderProfile();
       else if (state.screen === 'list') renderListScreen();
-      else if (state.screen === 'folders') renderFolders();
+      else if (state.screen === 'folderDetail') renderFolderDetail();
+      else if (state.screen === 'recents') renderRecents();
       else renderLibrary();
     }
     async function loadData() {
@@ -2396,6 +2470,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       state.loading = false;
       scheduleStatusPolling();
       render();
+      loadFolders();
     }
     function scheduleStatusPolling() {
       clearTimeout(state.pollTimer);
@@ -2411,7 +2486,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     libraryNav.addEventListener('click', () => setNav('library'));
     profileNav.addEventListener('click', () => setNav('profile'));
-    foldersNav.addEventListener('click', () => { state.folderDetail = null; if (!state.foldersLoaded) loadFolders(); setNav('folders'); });
     miniToggle.addEventListener('click', toggleMini);
     miniMore.addEventListener('click', () => openActionSheet());
     miniClose.addEventListener('click', closeMini);

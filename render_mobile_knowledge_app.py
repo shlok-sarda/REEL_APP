@@ -63,6 +63,7 @@ def normalized_item_rows(rows):
                 "local_video_url": normalize(row.get("Local Video URL") or row.get("local_video_url")),
                 "thumbnail_path": normalize(row.get("Thumbnail Path") or row.get("thumbnail_path")),
                 "thumbnail_url": normalize(row.get("Thumbnail URL") or row.get("thumbnail_url")),
+                "received_at": normalize(row.get("Received At") or row.get("received_at")),
             }
         )
     return normalized
@@ -107,6 +108,7 @@ def build_collections_from_rows(rows):
                 "local_video_url": row["local_video_url"],
                 "thumbnail_path": row["thumbnail_path"],
                 "thumbnail_url": row["thumbnail_url"],
+                "received_at": row["received_at"],
             }
         )
 

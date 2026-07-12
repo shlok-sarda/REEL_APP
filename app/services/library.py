@@ -302,6 +302,7 @@ def _db_standard_rows(user_id: str) -> list[dict]:
                 reels.media_status AS media_status,
                 reels.local_video_path AS local_video_path,
                 reels.thumbnail_path AS thumbnail_path,
+                reels.received_at AS received_at,
                 reel_items.primary_category AS primary_category,
                 reel_items.secondary_category AS secondary_category,
                 reel_items.item_name AS item_name,
@@ -337,6 +338,7 @@ def _db_v2_item_rows(user_id: str) -> dict[int, dict]:
                 reels.media_status AS media_status,
                 reels.local_video_path AS local_video_path,
                 reels.thumbnail_path AS thumbnail_path,
+                reels.received_at AS received_at,
                 reel_item_features.item_name AS item_name,
                 reel_item_features.summary AS summary,
                 reel_item_features.specific_category AS specific_category,
@@ -402,6 +404,7 @@ def _build_strong_personalization_collections(user_id: str) -> list[dict]:
                 "local_video_url": _media_url_from_path(item_row.get("local_video_path", "")),
                 "thumbnail_path": item_row.get("thumbnail_path", ""),
                 "thumbnail_url": _media_url_from_path(item_row.get("thumbnail_path", "")),
+                "received_at": item_row.get("received_at", ""),
                 "membership_score": strong_item.get("membership_score", ""),
                 "membership_reasons": strong_item.get("membership_reasons", {}),
                 "personalization_model": payload.get("model", ""),
@@ -594,6 +597,7 @@ def _build_v2_collections(user_id: str) -> list[dict]:
                 "local_video_url": _media_url_from_path(item_row.get("local_video_path", "")),
                 "thumbnail_path": item_row.get("thumbnail_path", ""),
                 "thumbnail_url": _media_url_from_path(item_row.get("thumbnail_path", "")),
+                "received_at": item_row.get("received_at", ""),
             }
             dedupe_key = (item["reel_id"], item["name"], item["url"])
             if dedupe_key in seen:
