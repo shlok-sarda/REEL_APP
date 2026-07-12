@@ -1891,7 +1891,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function renderFolderDetail() {
       const f = state.folderDetail;
-      app.innerHTML = '<div class="home-head"><button class="newlist-btn ghost" id="folderBack" type="button">← Folders</button></div>'
+      app.innerHTML = '<div class="home-head" style="justify-content:space-between">'
+        + '<button class="newlist-btn ghost" id="folderBack" type="button">← Folders</button>'
+        + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
         + `<h1 class="greeting" style="margin-top:6px">${escapeHtml(f.name)}</h1>`
         + `<p style="color:var(--muted);font-size:.85rem;margin:4px 0 8px">${escapeHtml(f.description || '')}</p>`
         + ((f.suggestions || []).length ? '<div class="section-head"><h2 class="section-title">Suggested &mdash; auto-routed, needs your yes</h2></div>'
@@ -1899,6 +1901,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
         + '<div class="section-head"><h2 class="section-title">In this folder</h2></div>'
         + ((f.members || []).length ? `<section class="masonry">${f.members.map((m) => folderItemRow(m, false)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
       document.getElementById('folderBack').addEventListener('click', () => { state.folderDetail = null; renderFolders(); });
+      document.getElementById('folderDelete').addEventListener('click', async () => {
+        if (!confirm('Delete "' + f.name + '"? Your reels stay saved — only the folder is removed.')) return;
+        try { await fetch(`/folders/${f.id}?user_id=${encodeURIComponent(USER_ID)}`, { method: 'DELETE', credentials: 'same-origin' }); } catch (e) {}
+        state.folderDetail = null; state.foldersLoaded = false; await loadFolders(); renderFolders();
+      });
       app.querySelectorAll('[data-open-url]').forEach((b) => b.addEventListener('click', () => { const u = b.dataset.openUrl; if (u) window.open(u, '_blank'); }));
       app.querySelectorAll('[data-accept]').forEach((b) => b.addEventListener('click', () => folderDecide(f.id, b.dataset.accept, 'accept')));
       app.querySelectorAll('[data-reject]').forEach((b) => b.addEventListener('click', () => folderDecide(f.id, b.dataset.reject, 'reject')));
