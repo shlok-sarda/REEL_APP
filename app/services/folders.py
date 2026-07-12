@@ -42,7 +42,7 @@ AUTO_MARGIN_SIGMA, AUTO_MARGIN_FLOOR = 1.0, 0.05
 SUGGEST_MARGIN_SIGMA, SUGGEST_MARGIN_FLOOR = 2.0, 0.10
 ANCHOR_MARGIN = 0.20
 ANCHOR_DF_MAX, STRONG_DF_MAX = 0.15, 0.06
-ADJUDICATION_MODEL = SUGGESTION_MODEL = "gpt-4.1-mini"
+ADJUDICATION_MODEL = "gpt-4.1-mini"
 EMB_OBJECT_TYPE = "folder_reel"
 
 STOPWORDS = {
@@ -321,44 +321,21 @@ def _members(conn, folder_id: int, statuses=("member",)) -> list[str]:
 
 
 def suggest_meta(user_id: str, query: str, reel_ids: list[str]) -> dict:
-    """LLM-draft a folder name + content-driven description (name low-weight)."""
-    with get_connection() as conn:
-        rows = _reel_rows(conn, user_id)
-    items = [rows[r] for r in reel_ids if r in rows]
-    lines = []
-    for r in items[:12]:
-        doc = json.loads(r.get("document_json") or "{}")
-        lines.append(f"- {r.get('item_name','')} | topic: {doc.get('primary_topic','')} "
-                     f"| entities: {_join(doc.get('entities'))[:60]}")
-    try:
-        from api_config import get_openai_client
-        client = get_openai_client()
-        prompt = (
-            "The user searched their saved reels for a phrase, selected some results, and is "
-            "creating a folder from them.\n\n"
-            f'Search phrase (their intent): "{query}"\n\nSelected reels:\n' + "\n".join(lines) + "\n\n"
-            "Write a SHORT folder name and a SHORT one-line description (about 8-14 words).\n"
-            "- The description captures the BROAD intent of the SEARCH PHRASE, in plain words a "
-            "user would use (phrase 'protein recipes' -> 'High-protein recipes and dishes').\n"
-            "- Do NOT narrow it to incidental things only some picked reels share. Paneer-heavy "
-            "picks under 'protein recipes' still mean high-protein recipes broadly, NOT 'paneer "
-            "dishes'. Stay at the level of the phrase.\n"
-            "- One clean line. No long lists, no ingredient/place enumeration, no emojis or hashtags.\n"
-            'Reply JSON only: {"name":"...","description":"..."}'
-        )
-        resp = client.chat.completions.create(
-            model=SUGGESTION_MODEL, temperature=0.2, max_tokens=80,
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": prompt}],
-        )
-        data = json.loads(resp.choices[0].message.content)
-        name, desc = str(data.get("name", "")).strip(), str(data.get("description", "")).strip()
-        if name and desc:
-            return {"name": name[:80], "description": desc[:160], "source": "llm"}
-    except Exception:
-        pass
-    return {"name": (query or "New list").strip()[:80],
-            "description": f"Reels about {query}.", "source": "fallback"}
+    """Draft the folder name/description from the SEARCH PHRASE alone — no LLM.
+
+    The phrase IS the user's intent (someone who wants paneer recipes searches
+    "paneer recipes"), so the visible description is a plain template of it:
+    instant, free, and 1-2 seconds to edit. The selected reels still shape
+    routing silently (member centroid in the profile), and alias/nuance
+    matching lives in the routing-time adjudicator — not in the description.
+    """
+    phrase = (query or "").strip()
+    if not phrase:
+        return {"name": "New list", "description": "Reels saved to this list.",
+                "source": "template"}
+    return {"name": phrase.title()[:80],
+            "description": f"Reels about {phrase}."[:160],
+            "source": "template"}
 
 
 def create_folder(user_id: str, name: str, description: str, query: str, reel_ids: list[str]) -> dict:
