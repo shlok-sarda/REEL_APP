@@ -281,6 +281,39 @@ SCHEMA_STATEMENTS = [
         detail TEXT NOT NULL DEFAULT ''
     )
     """,
+    # ---- Smart folders (search -> list + auto-routing). Learned, user-owned
+    # folders, distinct from personalization clusters. See app/services/folders.py.
+    """
+    CREATE TABLE IF NOT EXISTS user_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        query TEXT NOT NULL DEFAULT '',
+        profile_vector_json TEXT NOT NULL DEFAULT '[]',
+        profile_basis TEXT NOT NULL DEFAULT '',
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS folder_memberships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        folder_id INTEGER NOT NULL,
+        reel_id TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        status TEXT NOT NULL DEFAULT 'member',
+        score REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(folder_id, reel_id),
+        FOREIGN KEY(folder_id) REFERENCES user_folders(id),
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
 ]
 
 USER_EXTRA_COLUMNS = {
@@ -316,6 +349,9 @@ def create_tables():
         connection.execute("CREATE INDEX IF NOT EXISTS idx_cluster_titles_cluster_node_id ON cluster_titles(cluster_node_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_deep_search_documents_user_id ON deep_search_documents(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_deep_search_documents_shortcode ON deep_search_documents(shortcode)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_user_folders_user_id ON user_folders(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_folder_memberships_user_id ON folder_memberships(user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_folder_memberships_folder_id ON folder_memberships(folder_id)")
 
 
 def ensure_default_user():

@@ -96,6 +96,17 @@ def process_job(job: dict):
     except Exception:
         pass
 
+    # Auto-route the freshly-processed reel into the user's smart folders.
+    # Wrapped so a routing failure can NEVER fail reel processing. No-op for
+    # users with no folders (the loop just doesn't run).
+    if job["job_type"] == "process_reel":
+        try:
+            from app.services.folders import route_reel
+
+            route_reel(job["user_id"], job["reel_id"])
+        except Exception:
+            pass
+
     complete_job(job["id"])
 
 

@@ -5,6 +5,7 @@ from app.config import settings
 from app.services.auth import create_login_csrf, current_user
 from app.services.library import is_demo_user
 from app.ui_ux.clipnest_v1 import build_clipnest_v1_html
+from app.ui_ux.folders_page import build_folders_html
 
 
 router = APIRouter(tags=["webapp"])
@@ -3061,6 +3062,18 @@ def my_app(request: Request):
     if not user:
         return RedirectResponse(url="/", status_code=303)
     return HTMLResponse(build_web_app_html(user["id"]))
+
+
+@router.get("/folders-app", response_class=HTMLResponse)
+def folders_app(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+    from app.api.routes.folders import folders_enabled
+
+    if not folders_enabled(user["id"]):
+        return RedirectResponse(url="/app", status_code=303)
+    return HTMLResponse(build_folders_html(user["id"]))
 
 
 @router.get("/app/{user_id}", response_class=HTMLResponse)
