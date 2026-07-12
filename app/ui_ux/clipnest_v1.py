@@ -1810,17 +1810,25 @@ def build_clipnest_v1_html(user_id: str) -> str:
       ov.classList.add('show');
       document.getElementById('createDrafting').style.display = 'block';
       document.getElementById('createForm').style.display = 'none';
-      document.getElementById('createSub').textContent = `${state.selectedReels.length} reels · from "${state.magicQuery.trim()}"`;
+      const q = state.magicQuery.trim();
+      document.getElementById('createSub').textContent = `${state.selectedReels.length} reels · from "${q}"`;
+      let name = q, desc = '', drafted = false;
       try {
         const r = await fetch('/folders/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-          body: JSON.stringify({ user_id: USER_ID, query: state.magicQuery.trim(), reel_ids: state.selectedReels }) });
-        const d = await r.json();
-        document.getElementById('createName').value = d.name || state.magicQuery.trim();
-        document.getElementById('createDesc').value = d.description || '';
-      } catch (e) {
-        document.getElementById('createName').value = state.magicQuery.trim();
-        document.getElementById('createDesc').value = '';
-      }
+          body: JSON.stringify({ user_id: USER_ID, query: q, reel_ids: state.selectedReels }) });
+        if (r.ok) {
+          const d = await r.json();
+          if (d.name) name = d.name;
+          if (d.description) { desc = d.description; drafted = true; }
+        }
+      } catch (e) {}
+      if (!desc) desc = 'Reels about ' + q + '.';
+      document.getElementById('createName').value = name;
+      document.getElementById('createDesc').value = desc;
+      const hintEl = document.querySelector('#folderOverlay .hint');
+      if (hintEl) hintEl.textContent = drafted
+        ? 'AI draft — edit freely. The description is the rule for what auto-joins later.'
+        : 'Could not reach the AI just now, so we added starter text. Edit it to describe what belongs.';
       document.getElementById('createDrafting').style.display = 'none';
       document.getElementById('createForm').style.display = 'block';
     }
@@ -1828,13 +1836,23 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const name = document.getElementById('createName').value.trim();
       const description = document.getElementById('createDesc').value.trim();
       if (!name || !description) return;
-      await fetch('/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-        body: JSON.stringify({ user_id: USER_ID, query: state.magicQuery.trim(), name, description, reel_ids: state.selectedReels }) });
-      document.getElementById('folderOverlay').classList.remove('show');
-      exitSelect();
-      state.foldersLoaded = false;
-      await loadFolders();
-      setNav('folders');
+      const btn = document.getElementById('createSubmit');
+      btn.disabled = true; btn.textContent = 'Creating…';
+      const hintEl = document.querySelector('#folderOverlay .hint');
+      try {
+        const r = await fetch('/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ user_id: USER_ID, query: state.magicQuery.trim(), name, description, reel_ids: state.selectedReels }) });
+        if (!r.ok) throw new Error('server ' + r.status);
+        document.getElementById('folderOverlay').classList.remove('show');
+        exitSelect();
+        state.foldersLoaded = false;
+        await loadFolders();
+        setNav('folders');
+      } catch (e) {
+        if (hintEl) hintEl.textContent = 'Could not create the list (' + (e.message || 'error') + '). Try again.';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Create list';
+      }
     }
     async function loadFolders() {
       try {

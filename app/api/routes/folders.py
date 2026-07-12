@@ -18,7 +18,9 @@ router = APIRouter(prefix="/folders", tags=["folders"])
 
 
 def _beta_users() -> set[str]:
-    raw = os.getenv("FOLDERS_BETA_USERS", "user_4a507f088f27007a").strip()
+    # Default "all" so it works on any of the owner's accounts. Restrict later
+    # by setting FOLDERS_BETA_USERS to a comma-separated list of user_ids.
+    raw = os.getenv("FOLDERS_BETA_USERS", "all").strip()
     return {u.strip() for u in raw.split(",") if u.strip()}
 
 

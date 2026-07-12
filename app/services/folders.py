@@ -330,13 +330,18 @@ def suggest_meta(user_id: str, query: str, reel_ids: list[str]) -> dict:
         from api_config import get_openai_client
         client = get_openai_client()
         prompt = (
-            "The user searched their saved reels, selected some, and is creating a folder.\n\n"
-            f'Search phrase: "{query}"\n\nSelected reels:\n' + "\n".join(lines) + "\n\n"
+            "The user searched their saved reels for a phrase, selected some results, and is "
+            "creating a folder from them.\n\n"
+            f'Search phrase (their intent): "{query}"\n\nSelected reels:\n' + "\n".join(lines) + "\n\n"
             "Write a folder name and a 1-2 sentence description.\n"
-            "- Describe what the REELS actually show (shared theme/place/thing). The reels' "
-            "content defines the folder, not just the name.\n"
-            "- If it's about a specific place/brand, include common alternate names.\n"
-            "- Write the description like a rule for what belongs. No emojis/hashtags.\n"
+            "- The SEARCH PHRASE is the user's intent and DOMINATES the meaning (~70%). Build the "
+            "description around it.\n"
+            "- Use the selected reels only to SHARPEN the phrase — the specific place, activity, or "
+            "theme they have in common (e.g. phrase 'things to do in Varanasi' + restaurant reels "
+            "-> a Varanasi food/restaurants folder).\n"
+            "- If it's about a specific place/brand, include common alternate names/spellings.\n"
+            "- Write the description like a rule for what belongs in this folder going forward. "
+            "No emojis/hashtags.\n"
             'Reply JSON only: {"name":"...","description":"..."}'
         )
         resp = client.chat.completions.create(
