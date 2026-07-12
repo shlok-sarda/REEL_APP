@@ -72,11 +72,15 @@ def _reel_text(row: dict) -> str:
             doc = json.loads(row["document_json"])
         except Exception:
             doc = {}
+    # Lead with the "what is this reel actually about" fields (main subject,
+    # item, topic) so routing keys on the subject, not incidental details.
     parts = [
-        row.get("item_name"), row.get("summary"),
+        doc.get("main_subject"),
+        row.get("item_name"),
+        doc.get("primary_topic"),
         row.get("primary_category"), row.get("specific_category"),
-        doc.get("main_subject"), doc.get("primary_topic"),
         _join(doc.get("subtopics")), _join(doc.get("entities")),
+        row.get("summary"),
         _join(_loads(row.get("canonical_entities_json"))),
         _join(_loads(row.get("canonical_subdomains_json"))),
         doc.get("visual_summary"),
@@ -127,7 +131,7 @@ def reel_vector(conn, reel_id: str, row: dict) -> list[float] | None:
     could only get a deterministic fallback (no meaning -> unroutable)."""
     cached = conn.execute(
         "SELECT vector_json, model FROM embedding_store "
-        "WHERE object_type=? AND object_id=? AND model=? AND version='v1'",
+        "WHERE object_type=? AND object_id=? AND model=? AND version='v2'",
         (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL),
     ).fetchone()
     if cached:
@@ -139,7 +143,7 @@ def reel_vector(conn, reel_id: str, row: dict) -> list[float] | None:
         "INSERT OR REPLACE INTO embedding_store "
         "(object_type, object_id, model, version, vector_json, created_at, updated_at) "
         "VALUES (?,?,?,?,?,?,?)",
-        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL, "v1", json.dumps(vector), _now(), _now()),
+        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL, "v2", json.dumps(vector), _now(), _now()),
     )
     return vector
 
@@ -333,26 +337,24 @@ def suggest_meta(user_id: str, query: str, reel_ids: list[str]) -> dict:
             "The user searched their saved reels for a phrase, selected some results, and is "
             "creating a folder from them.\n\n"
             f'Search phrase (their intent): "{query}"\n\nSelected reels:\n' + "\n".join(lines) + "\n\n"
-            "Write a folder name and a 1-2 sentence description.\n"
-            "- The SEARCH PHRASE is the user's intent and DOMINATES the meaning (~70%). Build the "
-            "description around it.\n"
-            "- Use the selected reels only to SHARPEN the phrase — the specific place, activity, or "
-            "theme they have in common (e.g. phrase 'things to do in Varanasi' + restaurant reels "
-            "-> a Varanasi food/restaurants folder).\n"
-            "- If it's about a specific place/brand, include common alternate names/spellings.\n"
-            "- Write the description like a rule for what belongs in this folder going forward. "
-            "No emojis/hashtags.\n"
+            "Write a SHORT folder name and a SHORT one-line description (about 8-14 words).\n"
+            "- The description captures the BROAD intent of the SEARCH PHRASE, in plain words a "
+            "user would use (phrase 'protein recipes' -> 'High-protein recipes and dishes').\n"
+            "- Do NOT narrow it to incidental things only some picked reels share. Paneer-heavy "
+            "picks under 'protein recipes' still mean high-protein recipes broadly, NOT 'paneer "
+            "dishes'. Stay at the level of the phrase.\n"
+            "- One clean line. No long lists, no ingredient/place enumeration, no emojis or hashtags.\n"
             'Reply JSON only: {"name":"...","description":"..."}'
         )
         resp = client.chat.completions.create(
-            model=SUGGESTION_MODEL, temperature=0.2, max_tokens=160,
+            model=SUGGESTION_MODEL, temperature=0.2, max_tokens=80,
             response_format={"type": "json_object"},
             messages=[{"role": "user", "content": prompt}],
         )
         data = json.loads(resp.choices[0].message.content)
         name, desc = str(data.get("name", "")).strip(), str(data.get("description", "")).strip()
         if name and desc:
-            return {"name": name[:80], "description": desc[:500], "source": "llm"}
+            return {"name": name[:80], "description": desc[:160], "source": "llm"}
     except Exception:
         pass
     return {"name": (query or "New list").strip()[:80],
