@@ -1072,58 +1072,63 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Reel Organizer</title>
+  <title>ClipNest</title>
   __GOOGLE_SCRIPT__
   <style>
+    /* Matches the in-app theme (app/ui_ux/clipnest_v1.py): near-black flat
+       background, #161619 cards, serif display headings, tan action color. */
     :root {
       color-scheme: dark;
-      --bg: #07090c;
-      --text: #f4f6f8;
-      --muted: #9ca4af;
-      --line: rgba(255,255,255,0.1);
-      --accent: #eed7a6;
-      --accent-2: #9fd5c5;
-      --shadow: 0 24px 70px rgba(0,0,0,0.38);
+      --bg:#0a0a0b;
+      --card:#161619;
+      --soft:#1c1c20;
+      --line:#232327;
+      --text:#f4f4f5;
+      --muted:#8e8e96;
+      --faint:#5c5c64;
+      --tan:#a9744a;
+      --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
     * { box-sizing: border-box; }
-    html, body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", system-ui, sans-serif; }
-    body {
-      background:
-        radial-gradient(circle at top left, rgba(238, 215, 166, 0.14), transparent 26rem),
-        radial-gradient(circle at top right, rgba(159, 213, 197, 0.12), transparent 24rem),
-        linear-gradient(180deg, #10141b 0%, #07090c 50%, #060709 100%);
+    html, body {
+      margin:0;
+      min-height:100%;
+      background:var(--bg);
+      color:var(--text);
+      font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     }
     .shell {
-      width:min(760px, 100%);
+      width:min(680px, 100%);
       min-height:100vh;
       margin:0 auto;
-      padding: calc(24px + var(--safe-top)) 18px calc(32px + var(--safe-bottom));
+      padding: calc(28px + var(--safe-top)) 20px calc(36px + var(--safe-bottom));
       display:grid;
-      gap:18px;
+      gap:16px;
       align-content:center;
     }
     .hero, .card {
       border:1px solid var(--line);
-      border-radius:28px;
-      background:linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.045));
-      box-shadow: var(--shadow);
-      padding:20px;
+      border-radius:20px;
+      background:var(--card);
+      padding:22px 20px;
     }
     .kicker {
-      margin:0 0 8px;
-      color:var(--accent-2);
-      font-size:.72rem;
-      font-weight:900;
-      letter-spacing:.11em;
+      margin:0 0 10px;
+      color:var(--tan);
+      font-size:.7rem;
+      font-weight:700;
+      letter-spacing:.12em;
       text-transform:uppercase;
     }
     h1 {
       margin:0;
-      font-size: clamp(2rem, 10vw, 3.3rem);
-      line-height:.95;
-      letter-spacing:-.06em;
+      font-family:var(--serif);
+      font-weight:600;
+      font-size: clamp(1.9rem, 8vw, 2.7rem);
+      line-height:1.08;
+      letter-spacing:-.01em;
     }
     p {
       color:var(--muted);
@@ -1139,7 +1144,15 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .auth-card, .user-card {
       display:grid;
       gap:14px;
-      margin-top:18px;
+      margin-top:20px;
+      border-top:1px solid var(--line);
+      padding-top:18px;
+    }
+    .auth-card h2, .user-row h2 {
+      margin:0;
+      font-family:var(--serif);
+      font-weight:600;
+      font-size:1.35rem;
     }
     .user-row {
       display:flex;
@@ -1147,23 +1160,18 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       justify-content:space-between;
       gap:14px;
     }
-    .user-row h2 {
-      margin:2px 0 0;
-      font-size:1.3rem;
-      letter-spacing:-.03em;
-    }
     .tiny-label {
-      margin:0;
-      color:var(--accent-2);
-      font-size:.72rem;
-      font-weight:900;
+      margin:0 0 4px;
+      color:var(--tan);
+      font-size:.7rem;
+      font-weight:700;
       letter-spacing:.1em;
       text-transform:uppercase;
     }
     .avatar {
-      width:58px;
-      height:58px;
-      border-radius:999px;
+      width:56px;
+      height:56px;
+      border-radius:50%;
       border:1px solid var(--line);
       object-fit:cover;
     }
@@ -1183,8 +1191,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       align-items:center;
       padding:0 14px;
       border-radius:16px;
-      border:1px dashed rgba(255,255,255,0.14);
-      color:#b5bcc7;
+      border:1px dashed var(--line);
+      color:var(--muted);
       font-size:.88rem;
       line-height:1.35;
     }
@@ -1195,32 +1203,27 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       justify-content:center;
       width:100%;
       min-height:52px;
-      border-radius:18px;
+      border-radius:26px;
       border:1px solid var(--line);
-      background:rgba(255,255,255,0.06);
+      background:var(--soft);
       color:var(--text);
       text-decoration:none;
-      font-size:.98rem;
-      font-weight:800;
+      font-size:.95rem;
+      font-weight:700;
     }
     .primary-link {
-      min-height:56px;
-      border-radius:18px;
-      background:rgba(238,215,166,0.14);
-      border:1px solid rgba(238,215,166,0.35);
-      color:var(--text);
-      text-decoration:none;
-      font-size:.98rem;
-      font-weight:900;
+      background:var(--tan);
+      border-color:var(--tan);
+      color:#fff;
     }
     .ghost-button {
       min-height:44px;
-      border-radius:16px;
+      border-radius:22px;
       border:1px solid var(--line);
       background:transparent;
       color:var(--muted);
-      font-size:.92rem;
-      font-weight:800;
+      font-size:.9rem;
+      font-weight:650;
       cursor:pointer;
     }
     .small-ghost {
@@ -1232,34 +1235,37 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     input, button {
       width:100%;
       min-height:52px;
-      border-radius:18px;
+      border-radius:26px;
       border:1px solid var(--line);
-      background:rgba(255,255,255,0.07);
+      background:var(--soft);
       color:var(--text);
       padding:0 16px;
-      font-size:.98rem;
+      font-size:.95rem;
     }
     button {
-      background:rgba(238,215,166,0.14);
-      border-color:rgba(238,215,166,0.35);
-      font-weight:900;
+      background:var(--tan);
+      border-color:var(--tan);
+      color:#fff;
+      font-weight:700;
       cursor:pointer;
     }
+    button:active { filter:brightness(1.1); }
     ol {
       margin:14px 0 0;
       padding-left:18px;
       color:var(--muted);
-      line-height:1.6;
+      line-height:1.7;
+      font-size:.92rem;
     }
     .tiny {
       font-size:.82rem;
-      color:#7e8694;
+      color:var(--faint);
     }
     .connect-modal {
       position: fixed;
       inset: 0;
-      background: rgba(7, 9, 12, 0.82);
-      backdrop-filter: blur(14px);
+      background: rgba(10, 10, 11, 0.78);
+      backdrop-filter: blur(10px);
       display: grid;
       place-items: center;
       padding: 20px;
@@ -1271,9 +1277,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .connect-card {
       width: min(520px, 100%);
       border: 1px solid var(--line);
-      border-radius: 24px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.06));
-      box-shadow: var(--shadow);
+      border-radius: 20px;
+      background: var(--card);
       padding: 18px;
     }
     .connect-head {
@@ -1283,18 +1288,19 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       align-items:flex-start;
       margin-bottom:12px;
     }
+    .connect-head h3 { font-family:var(--serif); font-weight:600; font-size:1.15rem; }
     .code-box {
       width:100%;
       min-height:60px;
-      border-radius:20px;
-      border:1px dashed rgba(238,215,166,0.35);
-      background: rgba(238,215,166,0.08);
+      border-radius:16px;
+      border:1px dashed rgba(169,116,74,.55);
+      background: rgba(169,116,74,.1);
       display:grid;
       place-items:center;
-      font-size:1.2rem;
-      font-weight:900;
-      letter-spacing:.08em;
-      color: var(--accent);
+      font-size:1.25rem;
+      font-weight:800;
+      letter-spacing:.1em;
+      color: var(--tan);
       margin: 14px 0 8px;
       padding: 10px 14px;
       text-align:center;
@@ -1358,7 +1364,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       });
       window.google.accounts.id.renderButton(
         target,
-        { theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
+        { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
       );
       return true;
     }
