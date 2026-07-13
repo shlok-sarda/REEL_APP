@@ -392,19 +392,70 @@ def reconcile_stuck_reels(connection) -> int:
     return cursor.rowcount
 
 
-def ensure_background_progress(user_id: str | None = None) -> None:
-    recover_orphaned_jobs()
-    if is_worker_running():
-        return
-    query = "SELECT COUNT(*) FROM processing_jobs WHERE status = 'pending'"
-    params = []
-    if user_id:
-        query += " AND user_id = ?"
-        params.append(user_id)
+JOB_BACKFILL_LIMIT = 25
+
+
+def enqueue_missing_reel_jobs(limit: int = JOB_BACKFILL_LIMIT) -> int:
+    """Re-enqueue reels stranded in a non-terminal status with no job at all.
+
+    Job rows and reel rows can fall out of sync (a purge/reset that kept the
+    reel, a partial ingest, a cleared jobs table): the reel then sits 'pending'
+    forever while the queue is empty and the worker has nothing to claim.
+    Recreate one process_reel job per such reel so the pipeline converges.
+    Reels whose jobs still exist — including failed ones — are never touched.
+    """
     with get_connection() as connection:
-        pending = connection.execute(query, params).fetchone()[0]
-    if pending:
-        start_worker_if_needed()
+        rows = connection.execute(
+            """
+            SELECT id, user_id
+            FROM reels
+            WHERE status IN ('pending', 'processing')
+              AND NOT EXISTS (
+                  SELECT 1 FROM processing_jobs j
+                  WHERE j.reel_id = reels.id
+                    AND j.job_type = 'process_reel'
+              )
+            ORDER BY received_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    created = 0
+    for row in rows:
+        try:
+            enqueue_reel_job(row["id"], user_id=row["user_id"])
+            created += 1
+        except Exception as exc:
+            print(f"[jobs] backfill enqueue failed for {row['id']}: {exc}", flush=True)
+    return created
+
+
+def ensure_background_progress(user_id: str | None = None) -> None:
+    # Janitor duties: recover orphans, backfill missing jobs, start the worker.
+    # Each step is isolated — this runs inside /jobs and /dashboard requests,
+    # so a broken janitor must degrade to a log line, never a 500.
+    try:
+        recover_orphaned_jobs()
+    except Exception as exc:
+        print(f"[jobs] orphan recovery failed: {exc}", flush=True)
+    try:
+        enqueue_missing_reel_jobs()
+    except Exception as exc:
+        print(f"[jobs] missing-job backfill failed: {exc}", flush=True)
+    try:
+        if is_worker_running():
+            return
+        query = "SELECT COUNT(*) FROM processing_jobs WHERE status = 'pending'"
+        params = []
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        with get_connection() as connection:
+            pending = connection.execute(query, params).fetchone()[0]
+        if pending:
+            start_worker_if_needed()
+    except Exception as exc:
+        print(f"[jobs] worker start failed: {exc}", flush=True)
 
 
 def create_worker_lock() -> bool:
