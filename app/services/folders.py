@@ -390,6 +390,14 @@ def create_folder(user_id: str, name: str, description: str, query: str, reel_id
                 (user_id, fid, rid, "manual", "member", _now(), _now()),
             )
         _refresh_profile(conn, user_id, fid)
+        # One-time scan at birth: reels saved BEFORE this folder existed get a
+        # shot at the Suggested tray. After this, only ingest-time routing (and
+        # the manual Rescan button) touch memberships — no per-open scanning.
+        try:
+            frow = conn.execute("SELECT * FROM user_folders WHERE id=?", (fid,)).fetchone()
+            _backfill_suggestions(conn, user_id, frow)
+        except Exception:
+            pass
     return {"id": fid, "name": name, "description": description, "item_count": len(set(reel_ids))}
 
 
@@ -455,6 +463,22 @@ def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
         )
 
 
+def rescan_folder(user_id: str, folder_id: int) -> dict | None:
+    """Manual re-scan (Rescan button / after a description edit): score the
+    library against this folder once and refresh the Suggested tray. Routing
+    otherwise happens only at ingest + once at folder creation — no per-open
+    scanning."""
+    with get_connection() as conn:
+        f = conn.execute(
+            "SELECT * FROM user_folders WHERE id=? AND user_id=? AND is_active=1",
+            (folder_id, user_id),
+        ).fetchone()
+        if not f:
+            return None
+        _backfill_suggestions(conn, user_id, f)
+    return folder_detail(user_id, folder_id)
+
+
 def folder_detail(user_id: str, folder_id: int) -> dict | None:
     with get_connection() as conn:
         f = conn.execute(
@@ -463,14 +487,12 @@ def folder_detail(user_id: str, folder_id: int) -> dict | None:
         ).fetchone()
         if not f:
             return None
-        try:
-            _backfill_suggestions(conn, user_id, f)
-        except Exception:
-            pass  # folder view must render even if the scan fails
-        members = [dict(_reel_card(conn, r), source=s) for r, s in
-                   [(m["reel_id"], m["source"]) for m in conn.execute(
-                       "SELECT reel_id, source FROM folder_memberships WHERE folder_id=? AND status='member'",
-                       (folder_id,))]]
+        members = [dict(_reel_card(conn, m["reel_id"]), source=m["source"]) for m in conn.execute(
+            "SELECT fm.reel_id, fm.source FROM folder_memberships fm "
+            "LEFT JOIN reels r ON r.id = fm.reel_id "
+            "WHERE fm.folder_id=? AND fm.status='member' "
+            "ORDER BY r.received_at DESC",
+            (folder_id,))]
         suggestions = [_reel_card(conn, m["reel_id"]) for m in conn.execute(
             "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status='suggested' "
             "ORDER BY score DESC", (folder_id,))]

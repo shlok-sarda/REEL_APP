@@ -285,6 +285,9 @@ def _attach_reel_ids(collections: list[dict], user_id: str) -> list[dict]:
             item["reel_id"] = reel.get("id", "")
             item["local_video_url"] = _media_url_from_path(item.get("local_video_path") or reel.get("local_video_path", ""))
             item["thumbnail_url"] = _media_url_from_path(item.get("thumbnail_path") or reel.get("thumbnail_path", ""))
+            # Save-time must reach the client on every path (the CSV fallback
+            # has no such column), or "Recently saved" cannot order by it.
+            item["received_at"] = item.get("received_at") or reel.get("received_at", "")
             filtered_items.append(item)
         if filtered_items:
             collection["items"] = filtered_items

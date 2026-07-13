@@ -1624,9 +1624,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
         seen.add(key);
         items.push(item);
       }
-      // Newest first. received_at is surfaced by the library API; when it is
-      // missing the original order is kept as a stable fallback.
-      items.sort((a, b) => (Date.parse(b.received_at || '') || 0) - (Date.parse(a.received_at || '') || 0));
+      // Newest saved first. Safari rejects "YYYY-MM-DD HH:MM:SS" (space
+      // separator), so normalize to ISO 'T' before parsing; anything
+      // unparseable sinks to the bottom in stable original order.
+      const savedAt = (v) => {
+        const t = Date.parse(String(v || '').trim().replace(' ', 'T'));
+        return Number.isFinite(t) ? t : 0;
+      };
+      items.sort((a, b) => savedAt(b.received_at) - savedAt(a.received_at));
       return items;
     }
     function renderRecents() {
@@ -2003,13 +2008,25 @@ def build_clipnest_v1_html(user_id: str) -> str:
       app.innerHTML = '<div class="list-heading">'
         + '<button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG + '</button>'
         + `<div class="list-title-block"><h1>${escapeHtml(f.name)}</h1><p class="count-text">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</p></div>`
-        + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
+        + '<span style="display:flex;gap:8px">'
+        + '<button class="newlist-btn ghost" id="folderRescan" type="button" title="Re-check your saved reels against this list">↻</button>'
+        + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></span></div>'
         + (f.description ? `<p class="folder-desc">${escapeHtml(f.description)}</p>` : '')
         + (suggestions.length ? '<div class="section-head"><h2 class="section-title sm">Suggested for this list</h2></div>'
           + renderMasonry(suggestions, (m, i) => folderItemRow(m, true, i)) : '')
         + `<div class="section-head"><h2 class="section-title sm">In this list</h2><span class="section-side">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</span></div>`
         + (memberCount ? renderMasonry(members, (m, i) => folderItemRow(m, false, i)) : '<div class="empty">No reels yet.</div>');
       document.getElementById('folderBack').addEventListener('click', backTo);
+      document.getElementById('folderRescan').addEventListener('click', async () => {
+        const b = document.getElementById('folderRescan');
+        b.disabled = true; b.textContent = '…';
+        try {
+          const r = await fetch(`/folders/${f.id}/rescan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ user_id: USER_ID }) });
+          if (r.ok) { state.folderDetail = await r.json(); renderFolderDetail(); return; }
+        } catch (e) {}
+        b.disabled = false; b.textContent = '↻';
+      });
       document.getElementById('folderDelete').addEventListener('click', async () => {
         if (!confirm('Delete "' + f.name + '"? Your reels stay saved — only the folder is removed.')) return;
         try { await fetch(`/folders/${f.id}?user_id=${encodeURIComponent(USER_ID)}`, { method: 'DELETE', credentials: 'same-origin' }); } catch (e) {}

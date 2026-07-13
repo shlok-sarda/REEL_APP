@@ -72,6 +72,15 @@ def detail(request: Request, folder_id: int, user_id: str = ""):
     return data
 
 
+@router.post("/{folder_id}/rescan")
+def rescan(request: Request, folder_id: int, payload: dict = Body(default={})):
+    resolved = _gate(request, str(payload.get("user_id", "")))
+    data = folders_service.rescan_folder(resolved, folder_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="folder not found")
+    return data
+
+
 @router.post("/{folder_id}/accept")
 def accept(request: Request, folder_id: int, payload: dict = Body(...)):
     resolved = _gate(request, str(payload.get("user_id", "")))
