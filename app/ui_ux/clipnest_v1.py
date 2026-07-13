@@ -425,11 +425,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-size:.78rem;
       font-weight:600;
     }
+    /* Two independent packed columns: card heights never couple across the
+       row, so no stretched cells or dead vertical gaps — each column stacks
+       tight with its own rhythm. */
     .masonry {
-      display:grid;
-      grid-template-columns:repeat(2,1fr);
-      gap:16px 12px;
-      align-items:start;
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .mas-col {
+      flex:1;
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
     }
     .m-card {
       margin:0;
@@ -1472,17 +1481,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       return sortedCollections().flatMap((list) =>
         list.items.map((item) => ({ ...item, list_id: list.list_id, list_title: list.list_title, parent_title: list.parent_title })));
     }
+    // Recents are always ordered by when the reel was SAVED (received_at),
+    // newest first — the rail and the full view must agree.
     function recentItems(limit = 24) {
-      const seen = new Set();
-      const items = [];
-      for (const item of flatItems()) {
-        const key = item.reel_id || item.url || item.name;
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        items.push(item);
-        if (items.length >= limit) break;
-      }
-      return items;
+      return allRecentsSorted().slice(0, limit);
     }
     function renderSearchBox(placeholder, value, id) {
       return `<label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="${id}" type="search" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" /></label>`;
@@ -1635,7 +1637,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="list-title-block"><h1>Recently saved</h1><p class="count-text">${items.length} ${items.length === 1 ? 'reel' : 'reels'}</p></div>
           <div class="icon-row"></div>
         </div>
-        ${items.length ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>` : '<div class="empty">Nothing saved yet.</div>'}
+        ${items.length ? renderMasonry(items, renderItemCard) : '<div class="empty">Nothing saved yet.</div>'}
       `;
       document.getElementById('recentsBack').addEventListener('click', () => { state.screen = 'library'; render(); });
       app.querySelectorAll('[data-open-item]').forEach((button) => {
@@ -1677,7 +1679,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         const results = document.getElementById('folderResults');
         if (!results) return;
         results.innerHTML = items.length
-          ? `<section class="masonry">${items.map(renderItemCard).join('')}</section>`
+          ? renderMasonry(items, renderItemCard)
           : '<div class="empty">No items found</div>';
         results.querySelectorAll('[data-open-item]').forEach((button) => {
           button.addEventListener('click', () => openActionSheet(items[Number(button.dataset.openItem)], Number(button.dataset.openItem), items));
@@ -1707,6 +1709,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
         });
       });
       renderFolderResults();
+    }
+    // Split items across two columns (left/right alternating so save order
+    // still reads left-to-right). cardFn receives the ORIGINAL index so tap
+    // handlers keep resolving into the source array.
+    function renderMasonry(items, cardFn) {
+      const cols = [[], []];
+      items.forEach((item, index) => { cols[index % 2].push(cardFn(item, index)); });
+      return `<section class="masonry"><div class="mas-col">${cols[0].join('')}</div><div class="mas-col">${cols[1].join('')}</div></section>`;
     }
     function renderItemCard(item, index) {
       const rid = item.reel_id || '';
@@ -1819,7 +1829,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ${q && state.deepSearch.loading && state.deepSearch.query === q ? '<div class="load-wrap"><div class="spinner"></div></div>' : ''}
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
-        ${results.length ? `<section class="masonry">${results.map(renderItemCard).join('')}</section>` : ''}
+        ${results.length ? renderMasonry(results, renderItemCard) : ''}
       `;
       state.lastSearchResults = results;
       resultList.querySelectorAll('[data-open-item]').forEach((button) => {
@@ -1996,9 +2006,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
         + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
         + (f.description ? `<p class="folder-desc">${escapeHtml(f.description)}</p>` : '')
         + (suggestions.length ? '<div class="section-head"><h2 class="section-title sm">Suggested for this list</h2></div>'
-          + `<section class="masonry">${suggestions.map((m, i) => folderItemRow(m, true, i)).join('')}</section>` : '')
+          + renderMasonry(suggestions, (m, i) => folderItemRow(m, true, i)) : '')
         + `<div class="section-head"><h2 class="section-title sm">In this list</h2><span class="section-side">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</span></div>`
-        + (memberCount ? `<section class="masonry">${members.map((m, i) => folderItemRow(m, false, i)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
+        + (memberCount ? renderMasonry(members, (m, i) => folderItemRow(m, false, i)) : '<div class="empty">No reels yet.</div>');
       document.getElementById('folderBack').addEventListener('click', backTo);
       document.getElementById('folderDelete').addEventListener('click', async () => {
         if (!confirm('Delete "' + f.name + '"? Your reels stay saved — only the folder is removed.')) return;
