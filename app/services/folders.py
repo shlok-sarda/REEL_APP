@@ -127,6 +127,41 @@ def _reel_rows(conn, user_id: str) -> dict[str, dict]:
     return {row["reel_id"]: dict(row) for row in rows}
 
 
+def _warm_vectors(conn, rows: dict[str, dict]) -> None:
+    """Batch-embed every reel that doesn't have a cached v2 vector yet — one
+    API call per ~96 reels instead of one per reel, so scanning a whole library
+    takes seconds, not tens of seconds. reel_vector() falls back to per-reel
+    embedding if this fails, so errors here are safe to swallow."""
+    missing = [
+        (rid, row) for rid, row in rows.items()
+        if not conn.execute(
+            "SELECT 1 FROM embedding_store WHERE object_type=? AND object_id=? "
+            "AND model=? AND version='v2'",
+            (EMB_OBJECT_TYPE, rid, EMBEDDING_MODEL),
+        ).fetchone()
+    ]
+    if not missing:
+        return
+    try:
+        from api_config import get_openai_client
+
+        client = get_openai_client()
+        for i in range(0, len(missing), 96):
+            chunk = missing[i:i + 96]
+            texts = [(_reel_text(row) or "empty")[:6000] for _, row in chunk]
+            resp = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
+            for (rid, _row), item in zip(chunk, resp.data):
+                conn.execute(
+                    "INSERT OR REPLACE INTO embedding_store "
+                    "(object_type, object_id, model, version, vector_json, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (EMB_OBJECT_TYPE, rid, EMBEDDING_MODEL, "v2",
+                     json.dumps(l2_normalize(item.embedding)), _now(), _now()),
+                )
+    except Exception:
+        pass
+
+
 def reel_vector(conn, reel_id: str, row: dict) -> list[float] | None:
     """Get cached folder embedding for a reel, or compute it. Returns None if we
     could only get a deterministic fallback (no meaning -> unroutable)."""
@@ -232,6 +267,7 @@ def _anchors(folder: dict, rows: dict) -> tuple[set[str], set[str]]:
 # ---------- routing ----------
 
 def evaluate_folder(conn, folder: dict, rows: dict) -> dict:
+    _warm_vectors(conn, rows)
     profile, desc_v, query_v = compute_profile(conn, folder, rows)
     strong, weak = _anchors(folder, rows)
     mean, std = _member_stats(conn, folder, rows, desc_v, query_v)
@@ -383,10 +419,40 @@ def _reel_card(conn, reel_id: str) -> dict:
         return {"reel_id": reel_id}
     card = dict(row)
     # Surface served media URLs so folder cards render real thumbnails/video,
-    # matching the rest of the app.
-    card["thumbnail_url"] = _media_url_from_path(card.get("thumbnail_path") or "")
-    card["local_video_url"] = _media_url_from_path(card.get("local_video_path") or "")
+    # matching the rest of the app. Never let media-URL generation (e.g. R2
+    # misconfig) take down the folder view — cards degrade to no thumbnail.
+    try:
+        card["thumbnail_url"] = _media_url_from_path(card.get("thumbnail_path") or "")
+        card["local_video_url"] = _media_url_from_path(card.get("local_video_path") or "")
+    except Exception:
+        card["thumbnail_url"] = ""
+        card["local_video_url"] = ""
     return card
+
+
+def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
+    """Self-healing scan: score the user's whole library against this folder and
+    insert anything that matches as a 'suggested' membership. Catches reels the
+    ingest-time hook missed (worker timing, failures, reels saved before the
+    folder existed). Reels already decided — member, suggested, or rejected —
+    are never touched, so a user's "No" stays a No."""
+    folder = {"name": folder_row["name"], "description": folder_row["description"],
+              "query": folder_row["query"],
+              "member_ids": _members(conn, folder_row["id"])}
+    rows = _reel_rows(conn, user_id)
+    decided = {r["reel_id"] for r in conn.execute(
+        "SELECT reel_id FROM folder_memberships WHERE folder_id=?", (folder_row["id"],))}
+    ev = evaluate_folder(conn, folder, rows)
+    for cand in ev["candidates"]:
+        if cand["reel_id"] in decided:
+            continue
+        conn.execute(
+            "INSERT OR IGNORE INTO folder_memberships "
+            "(user_id, folder_id, reel_id, source, status, score, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, folder_row["id"], cand["reel_id"], "backfill", "suggested",
+             cand["similarity"], _now(), _now()),
+        )
 
 
 def folder_detail(user_id: str, folder_id: int) -> dict | None:
@@ -397,12 +463,17 @@ def folder_detail(user_id: str, folder_id: int) -> dict | None:
         ).fetchone()
         if not f:
             return None
+        try:
+            _backfill_suggestions(conn, user_id, f)
+        except Exception:
+            pass  # folder view must render even if the scan fails
         members = [dict(_reel_card(conn, r), source=s) for r, s in
                    [(m["reel_id"], m["source"]) for m in conn.execute(
                        "SELECT reel_id, source FROM folder_memberships WHERE folder_id=? AND status='member'",
                        (folder_id,))]]
         suggestions = [_reel_card(conn, m["reel_id"]) for m in conn.execute(
-            "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status='suggested'", (folder_id,))]
+            "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status='suggested' "
+            "ORDER BY score DESC", (folder_id,))]
         return {"id": f["id"], "name": f["name"], "description": f["description"],
                 "query": f["query"], "members": members, "suggestions": suggestions}
 
