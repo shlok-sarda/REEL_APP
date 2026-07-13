@@ -12,7 +12,6 @@ from app.config import settings
 from app.db.database import get_connection
 from app.db.init_db import initialize_database
 from app.services.jobs import claim_next_job, complete_job, create_worker_lock, fail_job, release_worker_lock
-from app.services.deep_search import index_user_documents, rebuild_deep_search_documents
 from app.services.reel_ingest import get_reel_by_id
 
 
@@ -99,6 +98,10 @@ def process_job(job: dict):
             return
 
     try:
+        # Lazy import: keeps the resident worker lean; the deep-search stack
+        # (openai/meilisearch clients) only loads for this post-processing step.
+        from app.services.deep_search import index_user_documents, rebuild_deep_search_documents
+
         if settings.meili_host:
             index_user_documents(job["user_id"])
         else:
@@ -121,17 +124,35 @@ def process_job(job: dict):
 
 
 def main():
+    """Process one job, then re-exec into a fresh process for the next.
+
+    The container has 512MB total for uvicorn + this worker + the processor
+    subprocess. Handling one job per process image means any memory the job
+    leaves behind (client caches, allocator fragmentation) is returned to the
+    OS before the next claim, instead of accumulating across a long backlog
+    until the instance OOMs. The re-exec keeps the same PID, so the worker
+    lock stays valid across the chain (create_worker_lock adopts its own PID).
+    """
     initialize_database()
     if not create_worker_lock():
         return
 
+    job = None
     try:
-        while True:
-            job = claim_next_job()
-            if not job:
-                break
+        job = claim_next_job()
+        if job:
             process_job(job)
-    finally:
+    except BaseException:
+        release_worker_lock()
+        raise
+
+    if not job:
+        release_worker_lock()
+        return
+
+    try:
+        os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+    except OSError:
         release_worker_lock()
 
 

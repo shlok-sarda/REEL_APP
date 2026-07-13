@@ -130,6 +130,7 @@ class HealthResponse(BaseModel):
     csv_file: str
     media_storage_mode: str = "local_only"
     r2_enabled: bool = False
+    queue: dict = {}
 
 
 class DashboardResponse(BaseModel):

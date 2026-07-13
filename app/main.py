@@ -1,3 +1,6 @@
+import threading
+import time
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -34,6 +37,26 @@ app.add_middleware(
 )
 
 
+def _queue_janitor_loop():
+    """Keep the job queue moving without depending on anyone opening the app.
+
+    The worker dies with every deploy/restart/OOM; previously only a page load
+    resurrected it, so an unattended instance sat idle with pending jobs. This
+    loop recovers orphans, backfills missing jobs, and restarts the worker a
+    few times per hour. The initial sleep lets boot settle before any heavy
+    work starts (important on a 512MB instance that may have just OOM'd).
+    """
+    time.sleep(20)
+    while True:
+        try:
+            from app.services.jobs import ensure_background_progress
+
+            ensure_background_progress()
+        except Exception as exc:
+            print(f"[janitor] pass failed: {exc}", flush=True)
+        time.sleep(150)
+
+
 @app.on_event("startup")
 def startup_event():
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +75,7 @@ def startup_event():
             print(f"[startup] purged failed reels: {result}")
     except Exception as exc:
         print(f"[startup] failed-reel purge skipped: {exc}")
+    threading.Thread(target=_queue_janitor_loop, daemon=True, name="queue-janitor").start()
 
 
 app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")

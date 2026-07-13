@@ -34,7 +34,7 @@ class Settings:
     r2_endpoint: str = os.getenv("R2_ENDPOINT", "").strip()
     r2_access_key_id: str = os.getenv("R2_ACCESS_KEY_ID", "").strip()
     r2_secret_access_key: str = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
-    processor_script: Path = BASE_DIR / "process_shlok_reels.py"
+    processor_script: Path = Path(os.getenv("PROCESSOR_SCRIPT", str(BASE_DIR / "process_shlok_reels.py")))
     worker_script: Path = BASE_DIR / "app" / "workers" / "process_queue.py"
     processor_timeout_seconds: int = int(os.getenv("PROCESSOR_TIMEOUT_SECONDS", "600"))
 

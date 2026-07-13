@@ -466,7 +466,11 @@ def create_worker_lock() -> bool:
         os.close(fd)
         return True
     except FileExistsError:
-        return False
+        # A worker that re-exec'd between jobs keeps its PID: adopt our own lock.
+        try:
+            return int(settings.worker_lock_file.read_text().strip()) == os.getpid()
+        except Exception:
+            return False
 
 
 def release_worker_lock() -> None:
