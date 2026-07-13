@@ -470,6 +470,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
+      /* Reserve two lines so cards in the same grid row stay level. */
+      min-height:2.44em;
     }
     .m-kebab { color:var(--faint); font-weight:800; letter-spacing:1px; }
     .m-summary {
@@ -482,6 +484,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
+      min-height:2.7em;
     }
     .buy-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
     .buy-link {
@@ -1007,6 +1010,18 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card h3 { margin:0 0 3px; font-size:1rem; } .folder-card .sub { color:var(--muted); font-size:.82rem; line-height:1.4; }
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
     .sug-chip { font-size:.66rem; color:#08121f; background:var(--accent); border-radius:20px; padding:2px 8px; margin-left:6px; }
+    .folder-desc {
+      color:var(--muted);
+      font-size:.85rem;
+      line-height:1.45;
+      margin:2px 2px 14px;
+      display:-webkit-box;
+      -webkit-line-clamp:3;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    .section-title.sm { font-size:1.05rem; }
+    .sug-actions { display:flex; gap:8px; padding:8px 2px 2px; }
     .sheet-media { position:relative; height:200px; background:#0f0f11; cursor:pointer; }
     .sheet-media img, .sheet-media video { width:100%; height:100%; object-fit:cover; display:block; opacity:.92; }
     .sheet-play {
@@ -1917,14 +1932,17 @@ def build_clipnest_v1_html(user_id: str) -> str:
       }
     }
     async function loadFolders() {
+      const before = state.foldersLoaded ? JSON.stringify(state.folders) : null;
       try {
         const r = await fetch(`/folders?user_id=${encodeURIComponent(USER_ID)}`, { credentials: 'same-origin' });
         const d = await r.json();
         state.folders = d.folders || [];
       } catch (e) { state.folders = []; }
       state.foldersLoaded = true;
-      // Library (Home) lists these folders, so refresh whatever screen is showing.
-      if (state.screen === 'library' || state.screen === 'folderDetail') render();
+      // Only repaint Home when the list content actually changed — background
+      // polls must not rebuild the screen mid-interaction.
+      const changed = before === null || before !== JSON.stringify(state.folders);
+      if (changed && state.screen === 'library' && !state.selecting) render();
     }
     function renderFolders() {
       if (state.folderDetail) { renderFolderDetail(); return; }
@@ -1953,7 +1971,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         + reelThumb(m, 'm-thumb', 'lazy', `<span class="m-badges">${videoFor(m) ? '<span class="badge-dot">▶</span>' : ''}</span>`)
         + `<span class="m-title-row"><p class="m-title">${escapeHtml(m.name || 'Saved reel')}${suggested ? '<span class="sug-chip">suggested</span>' : ''}</p></span>`
         + (m.summary ? `<p class="m-summary">${escapeHtml(m.summary)}</p>` : '') + '</button>'
-        + (suggested ? '<div style="display:flex;gap:8px;padding:8px 4px 4px">'
+        + (suggested ? '<div class="sug-actions">'
           + `<button class="newlist-btn" type="button" data-accept="${escapeHtml(m.reel_id)}">Add</button>`
           + `<button class="newlist-btn ghost" type="button" data-reject="${escapeHtml(m.reel_id)}">Skip</button></div>` : '')
         + '</article>';
@@ -1963,7 +1981,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const backTo = () => { state.folderDetail = null; state.screen = 'library'; render(); window.scrollTo({ top: 0, behavior: 'instant' }); };
       if (!f) {
         app.innerHTML = '<div class="list-heading"><button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG
-          + '</button><div class="list-title-block"><h1>Loading…</h1></div><div class="icon-row"></div></div>';
+          + '</button><div class="list-title-block"></div><div class="icon-row"></div></div>'
+          + '<div class="load-wrap"><div class="spinner"></div></div>';
         document.getElementById('folderBack').addEventListener('click', backTo);
         return;
       }
@@ -1975,10 +1994,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
         + '<button id="folderBack" class="back-button" type="button" aria-label="Back to library">' + BACK_SVG + '</button>'
         + `<div class="list-title-block"><h1>${escapeHtml(f.name)}</h1><p class="count-text">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</p></div>`
         + '<button class="newlist-btn ghost" id="folderDelete" type="button" style="color:#e0736b;border-color:rgba(224,115,107,.5)">Delete</button></div>'
-        + (f.description ? `<p style="color:var(--muted);font-size:.85rem;margin:2px 2px 12px">${escapeHtml(f.description)}</p>` : '')
-        + (suggestions.length ? '<div class="section-head"><h2 class="section-title">Suggested &mdash; auto-routed, needs your yes</h2></div>'
+        + (f.description ? `<p class="folder-desc">${escapeHtml(f.description)}</p>` : '')
+        + (suggestions.length ? '<div class="section-head"><h2 class="section-title sm">Suggested for this list</h2></div>'
           + `<section class="masonry">${suggestions.map((m, i) => folderItemRow(m, true, i)).join('')}</section>` : '')
-        + '<div class="section-head"><h2 class="section-title">In this folder</h2></div>'
+        + `<div class="section-head"><h2 class="section-title sm">In this list</h2><span class="section-side">${memberCount} ${memberCount === 1 ? 'reel' : 'reels'}</span></div>`
         + (memberCount ? `<section class="masonry">${members.map((m, i) => folderItemRow(m, false, i)).join('')}</section>` : '<div class="empty">No reels yet.</div>');
       document.getElementById('folderBack').addEventListener('click', backTo);
       document.getElementById('folderDelete').addEventListener('click', async () => {
@@ -2456,8 +2475,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       else renderLibrary();
     }
     async function loadData() {
-      state.loading = true;
-      render();
+      const firstLoad = state.loading;
+      if (firstLoad) render();
       try {
         const [libraryRes, dashboardRes, jobsRes, diagnosticsRes, sessionRes] = await Promise.all([
           fetch(`/library?user_id=${encodeURIComponent(USER_ID)}`),
@@ -2479,7 +2498,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       }
       state.loading = false;
       scheduleStatusPolling();
-      render();
+      // Background refreshes must never yank the UI out from under the user:
+      // skip the re-render while they are typing, selecting, or in a sheet/player.
+      const typing = document.activeElement && document.activeElement.id === 'deepSearchInput' && state.magicQuery.trim();
+      const busy = !firstLoad && (state.selecting || typing
+        || actionSheet.classList.contains('visible')
+        || miniPlayer.classList.contains('visible'));
+      if (!busy) render();
       loadFolders();
     }
     function scheduleStatusPolling() {

@@ -815,7 +815,21 @@ def load_dashboard_status(user_id: str | None = None) -> dict:
         last_updated = datetime.fromtimestamp(raw_output_path.stat().st_mtime).isoformat(timespec="seconds")
     completed_count = len([row for row in rows if row.get("status") == "completed"])
     failed_count = len([row for row in rows if row.get("status") == "failed"])
-    pending_count = len(rows) - completed_count - failed_count
+    # "Waiting" must reflect reality: only reels with a live queued/running job.
+    # The old formula (total - completed - failed) counted reels stuck in any
+    # intermediate status forever, so the app claimed "4 reels waiting" right
+    # after a single send.
+    pending_query = (
+        "SELECT COUNT(DISTINCT reel_id) AS n FROM processing_jobs "
+        "WHERE status IN ('pending', 'running')"
+    )
+    pending_params: list = []
+    if user_id:
+        pending_query += " AND user_id = ?"
+        pending_params.append(user_id)
+    with get_connection() as connection:
+        pending_row = connection.execute(pending_query, pending_params).fetchone()
+        pending_count = int(pending_row["n"] if pending_row else 0)
     diagnostics = load_reel_processing_diagnostics(user_id=user_id)
     transcript_success_count = sum(1 for row in diagnostics if row.get("transcript_present"))
     visual_success_count = sum(1 for row in diagnostics if row.get("visual_present"))
