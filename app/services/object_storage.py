@@ -20,13 +20,18 @@ def _normalized_endpoint() -> str:
 def _r2_client():
     if not settings.r2_enabled:
         return None
-    return boto3.client(
-        "s3",
-        endpoint_url=_normalized_endpoint(),
-        aws_access_key_id=settings.r2_access_key_id,
-        aws_secret_access_key=settings.r2_secret_access_key,
-        region_name="auto",
-    )
+    try:
+        return boto3.client(
+            "s3",
+            endpoint_url=_normalized_endpoint(),
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            region_name="auto",
+        )
+    except Exception:
+        # Malformed credentials/endpoint (e.g. placeholder .env values) must
+        # degrade to "R2 off", not crash every media-URL builder that asks.
+        return None
 
 
 def r2_is_enabled() -> bool:
@@ -44,6 +49,30 @@ def upload_file(local_path: Path, object_key: str, content_type: str | None = No
 
     client.upload_file(str(local_path), settings.r2_bucket_name, object_key, ExtraArgs=extra_args)
     return True
+
+
+def object_exists(object_key: str) -> bool:
+    client = _r2_client()
+    if client is None:
+        return False
+    try:
+        client.head_object(Bucket=settings.r2_bucket_name, Key=object_key)
+        return True
+    except Exception:
+        return False
+
+
+def download_file(object_key: str, local_path: Path) -> bool:
+    client = _r2_client()
+    if client is None:
+        return False
+    try:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(settings.r2_bucket_name, object_key, str(local_path))
+        return local_path.exists()
+    except Exception:
+        local_path.unlink(missing_ok=True)
+        return False
 
 
 def presigned_get_url(object_key: str, expires_in: int = 3600) -> str:

@@ -312,13 +312,45 @@ def start_worker_if_needed() -> bool:
     if is_worker_running():
         return False
 
+    # Inherit stdout/stderr so worker + processor output lands in the host's
+    # logs (Render Logs tab) instead of vanishing into DEVNULL.
     subprocess.Popen(
         [sys.executable, str(settings.worker_script)],
         cwd=str(settings.worker_script.parent.parent.parent),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
     return True
+
+
+def maybe_spawn_media_repair() -> bool:
+    """Spawn the one-shot thumbnail repair, but only when the queue is idle.
+
+    Idle-gating means the repair's cv2/boto3/download memory never stacks on
+    top of a running processor inside the 512MB instance. The repair process
+    is self-guarding (maintenance flag + its own lock), so calling this every
+    janitor tick is safe and becomes a cheap no-op once the pass completes.
+    """
+    try:
+        from app.workers.repair_media import repair_flag_done
+
+        if repair_flag_done():
+            return False
+        if is_worker_running():
+            return False
+        with get_connection() as connection:
+            busy = connection.execute(
+                "SELECT COUNT(*) FROM processing_jobs WHERE status IN ('pending', 'running')"
+            ).fetchone()[0]
+        if busy:
+            return False
+        repair_script = settings.worker_script.parent / "repair_media.py"
+        subprocess.Popen(
+            [sys.executable, str(repair_script)],
+            cwd=str(settings.worker_script.parent.parent.parent),
+        )
+        return True
+    except Exception as exc:
+        print(f"[jobs] media repair spawn failed: {exc}", flush=True)
+        return False
 
 
 def recover_orphaned_jobs() -> int:

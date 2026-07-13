@@ -49,9 +49,10 @@ def _queue_janitor_loop():
     time.sleep(20)
     while True:
         try:
-            from app.services.jobs import ensure_background_progress
+            from app.services.jobs import ensure_background_progress, maybe_spawn_media_repair
 
             ensure_background_progress()
+            maybe_spawn_media_repair()
         except Exception as exc:
             print(f"[janitor] pass failed: {exc}", flush=True)
         time.sleep(150)
