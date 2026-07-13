@@ -1,10 +1,12 @@
-import yt_dlp
 import re
 import os
 import json
 import time
-import pandas as pd
 from pathlib import Path
+
+# NOTE: yt_dlp and pandas are imported lazily inside the functions that use
+# them — together they add ~70MB RSS, which matters on the 512MB Render box
+# where this module loads into the per-reel extraction subprocess.
 from urllib.parse import urlparse
 from api_config import get_openai_client
 
@@ -72,6 +74,8 @@ def get_shortcode_from_url(url):
 # ----------------------------
 def extract_metadata(url):
     try:
+        import yt_dlp
+
         with yt_dlp.YoutubeDL({'quiet': True, 'skip_download': True}) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -164,6 +168,8 @@ def download_reel(url, media_kind="video"):
         'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
         'best',
     ]
+
+    import yt_dlp
 
     for index, fmt in enumerate(candidate_formats, start=1):
         ydl_opts = {
@@ -327,6 +333,8 @@ def process_reel(url, refresh_transcript=True):
 # BUILD DATASET
 # ----------------------------
 def build_dataset():
+    import pandas as pd
+
     df = pd.read_csv(INPUT_CSV)   # url, category
 
     rows = []
