@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 
 from app.schemas import ReelRecord
 from app.services.auth import ensure_user_access, require_user
-from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, start_worker_if_needed
+from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, ensure_background_progress
 from app.services.reel_ingest import (
     delete_reel,
     get_reel_by_id,
@@ -66,7 +66,7 @@ def retry_unsorted_reels(
         except Exception as exc:
             errors.append({"id": reel_id, "error": str(exc)[:200]})
     if requeued:
-        start_worker_if_needed()
+        ensure_background_progress()
     return {
         "ok": True,
         "user_id": resolved_user_id,
@@ -217,7 +217,7 @@ def remove_reel(reel_id: str, request: Request):
     job = None
     if deleted:
         job = enqueue_library_rebuild_job(reel["user_id"])
-        start_worker_if_needed()
+        ensure_background_progress()
     return {
         "ok": deleted,
         "deleted": reel_id,
@@ -243,7 +243,7 @@ def rebuild_library(request: Request, user_id: Optional[str] = Query(default=Non
     require_user(request)
     invalidated = invalidate_user_library_outputs(resolved_user_id)
     job = enqueue_library_rebuild_job(resolved_user_id)
-    start_worker_if_needed()
+    ensure_background_progress()
     return {
         "ok": True,
         "user_id": resolved_user_id,
@@ -263,7 +263,7 @@ def retry_reel(reel_id: str, request: Request):
     ensure_user_access(request, reel["user_id"])
     reset = reset_reel_for_retry(reel_id)
     job = enqueue_reel_job(reel_id, user_id=reel["user_id"])
-    start_worker_if_needed()
+    ensure_background_progress()
     return {
         "ok": True,
         "id": reel_id,

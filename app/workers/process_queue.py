@@ -1,3 +1,5 @@
+import os
+import signal
 import subprocess
 import sys
 import traceback
@@ -31,61 +33,69 @@ def failure_summary_for_reel(reel_id: str) -> str:
     return "Reel processor returned failed output"
 
 
-def process_job(job: dict):
+def run_processor(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run the processor in its own process group so a timeout kills the whole
+    tree. A plain subprocess.run timeout only kills the direct child, leaving
+    yt-dlp/ffmpeg grandchildren (spawned without their own timeout) running."""
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(settings.processor_script.parent),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
-        if job["job_type"] == "rebuild_library":
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(settings.processor_script),
-                    "--user-id",
-                    job["user_id"],
-                ],
-                cwd=str(settings.processor_script.parent),
-                capture_output=True,
-                text=True,
-                timeout=settings.processor_timeout_seconds,
-            )
-        else:
+        stdout, stderr = process.communicate(timeout=settings.processor_timeout_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            process.kill()
+        try:
+            process.communicate(timeout=30)
+        except Exception:
+            pass
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def process_job(job: dict):
+    claim_token = job.get("started_at") or None
+    try:
+        cmd = [
+            sys.executable,
+            str(settings.processor_script),
+            "--user-id",
+            job["user_id"],
+        ]
+        if job["job_type"] != "rebuild_library":
             reel = get_reel_by_id(job["reel_id"])
             if not reel:
-                fail_job(job["id"], "Missing reel for job")
+                fail_job(job["id"], "Missing reel for job", claim_token)
                 return
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(settings.processor_script),
-                    "--user-id",
-                    job["user_id"],
-                    "--only-url",
-                    reel["url"],
-                ],
-                cwd=str(settings.processor_script.parent),
-                capture_output=True,
-                text=True,
-                timeout=settings.processor_timeout_seconds,
-            )
+            cmd += ["--only-url", reel["url"]]
+        result = run_processor(cmd)
     except subprocess.TimeoutExpired:
-        fail_job(job["id"], f"Processor timed out after {settings.processor_timeout_seconds}s")
+        fail_job(job["id"], f"Processor timed out after {settings.processor_timeout_seconds}s", claim_token)
         return
     except Exception as exc:
         detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-        fail_job(job["id"], f"Worker error: {detail}")
+        fail_job(job["id"], f"Worker error: {detail}", claim_token)
         return
 
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "Processor failed"
-        fail_job(job["id"], message)
+        fail_job(job["id"], message, claim_token)
         return
 
     if job["job_type"] == "process_reel":
         reel = get_reel_by_id(job["reel_id"])
         if not reel:
-            fail_job(job["id"], "Missing reel after processing")
+            fail_job(job["id"], "Missing reel after processing", claim_token)
             return
         if reel.get("status") != "completed":
-            fail_job(job["id"], failure_summary_for_reel(job["reel_id"]))
+            fail_job(job["id"], failure_summary_for_reel(job["reel_id"]), claim_token)
             return
 
     try:
@@ -107,7 +117,7 @@ def process_job(job: dict):
         except Exception:
             pass
 
-    complete_job(job["id"])
+    complete_job(job["id"], claim_token)
 
 
 def main():

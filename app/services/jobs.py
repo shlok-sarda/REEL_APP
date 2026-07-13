@@ -1,17 +1,82 @@
 import os
 import subprocess
 import sys
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from app.config import settings
 from app.db.database import get_connection
 
-MAX_PROCESS_REEL_ATTEMPTS = 2
+MAX_PROCESS_REEL_ATTEMPTS = 3
 MAX_REBUILD_ATTEMPTS = 2
+
+# Slack on top of the hard processor timeout before a 'running' job is treated
+# as dead regardless of what the worker lock file claims.
+STALE_RUNNING_GRACE_SECONDS = 600
 
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _stale_running_cutoff() -> str:
+    grace = settings.processor_timeout_seconds + STALE_RUNNING_GRACE_SECONDS
+    return (datetime.now() - timedelta(seconds=grace)).isoformat(timespec="seconds")
+
+
+def _fail_exhausted_jobs(connection, status: str, stale_cutoff: str | None = None) -> None:
+    """Flip jobs of the given status that are out of attempts to 'failed'."""
+    for job_type, max_attempts, label in (
+        ("process_reel", MAX_PROCESS_REEL_ATTEMPTS, "Reel processing interrupted repeatedly"),
+        ("rebuild_library", MAX_REBUILD_ATTEMPTS, "Library rebuild interrupted repeatedly"),
+    ):
+        query = """
+            UPDATE processing_jobs
+            SET status = 'failed',
+                error_message = CASE
+                    WHEN error_message = '' THEN ?
+                    ELSE error_message
+                END,
+                finished_at = ?
+            WHERE status = ?
+              AND job_type = ?
+              AND attempts >= ?
+        """
+        params: list = [label, _now(), status, job_type, max_attempts]
+        if stale_cutoff is not None:
+            query += " AND started_at < ?"
+            params.append(stale_cutoff)
+        connection.execute(query, params)
+
+
+def recover_stale_running_jobs(connection) -> int:
+    """Requeue 'running' jobs whose subprocess must be long dead.
+
+    Every job run is hard-capped at processor_timeout_seconds, so a job still
+    marked 'running' well past that cutoff is an orphan — its worker was killed
+    mid-job (deploy/restart/OOM) or a stale lock file is blocking the normal
+    recovery path. This check is purely time-based and deliberately ignores the
+    worker lock: the one live worker can only ever hold a claim younger than
+    the cutoff, so requeueing older claims can never touch an in-flight job.
+    """
+    cutoff = _stale_running_cutoff()
+    _fail_exhausted_jobs(connection, "running", stale_cutoff=cutoff)
+    cursor = connection.execute(
+        """
+        UPDATE processing_jobs
+        SET status = 'pending',
+            started_at = '',
+            error_message = CASE
+                WHEN error_message = '' THEN 'Recovered after stalled run'
+                ELSE error_message
+            END
+        WHERE status = 'running'
+          AND started_at < ?
+        """,
+        (cutoff,),
+    )
+    return cursor.rowcount
 
 
 def enqueue_reel_job(reel_id: str, user_id: str = "default", job_type: str = "process_reel") -> dict:
@@ -109,36 +174,10 @@ def job_counts(user_id: str | None = None) -> dict:
 
 def claim_next_job() -> dict | None:
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'failed',
-                error_message = CASE
-                    WHEN error_message = '' THEN 'Reel processing interrupted repeatedly'
-                    ELSE error_message
-                END,
-                finished_at = ?
-            WHERE status = 'pending'
-              AND job_type = 'process_reel'
-              AND attempts >= ?
-            """,
-            (_now(), MAX_PROCESS_REEL_ATTEMPTS),
-        )
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'failed',
-                error_message = CASE
-                    WHEN error_message = '' THEN 'Library rebuild interrupted repeatedly'
-                    ELSE error_message
-                END,
-                finished_at = ?
-            WHERE status = 'pending'
-              AND job_type = 'rebuild_library'
-              AND attempts >= ?
-            """,
-            (_now(), MAX_REBUILD_ATTEMPTS),
-        )
+        # Self-heal before claiming: requeue orphaned 'running' rows left behind
+        # by a worker that died mid-job, then retire jobs that are out of attempts.
+        recover_stale_running_jobs(connection)
+        _fail_exhausted_jobs(connection, "pending")
         row = connection.execute(
             """
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
@@ -176,45 +215,97 @@ def claim_next_job() -> dict | None:
     return dict(updated)
 
 
-def complete_job(job_id: int) -> None:
+def complete_job(job_id: int, claim_started_at: str | None = None) -> None:
+    query = """
+        UPDATE processing_jobs
+        SET status = 'completed', finished_at = ?
+        WHERE id = ?
+    """
+    params: list = [_now(), job_id]
+    if claim_started_at:
+        # Only finalize our own claim: if the job was requeued and re-claimed
+        # after this worker stalled, leave the newer claim alone.
+        query += " AND status = 'running' AND started_at = ?"
+        params.append(claim_started_at)
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'completed', finished_at = ?
-            WHERE id = ?
-            """,
-            (_now(), job_id),
-        )
+        connection.execute(query, params)
 
 
-def fail_job(job_id: int, error_message: str) -> None:
+def fail_job(job_id: int, error_message: str, claim_started_at: str | None = None) -> None:
+    query = """
+        UPDATE processing_jobs
+        SET status = 'failed', error_message = ?, finished_at = ?
+        WHERE id = ?
+    """
+    params: list = [(error_message or "")[:500], _now(), job_id]
+    if claim_started_at:
+        query += " AND status = 'running' AND started_at = ?"
+        params.append(claim_started_at)
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'failed', error_message = ?, finished_at = ?
-            WHERE id = ?
-            """,
-            ((error_message or "")[:500], _now(), job_id),
+        connection.execute(query, params)
+
+
+def _pid_is_worker(pid: int) -> bool:
+    """Check the process is actually our queue worker, not a reused PID.
+
+    After a container restart the lock file survives (storage dir is on the
+    persistent disk) while its PID gets recycled by unrelated processes, which
+    made the old bare os.kill(pid, 0) check report a phantom worker forever —
+    blocking both orphan recovery and new worker startup.
+    """
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        # No such process — or owned by another user, which our worker never is.
+        return False
+
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    if Path("/proc").is_dir():  # Linux (Render)
+        try:
+            cmdline = proc_cmdline.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            return False
+        return "process_queue" in cmdline
+
+    try:  # macOS (local dev)
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
+    except Exception:
+        # Can't verify: assume alive so we never spawn a duplicate worker.
+        # Stale-time recovery still unfreezes jobs even if this is wrong.
+        return True
+    if result.returncode != 0:
+        return False
+    return "process_queue" in result.stdout
 
 
 def is_worker_running() -> bool:
-    if not settings.worker_lock_file.exists():
+    lock_file = settings.worker_lock_file
+    if not lock_file.exists():
         return False
     try:
-        pid = int(settings.worker_lock_file.read_text().strip())
+        pid = int(lock_file.read_text().strip())
     except Exception:
-        settings.worker_lock_file.unlink(missing_ok=True)
+        # Unreadable or empty. A worker that just created the lock may not have
+        # written its PID yet, so give a fresh file a grace window instead of
+        # deleting a live worker's lock out from under it.
+        try:
+            is_fresh = (time.time() - lock_file.stat().st_mtime) < 30
+        except OSError:
+            return False
+        if is_fresh:
+            return True
+        lock_file.unlink(missing_ok=True)
         return False
 
-    try:
-        os.kill(pid, 0)
+    if _pid_is_worker(pid):
         return True
-    except OSError:
-        settings.worker_lock_file.unlink(missing_ok=True)
-        return False
+    lock_file.unlink(missing_ok=True)
+    return False
 
 
 def start_worker_if_needed() -> bool:
@@ -231,54 +322,27 @@ def start_worker_if_needed() -> bool:
 
 
 def recover_orphaned_jobs() -> int:
-    if is_worker_running():
-        return 0
+    worker_alive = is_worker_running()
     with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'failed',
-                error_message = CASE
-                    WHEN error_message = '' THEN 'Reel processing interrupted repeatedly'
-                    ELSE error_message
-                END,
-                finished_at = ?
-            WHERE status = 'running'
-              AND job_type = 'process_reel'
-              AND attempts >= ?
-            """,
-            (_now(), MAX_PROCESS_REEL_ATTEMPTS),
-        )
-        connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'failed',
-                error_message = CASE
-                    WHEN error_message = '' THEN 'Library rebuild interrupted repeatedly'
-                    ELSE error_message
-                END,
-                finished_at = ?
-            WHERE status = 'running'
-              AND job_type = 'rebuild_library'
-              AND attempts >= ?
-            """,
-            (_now(), MAX_REBUILD_ATTEMPTS),
-        )
-        cursor = connection.execute(
-            """
-            UPDATE processing_jobs
-            SET status = 'pending', error_message = CASE
-                WHEN error_message = '' THEN 'Recovered after worker interruption'
-                ELSE error_message
-            END
-            WHERE status = 'running'
-              AND NOT (job_type = 'process_reel' AND attempts >= ?)
-              AND NOT (job_type = 'rebuild_library' AND attempts >= ?)
-            """
-            ,
-            (MAX_PROCESS_REEL_ATTEMPTS, MAX_REBUILD_ATTEMPTS),
-        )
-        recovered = cursor.rowcount
+        # Always requeue jobs stuck 'running' past the hard timeout — this is
+        # safe even with a live worker (its current claim is always fresh) and
+        # is what unfreezes the queue when the lock check is wrong.
+        recovered = recover_stale_running_jobs(connection)
+        if not worker_alive:
+            _fail_exhausted_jobs(connection, "running")
+            cursor = connection.execute(
+                """
+                UPDATE processing_jobs
+                SET status = 'pending',
+                    started_at = '',
+                    error_message = CASE
+                        WHEN error_message = '' THEN 'Recovered after worker interruption'
+                        ELSE error_message
+                    END
+                WHERE status = 'running'
+                """
+            )
+            recovered += cursor.rowcount
         reconciled = reconcile_stuck_reels(connection)
     if reconciled:
         # Keep the CSV mirror in sync when reels leave the non-terminal state.
@@ -302,10 +366,8 @@ def reconcile_stuck_reels(connection) -> int:
     dashboard counts any reel that is not 'completed'/'failed' as "waiting",
     which is the "always N reels waiting" bug. Here we reconcile only reels that
     have a failed process_reel job and no still-active (pending/running) job, so
-    freshly-ingested reels awaiting their first run are never touched.
-
-    Must be called with the worker known to be idle (see recover_orphaned_jobs),
-    so a reel legitimately being processed right now is never marked failed.
+    freshly-ingested reels awaiting their first run — and reels a live worker is
+    processing right now (their job is 'running') — are never touched.
     """
     cursor = connection.execute(
         """

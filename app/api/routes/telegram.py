@@ -3,7 +3,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 
 from app.schemas import TelegramIngestRequest, TelegramIngestResponse
 from app.services.auth import get_user_by_telegram_user_id
-from app.services.jobs import enqueue_reel_job, start_worker_if_needed
+from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
@@ -36,7 +36,7 @@ def telegram_ingest(payload: TelegramIngestRequest, x_ingest_token: str = Header
 
     reel = append_reel(payload.url, user_id=resolved_user_id or "default", source=payload.source or "telegram")
     job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
-    start_worker_if_needed()
+    ensure_background_progress()
     return TelegramIngestResponse(
         id=reel["id"],
         user_id=reel["user_id"],

@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from app.config import settings
 from app.db.database import get_connection
 from app.services.auth import complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
-from app.services.jobs import enqueue_reel_job, start_worker_if_needed
+from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
@@ -201,7 +201,7 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             )
 
     if linked_accounts or reels_saved:
-        start_worker_if_needed()
+        ensure_background_progress()
 
     return JSONResponse(
         {
