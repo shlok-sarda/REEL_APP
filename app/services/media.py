@@ -1,9 +1,7 @@
 import logging
 from pathlib import Path
 
-import cv2
 import requests
-import yt_dlp
 
 from app.config import settings
 from app.services.object_storage import upload_file
@@ -99,6 +97,10 @@ def _find_downloaded_video(reel_id: str) -> Path | None:
 
 
 def _make_thumbnail(video_path: Path, reel_id: str) -> Path | None:
+    # Lazy import: opencv costs ~60-90MB RSS, only load it when a thumbnail
+    # is actually being generated (keeps the web process lean on Render).
+    import cv2
+
     thumbnail_path = settings.thumbnails_dir / f"{reel_id}.jpg"
     cap = cv2.VideoCapture(str(video_path))
     success, frame = cap.read()
@@ -181,6 +183,10 @@ def ensure_reel_media(url: str) -> dict:
         # requests since ~mid-2026, but kept for other sources / local cookies).
         target_template = settings.videos_dir / f"{reel_id}.%(ext)s"
         try:
+            # Lazy import: yt-dlp pulls in ~1000 extractor modules; only pay
+            # that memory cost on the rare fallback download path.
+            import yt_dlp
+
             with yt_dlp.YoutubeDL(
                 {
                     "outtmpl": str(target_template),
