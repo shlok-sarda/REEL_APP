@@ -31,8 +31,15 @@ def retry_unsorted_reels(
     request: Request,
     user_id: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=300),
+    dry_run: bool = Query(default=False),
 ):
-    """Requeue every reel that failed or only produced generic/unsorted items."""
+    """Repair pass: requeue every reel whose extraction is broken or incomplete.
+
+    Catches: failed reels, reels with no items at all, generic/unsorted
+    categories, half-extracted reels (no non-empty item name anywhere, or the
+    pipeline's "could not be processed" placeholder summary), and completed
+    reels missing their deep-search document. dry_run=1 returns the count
+    without requeuing, so the UI can confirm before spending reprocess money."""
     resolved_user_id = ensure_user_access(request, user_id or "")
     placeholders = ",".join("?" for _ in GENERIC_CATEGORY_LABELS)
     from app.db.database import get_connection
@@ -49,12 +56,29 @@ def retry_unsorted_reels(
                 r.status = 'failed'
                 OR ri.id IS NULL
                 OR LOWER(TRIM(ri.primary_category)) IN ({placeholders})
+                OR NOT EXISTS (
+                    SELECT 1 FROM reel_items ri2
+                    WHERE ri2.reel_id = r.id AND TRIM(ri2.item_name) != ''
+                )
+                OR LOWER(ri.summary) LIKE '%could not be processed%'
+                OR ri.summary LIKE 'Processing error:%'
+                OR NOT EXISTS (
+                    SELECT 1 FROM deep_search_documents d WHERE d.reel_id = r.id
+                )
               )
             ORDER BY r.received_at DESC
             LIMIT ?
             """,
             (resolved_user_id, *GENERIC_CATEGORY_LABELS, limit),
         ).fetchall()
+    if dry_run:
+        return {
+            "ok": True,
+            "user_id": resolved_user_id,
+            "dry_run": True,
+            "broken_count": len(rows),
+            "reel_ids": [row["id"] for row in rows[:20]],
+        }
     requeued = []
     errors = []
     for row in rows:

@@ -2081,7 +2081,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
             <div class="set-row">Sync status <span class="value">${escapeHtml(pipelineStatus().title)}</span></div>
             <div class="set-row">Pending reels <span class="value">${state.dashboard.pending_url_count || 0}</span></div>
             <div class="set-row">Failed reels <span class="value">${state.dashboard.failed_url_count || 0}</span></div>
-            ${state.session?.authenticated ? '<button class="set-row action" type="button" id="retryUnsortedButton">Reprocess Unsorted &amp; failed reels</button>' : ''}
+            ${state.session?.authenticated ? '<button class="set-row action" type="button" id="retryUnsortedButton">Repair broken &amp; unsorted reels</button>' : ''}
           </div>
         </section>
         <section class="set-section">
@@ -2106,18 +2106,35 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('igLinkDoneButton')?.addEventListener('click', loadData);
     }
     async function retryUnsorted() {
-      const confirmed = window.confirm(
-        'Reprocess every Unsorted or failed reel?\\n\\n' +
-        'Each reel will be downloaded and categorized again. If the AI key on the server is not working, they will come back as Unsorted again — fix the key first.'
-      );
-      if (!confirmed) return;
       const button = document.getElementById('retryUnsortedButton');
-      if (button) { button.disabled = true; button.textContent = 'Requeuing…'; }
+      if (button) { button.disabled = true; button.textContent = 'Checking your library…'; }
+      let broken = -1;
+      try {
+        const probe = await fetch(`/reels/retry-unsorted?user_id=${encodeURIComponent(USER_ID)}&dry_run=1`, { method: 'POST', credentials: 'same-origin' });
+        const found = await probe.json();
+        if (probe.ok) broken = Number(found.broken_count || 0);
+      } catch (e) {}
+      if (broken === 0) {
+        window.alert('All reels look fully extracted — nothing to repair. ✓');
+        if (button) { button.disabled = false; button.textContent = 'Repair broken & unsorted reels'; }
+        return;
+      }
+      const countLine = broken > 0 ? `${broken} reel${broken === 1 ? '' : 's'} with broken or incomplete extraction found.\\n\\n` : '';
+      const confirmed = window.confirm(
+        countLine +
+        'Reprocess them now? Each reel is downloaded and categorized again (costs a little per reel). ' +
+        'If the AI key on the server is not working, they will come back broken — fix the key first.'
+      );
+      if (!confirmed) {
+        if (button) { button.disabled = false; button.textContent = 'Repair broken & unsorted reels'; }
+        return;
+      }
+      if (button) { button.textContent = 'Requeuing…'; }
       try {
         const response = await fetch(`/reels/retry-unsorted?user_id=${encodeURIComponent(USER_ID)}`, { method: 'POST', credentials: 'same-origin' });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Requeue failed');
-        window.alert(`Requeued ${payload.requeued_count} reels for reprocessing.` + (payload.error_count ? ` ${payload.error_count} could not be requeued.` : ''));
+        window.alert(`Requeued ${payload.requeued_count} reels for reprocessing. Watch progress in Activity (bell icon).` + (payload.error_count ? ` ${payload.error_count} could not be requeued.` : ''));
       } catch (error) {
         window.alert(error.message || 'Could not requeue reels. Please try again.');
       }
