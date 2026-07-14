@@ -191,11 +191,17 @@ def job_counts(user_id: str | None = None) -> dict:
 
 
 def claim_next_job() -> dict | None:
+    # Self-heal before claiming: requeue orphaned 'running' rows left behind by
+    # a worker that died mid-job, then retire jobs that are out of attempts.
+    # Isolated from the claim itself — a cleanup failure (e.g. legacy schema
+    # constraints) must degrade to a log line, never crash the worker.
+    try:
+        with get_connection() as connection:
+            recover_stale_running_jobs(connection)
+            _fail_exhausted_jobs(connection, "pending")
+    except Exception as exc:
+        print(f"[jobs] pre-claim cleanup failed: {exc}", flush=True)
     with get_connection() as connection:
-        # Self-heal before claiming: requeue orphaned 'running' rows left behind
-        # by a worker that died mid-job, then retire jobs that are out of attempts.
-        recover_stale_running_jobs(connection)
-        _fail_exhausted_jobs(connection, "pending")
         row = connection.execute(
             """
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at

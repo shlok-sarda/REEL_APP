@@ -115,6 +115,11 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(reel_item_id) REFERENCES reel_items(id)
     )
     """,
+    # NOTE: no UNIQUE(reel_id, job_type, status) here — that constraint meant a
+    # reel could never have a second 'failed' row, so recovery status flips and
+    # claim-time cleanup raised IntegrityError once history accumulated (this
+    # crashed the production worker on every claim and rolled back recovery).
+    # Active-job dedup is enforced by enqueue_reel_job's existing-row check.
     """
     CREATE TABLE IF NOT EXISTS processing_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,8 +131,7 @@ SCHEMA_STATEMENTS = [
         error_message TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         started_at TEXT NOT NULL DEFAULT '',
-        finished_at TEXT NOT NULL DEFAULT '',
-        UNIQUE(reel_id, job_type, status)
+        finished_at TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -341,10 +345,58 @@ REEL_EXTRA_COLUMNS = {
 }
 
 
+PROCESSING_JOBS_COLUMNS = (
+    "id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at"
+)
+
+
+def _migrate_processing_jobs_unique_constraint(connection) -> None:
+    """Rebuild processing_jobs if it still carries UNIQUE(reel_id, job_type, status).
+
+    The constraint lives in the table DDL (sqlite autoindex), so it can't be
+    dropped — the table must be rebuilt. Written to be resumable: if a previous
+    attempt renamed the old table but died before copying, the next boot
+    finishes the copy instead of losing rows.
+    """
+    legacy = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'processing_jobs_legacy_unique'"
+    ).fetchone()
+    if not legacy:
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'processing_jobs'"
+        ).fetchone()
+        if not row or "UNIQUE" not in (row["sql"] or "").upper():
+            return
+        connection.execute("ALTER TABLE processing_jobs RENAME TO processing_jobs_legacy_unique")
+        create_statement = next(s for s in SCHEMA_STATEMENTS if "processing_jobs" in s)
+        connection.execute(create_statement)
+    connection.execute(
+        f"""
+        INSERT OR IGNORE INTO processing_jobs ({PROCESSING_JOBS_COLUMNS})
+        SELECT {PROCESSING_JOBS_COLUMNS} FROM processing_jobs_legacy_unique
+        """
+    )
+    connection.execute("DROP TABLE processing_jobs_legacy_unique")
+    # Hygiene while we're here: tonight's recovery may have left duplicate
+    # pending rows for the same reel; keep the oldest of each group.
+    connection.execute(
+        """
+        DELETE FROM processing_jobs
+        WHERE status = 'pending'
+          AND id NOT IN (
+              SELECT MIN(id) FROM processing_jobs
+              WHERE status = 'pending'
+              GROUP BY reel_id, job_type
+          )
+        """
+    )
+
+
 def create_tables():
     with get_connection() as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        _migrate_processing_jobs_unique_constraint(connection)
         existing_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(users)").fetchall()
