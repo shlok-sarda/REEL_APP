@@ -95,6 +95,11 @@ def _run_inline_fix() -> dict:
     logs, so this exposes each stage's rowcount/exception in the response.
     Everything here is idempotent maintenance the janitor already attempts.
     """
+    import subprocess
+    import sys
+    import time
+    from datetime import datetime, timedelta
+
     report: dict = {}
     from app.db.database import get_connection
 
@@ -104,18 +109,44 @@ def _run_inline_fix() -> dict:
         report["worker_alive"] = is_worker_running()
     except Exception as exc:
         report["worker_alive_error"] = repr(exc)[:300]
+    # Stage 1: the real service-path recovery, with its error surfaced.
     try:
+        from app.services.jobs import recover_orphaned_jobs
+
+        report["service_recovered"] = recover_orphaned_jobs()
+    except Exception as exc:
+        report["service_recover_error"] = repr(exc)[:300]
+    # Stage 2: raw fallback requeue — stale claims only, so a live worker's
+    # in-flight job is never yanked into double processing.
+    try:
+        stale_cutoff = (datetime.now() - timedelta(seconds=1500)).isoformat(timespec="seconds")
         with get_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE processing_jobs
                 SET status = 'pending', started_at = ''
                 WHERE status = 'running'
-                """
+                  AND started_at < ?
+                """,
+                (stale_cutoff,),
             )
-            report["raw_requeued"] = cursor.rowcount
+            report["raw_requeued_stale"] = cursor.rowcount
     except Exception as exc:
         report["raw_requeue_error"] = repr(exc)[:300]
+    # Stage 3: can the worker module even be imported in this environment?
+    try:
+        repo_root = settings.worker_script.parent.parent.parent
+        probe = subprocess.run(
+            [sys.executable, "-c", "import app.workers.process_queue; print('import_ok')"],
+            capture_output=True,
+            text=True,
+            timeout=45,
+            cwd=str(repo_root),
+        )
+        report["worker_import"] = (probe.stdout.strip() + " " + probe.stderr.strip())[-500:].strip()
+    except Exception as exc:
+        report["worker_import_error"] = repr(exc)[:300]
+    # Stage 4: kick the janitor, give a spawned worker a moment, then inspect.
     try:
         from app.services.jobs import ensure_background_progress
 
@@ -123,7 +154,9 @@ def _run_inline_fix() -> dict:
         report["ensure_background_progress"] = "ok"
     except Exception as exc:
         report["ensure_error"] = repr(exc)[:300]
+    time.sleep(3)
     try:
+        report["lock_after"] = settings.worker_lock_file.exists()
         with get_connection() as connection:
             rows = connection.execute(
                 "SELECT status, COUNT(*) AS n FROM processing_jobs GROUP BY status"
