@@ -225,6 +225,23 @@ def write_input_urls(urls, output_path):
             writer.writerow([url])
 
 
+class StepFailure(RuntimeError):
+    """Step failure whose MESSAGE carries the child's stderr tail.
+
+    A bare CalledProcessError stringifies to just "Command ... returned
+    non-zero exit status 1", so when it crashes this wrapper the stored job
+    error shows a useless traceback and the actual cause (e.g. an OpenAI
+    quota error inside the step) is invisible. Keeps stderr/output/stdout
+    attributes for handlers that read them.
+    """
+
+    def __init__(self, message, stderr="", stdout=""):
+        super().__init__(message)
+        self.stderr = stderr
+        self.output = stdout
+        self.stdout = stdout
+
+
 def run_step(cmd):
     result = subprocess.run(
         [str(part) for part in cmd],
@@ -234,11 +251,12 @@ def run_step(cmd):
         text=True,
     )
     if result.returncode != 0:
-        raise subprocess.CalledProcessError(
-            result.returncode,
-            result.args,
-            output=result.stdout,
-            stderr=result.stderr,
+        detail = (result.stderr or "").strip() or (result.stdout or "").strip()
+        script_name = Path(str(cmd[1])).name
+        raise StepFailure(
+            f"{script_name} failed (exit {result.returncode}): {detail[-350:] or 'no output'}",
+            stderr=result.stderr or "",
+            stdout=result.stdout or "",
         )
     return result
 
@@ -366,7 +384,7 @@ def main(user_id="default", only_urls=None):
         processor_failure_message = ""
         try:
             run_step([sys.executable, extraction_script(), "--input", pending_input, "--output", pending_output])
-        except subprocess.CalledProcessError as exc:
+        except (subprocess.CalledProcessError, StepFailure) as exc:
             finale_failed = True
             stderr = getattr(exc, "stderr", "") or ""
             stdout = getattr(exc, "output", "") or getattr(exc, "stdout", "") or ""

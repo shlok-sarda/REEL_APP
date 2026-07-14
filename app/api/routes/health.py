@@ -171,6 +171,23 @@ def _run_inline_fix() -> dict:
             report["worker_run"] = f"still_running_at_25s {text_out[-600:].strip()}"
     except Exception as exc:
         report["worker_run_error"] = repr(exc)[:300]
+    # Stage 3.5: is the OpenAI key alive and funded? A dead key/quota makes
+    # every reel fail at the first step that calls the API. One 1-token
+    # embedding per manual fix=1 invocation — negligible cost.
+    try:
+        import os as _os
+
+        from openai import OpenAI
+
+        _key = _os.getenv("OPENAI_API_KEY", "").strip()
+        if not _key:
+            report["openai_probe"] = "NO KEY IN ENV"
+        else:
+            _client = OpenAI(api_key=_key, timeout=20, max_retries=0)
+            _client.embeddings.create(model="text-embedding-3-small", input="ping")
+            report["openai_probe"] = "ok — paid call accepted"
+    except Exception as exc:
+        report["openai_probe"] = f"FAILED: {exc}"[:300]
     # Stage 4: kick the janitor, give a spawned worker a moment, then inspect.
     try:
         from app.services.jobs import ensure_background_progress
