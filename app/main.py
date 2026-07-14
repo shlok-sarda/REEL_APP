@@ -47,7 +47,20 @@ def _queue_janitor_loop():
     work starts (important on a 512MB instance that may have just OOM'd).
     """
     time.sleep(20)
+    tick = 0
     while True:
+        try:
+            # Disk-space sweep first: on a full disk nothing else (locks, DB
+            # writes, worker spawns) can work. Every 10th tick thereafter to
+            # mop up videos left behind by processed jobs.
+            if tick % 10 == 0:
+                import subprocess
+                import sys as _sys
+
+                cleanup_script = settings.worker_script.parent / "cleanup_videos.py"
+                subprocess.Popen([_sys.executable, str(cleanup_script)])
+        except Exception as exc:
+            print(f"[janitor] cleanup spawn failed: {exc}", flush=True)
         try:
             from app.services.jobs import ensure_background_progress, maybe_spawn_media_repair
 
@@ -55,6 +68,7 @@ def _queue_janitor_loop():
             maybe_spawn_media_repair()
         except Exception as exc:
             print(f"[janitor] pass failed: {exc}", flush=True)
+        tick += 1
         time.sleep(150)
 
 

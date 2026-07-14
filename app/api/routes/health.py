@@ -35,6 +35,27 @@ def _queue_debug() -> dict:
         "processor_timeout_seconds": settings.processor_timeout_seconds,
     }
     try:
+        import shutil
+
+        usage = shutil.disk_usage(settings.storage_dir)
+        info["disk"] = {
+            "total_mb": usage.total // (1024 * 1024),
+            "free_mb": usage.free // (1024 * 1024),
+        }
+        # Distinguish "disk full" from other write failures directly.
+        from app.db.database import get_connection
+
+        with get_connection() as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS write_probe (id INTEGER PRIMARY KEY, ts TEXT)"
+            )
+            connection.execute("DELETE FROM write_probe")
+            connection.execute("INSERT INTO write_probe (ts) VALUES (?)", (info["server_now"],))
+        info["db_writable"] = True
+    except Exception as exc:
+        info["db_writable"] = False
+        info["db_write_error"] = str(exc)[:200]
+    try:
         from app.services.jobs import _pid_is_worker, _stale_cutoff_for
 
         info["stale_cutoff_process_reel"] = _stale_cutoff_for("process_reel")

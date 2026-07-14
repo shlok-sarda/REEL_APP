@@ -130,6 +130,7 @@ def repair_reel(reel: dict, redownload_budget: int) -> tuple[str, int]:
             return "restored_from_r2", 0
 
     video = _find_local_video(reel)
+    video_is_temporary = False
     if video is None and r2_is_enabled():
         for suffix in VIDEO_SUFFIXES:
             video_key = f"videos/{reel_id}{suffix}"
@@ -137,20 +138,23 @@ def repair_reel(reel: dict, redownload_budget: int) -> tuple[str, int]:
                 candidate = settings.videos_dir / f"{reel_id}{suffix}"
                 if download_file(video_key, candidate):
                     video = candidate
+                    video_is_temporary = True  # fetched only for the thumbnail
                 break
 
     if video is not None:
         from app.services.media import _make_thumbnail, _upload_media_to_r2
 
         thumbnail = _make_thumbnail(video, reel_id)
+        outcome = "regenerated_from_video" if thumbnail else "video_unreadable"
         if thumbnail:
             _set_thumbnail_path(reel_id, str(thumbnail))
             try:
                 _upload_media_to_r2(video, thumbnail)
             except Exception:
                 pass
-            return "regenerated_from_video", 0
-        return "video_unreadable", 0
+        if video_is_temporary:
+            video.unlink(missing_ok=True)  # don't refill the disk we just freed
+        return outcome, 0
 
     if redownload_budget > 0:
         from app.services.media import ensure_reel_media
