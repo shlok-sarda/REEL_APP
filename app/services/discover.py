@@ -254,6 +254,75 @@ def _extract_recipe_card(row: dict, transcript: str) -> dict | None:
     }
 
 
+def _recipe_row(conn, user_id: str, reel_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT r.id AS reel_id, r.url,
+               COALESCE(ri.item_name,'') item_name,
+               COALESCE(ri.primary_category,'') primary_category,
+               COALESCE(ri.secondary_category,'') specific_category,
+               dsd.document_json
+        FROM reels r
+        LEFT JOIN reel_items ri ON ri.reel_id = r.id
+        LEFT JOIN deep_search_documents dsd ON dsd.reel_id = r.id
+        WHERE r.user_id = ? AND r.id = ?
+        GROUP BY r.id
+        """,
+        (user_id, reel_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def reel_recipe_status(user_id: str, reel_id: str) -> dict:
+    """Per-reel recipe state, for the reel action sheet.
+    status: 'recipe' (cached card) | 'candidate' (food reel with a transcript,
+    extract on demand) | 'none' (not recipe material / confirmed not-a-recipe)."""
+    with get_connection() as conn:
+        cached = conn.execute(
+            "SELECT is_recipe, recipe_json FROM reel_recipes WHERE user_id=? AND reel_id=?",
+            (user_id, reel_id),
+        ).fetchone()
+        if cached:
+            if cached["is_recipe"]:
+                try:
+                    return {"status": "recipe", "card": json.loads(cached["recipe_json"])}
+                except Exception:
+                    return {"status": "none"}
+            return {"status": "none"}
+        row = _recipe_row(conn, user_id, reel_id)
+    if not row:
+        return {"status": "none"}
+    cat = (row["primary_category"] + " " + row["specific_category"]).lower()
+    if ("recipe" in cat or "food" in cat) and len(_transcript_of(row)) >= 120:
+        return {"status": "candidate"}
+    return {"status": "none"}
+
+
+def extract_reel_recipe(user_id: str, reel_id: str) -> dict:
+    """On-demand extraction for one reel (tapping 'Get recipe' in the sheet).
+    Cached both ways, so each reel costs at most one call ever."""
+    state = reel_recipe_status(user_id, reel_id)
+    if state["status"] != "candidate":
+        return state
+    with get_connection() as conn:
+        row = _recipe_row(conn, user_id, reel_id)
+        if not row:
+            return {"status": "none"}
+        try:
+            card = _extract_recipe_card(row, _transcript_of(row))
+        except Exception:
+            return {"status": "candidate", "error": "extraction_failed"}
+        conn.execute(
+            "INSERT OR REPLACE INTO reel_recipes "
+            "(user_id, reel_id, is_recipe, recipe_json, created_at) VALUES (?,?,?,?,?)",
+            (user_id, reel_id, 1 if card else 0,
+             json.dumps(card, ensure_ascii=False) if card else "", _now()),
+        )
+    if card:
+        return {"status": "recipe", "card": card}
+    return {"status": "none"}
+
+
 def build_recipes(user_id: str) -> dict:
     """Extract recipe cards for food reels with transcripts; fully cached, both
     positive and negative outcomes, so nothing is ever paid for twice."""

@@ -12,6 +12,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ClipNest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: dark;
@@ -1039,6 +1041,82 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card h3 { margin:0 0 3px; font-size:1rem; } .folder-card .sub { color:var(--muted); font-size:.82rem; line-height:1.4; }
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
     .sug-chip { font-size:.66rem; color:#08121f; background:var(--accent); border-radius:20px; padding:2px 8px; margin-left:6px; }
+    /* ---------- reel map overlay (cartoon mode) ---------- */
+    .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:#aee3f2;
+      font-family:'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif; }
+    .map-overlay.show { display:block; }
+    #reelMap { position:absolute; inset:0; }
+    #reelMap .leaflet-tile-pane { filter:saturate(1.55) hue-rotate(-8deg) brightness(1.05) contrast(.97); }
+    .map-hud { position:absolute; z-index:600; top:16px; left:14px; background:#fff7e6;
+      border:4px solid #2d2a26; border-radius:24px; padding:12px 18px; max-width:74vw;
+      box-shadow:5px 7px 0 rgba(45,42,38,.35); transform:rotate(-2deg); }
+    .map-hud h2 { margin:0; font-size:20px; font-weight:800; color:#2d2a26; }
+    .map-hud p { margin:2px 0 0; font-size:12.5px; color:#8a7d68; font-weight:600; }
+    .map-close { position:absolute; z-index:600; top:16px; right:14px; width:52px; height:52px;
+      background:#ef476f; color:#fff; border:4px solid #2d2a26; border-radius:50%;
+      font:800 22px/1 'Fredoka', sans-serif; cursor:pointer; transform:rotate(3deg);
+      box-shadow:4px 5px 0 rgba(45,42,38,.35); }
+    .map-close:active { transform:rotate(3deg) translate(2px,2px); box-shadow:1px 1px 0 rgba(45,42,38,.35); }
+    .map-doodle { position:absolute; z-index:590; font-size:34px; pointer-events:none;
+      animation:cloudfloat 7s ease-in-out infinite; filter:drop-shadow(2px 3px 0 rgba(45,42,38,.18)); }
+    @keyframes cloudfloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-12px); } }
+    .map-empty { position:absolute; z-index:600; left:50%; top:50%; transform:translate(-50%,-50%) rotate(-1deg);
+      background:#fff7e6; border:4px solid #2d2a26; border-radius:22px; padding:18px 22px;
+      font-weight:700; color:#2d2a26; text-align:center; box-shadow:5px 7px 0 rgba(45,42,38,.35); max-width:82vw; }
+    .map-empty span { font-weight:500; font-size:13px; }
+    .pin-wrap { position:relative; width:54px; height:60px; }
+    .pin-blob { position:absolute; left:2px; top:0; width:50px; height:50px; background:#fff;
+      border:4px solid #2d2a26; border-radius:53% 47% 55% 45% / 52% 55% 45% 48%;
+      transform:rotate(-7deg); display:flex; align-items:center; justify-content:center;
+      font-size:25px; box-shadow:4px 5px 0 rgba(45,42,38,.28);
+      animation:pinplop .5s cubic-bezier(.34,1.65,.6,1) both; }
+    .pin-wrap:hover .pin-blob { animation:pinwiggle .45s ease-in-out infinite; }
+    .pin-shadow { position:absolute; left:14px; bottom:0; width:26px; height:8px;
+      background:rgba(45,42,38,.25); border-radius:50%; }
+    .pin-badge { position:absolute; right:-5px; top:-8px; min-width:24px; height:24px;
+      background:#ffd166; color:#2d2a26; border:3px solid #2d2a26; border-radius:999px;
+      font:800 12.5px/18px 'Fredoka', sans-serif; text-align:center; padding:0 5px;
+      transform:rotate(8deg); }
+    @keyframes pinplop { from { transform:scale(0) rotate(-7deg) translateY(-30px); } to { transform:scale(1) rotate(-7deg) translateY(0); } }
+    @keyframes pinwiggle { 0%,100% { transform:rotate(-13deg); } 50% { transform:rotate(5deg); } }
+    .map-overlay .leaflet-popup-content-wrapper { background:#fff7e6; color:#2d2a26;
+      border:4px solid #2d2a26; border-radius:20px; box-shadow:5px 6px 0 rgba(45,42,38,.3);
+      font-family:'Fredoka', sans-serif; }
+    .map-overlay .leaflet-popup-tip { background:#fff7e6; border:2px solid #2d2a26; }
+    .map-pop-place { font-weight:800; font-size:17px; }
+    .map-pop-sub { font-size:12px; color:#8a7d68; font-weight:600; margin-bottom:8px; }
+    .map-pop-item { margin:7px 0; padding:8px 10px; background:#fff; border:3px solid #2d2a26; border-radius:14px; }
+    .map-pop-name { font-weight:700; font-size:13.5px; color:#2d2a26; }
+    .map-pop-link { font-size:12.5px; color:#e07a2f; text-decoration:none; font-weight:700; }
+    /* ---------- recipe card overlay ---------- */
+    .recipe-overlay { position:fixed; inset:0; z-index:90; display:none; background:rgba(30,25,20,.55);
+      align-items:flex-end; justify-content:center; font-family:'Fredoka', ui-rounded, system-ui, sans-serif; }
+    .recipe-overlay.show { display:flex; }
+    .recipe-card { background:#fdf6ec; color:#2d2a26; border:4px solid #2d2a26; border-radius:26px 26px 0 0;
+      border-bottom:none; width:min(560px,100%); max-height:88vh; overflow-y:auto; padding:20px 18px 30px;
+      box-shadow:0 -8px 0 rgba(45,42,38,.25); }
+    .recipe-card h2 { margin:0 0 6px; font-size:22px; font-weight:800; padding-right:50px; }
+    .recipe-close { position:sticky; top:0; float:right; width:44px; height:44px; background:#ef476f;
+      color:#fff; border:3.5px solid #2d2a26; border-radius:50%; font:800 18px/1 'Fredoka';
+      cursor:pointer; box-shadow:3px 4px 0 rgba(45,42,38,.3); }
+    .recipe-meta { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px; }
+    .recipe-chip { background:#ffe8c2; border:3px solid #2d2a26; border-radius:999px;
+      font-size:12.5px; font-weight:700; padding:4px 13px; }
+    .recipe-card h3 { font-size:13px; margin:16px 0 8px; color:#8a7d68; text-transform:uppercase; letter-spacing:.7px; }
+    .recipe-ing { list-style:none; margin:0; padding:0; }
+    .recipe-ing li { padding:8px 12px; margin:6px 0; background:#fff; border:3px solid #2d2a26;
+      border-radius:14px; font-size:14.5px; font-weight:600; cursor:pointer; user-select:none; }
+    .recipe-ing li.done { text-decoration:line-through; opacity:.4; }
+    .recipe-steps { margin:0; padding:0; counter-reset:rstep; list-style:none; }
+    .recipe-steps li { counter-increment:rstep; position:relative; padding:9px 12px 9px 46px; margin:8px 0;
+      background:#fff; border:3px solid #2d2a26; border-radius:14px; font-size:14.5px; line-height:1.5; font-weight:500; }
+    .recipe-steps li::before { content:counter(rstep); position:absolute; left:9px; top:9px; width:27px; height:27px;
+      background:#ef476f; color:#fff; border:3px solid #2d2a26; border-radius:999px; font-weight:800;
+      font-size:13px; display:flex; align-items:center; justify-content:center; }
+    .recipe-watch { display:inline-block; margin-top:14px; background:#ffd166; color:#2d2a26;
+      border:3.5px solid #2d2a26; border-radius:999px; font:700 14.5px 'Fredoka'; padding:10px 20px;
+      text-decoration:none; box-shadow:3px 4px 0 rgba(45,42,38,.3); }
+    .recipe-watch:active { transform:translate(2px,2px); box-shadow:1px 1px 0 rgba(45,42,38,.3); }
     .folder-desc {
       color:var(--muted);
       font-size:.85rem;
@@ -1532,7 +1610,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <h1 class="greeting">${escapeHtml(greeting())}</h1>
           <div class="icon-row">
-            <button class="icon-button" type="button" aria-label="Recipes from your reels" id="recipesButton" style="font-size:18px">🍳</button>
             <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton" style="font-size:18px">🗺️</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
@@ -1585,8 +1662,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         window.scrollTo({ top: 0, behavior: 'instant' });
         render();
       });
-      document.getElementById('mapButton')?.addEventListener('click', () => { window.location.href = '/map'; });
-      document.getElementById('recipesButton')?.addEventListener('click', () => { window.location.href = '/recipes'; });
+      document.getElementById('mapButton')?.addEventListener('click', openReelMap);
       const notifButton = document.getElementById('notifButton');
       notifButton?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -2081,6 +2157,166 @@ def build_clipnest_v1_html(user_id: str) -> str:
       await openFolderDetail(id);
     }
 
+    /* ---------- REEL MAP (in-app overlay) ---------- */
+    let leafletPromise = null;
+    function loadLeaflet() {
+      if (window.L) return Promise.resolve();
+      if (leafletPromise) return leafletPromise;
+      leafletPromise = new Promise((resolve, reject) => {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(css);
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+      return leafletPromise;
+    }
+    function ensureMapDom() {
+      if (document.getElementById('mapOverlay')) return;
+      const ov = document.createElement('div');
+      ov.id = 'mapOverlay'; ov.className = 'map-overlay';
+      ov.innerHTML = '<div id="reelMap"></div>'
+        + '<span class="map-doodle" style="top:84px;right:70px;animation-delay:0s">☁️</span>'
+        + '<span class="map-doodle" style="bottom:120px;left:26px;animation-delay:1.6s;font-size:28px">☁️</span>'
+        + '<span class="map-doodle" style="bottom:60px;right:30px;animation-delay:.8s">🎈</span>'
+        + '<span class="map-doodle" style="top:90px;left:50%;animation-delay:2.2s;font-size:30px">✈️</span>'
+        + '<div class="map-hud"><h2>🌍 Your Reel World</h2><p id="mapStat">finding your places…</p></div>'
+        + '<button id="mapClose" class="map-close" type="button" aria-label="Close map">✕</button>'
+        + '<div id="mapEmpty" class="map-empty" hidden>No places yet! 🧭<br><span>Save reels about cities, food spots or trips and they pop up here.</span></div>';
+      document.body.appendChild(ov);
+      document.getElementById('mapClose').addEventListener('click', closeReelMap);
+    }
+    function closeReelMap() { document.getElementById('mapOverlay')?.classList.remove('show'); }
+    function mapEmojiFor(cats) {
+      if (/food|recipe|restaurant|cafe|street/i.test(cats)) return '🍜';
+      if (/stay|hotel|accommodation|rental|resort/i.test(cats)) return '🛏️';
+      if (/travel|destination|place|beach/i.test(cats)) return '🏖️';
+      return '📍';
+    }
+    async function openReelMap() {
+      ensureMapDom();
+      document.getElementById('mapOverlay').classList.add('show');
+      try { await loadLeaflet(); } catch (e) {
+        document.getElementById('mapStat').textContent = 'map could not load 😢 — check internet'; return;
+      }
+      if (state.reelMap) { setTimeout(() => state.reelMap.invalidateSize(), 120); return; }
+      const map = L.map('reelMap', { zoomControl: false, minZoom: 3, worldCopyJump: true }).setView([21, 78], 4);
+      state.reelMap = map;
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+      }).addTo(map);
+      try {
+        const res = await fetch('/api/map-data?user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' });
+        const data = await res.json();
+        const pins = data.pins || [];
+        const groups = {};
+        for (const p of pins) {
+          (groups[p.place] ||= { lat: p.lat, lng: p.lng, place: p.place, cats: '', reels: [] }).reels.push(p);
+          groups[p.place].cats += ' ' + (p.category || '');
+        }
+        const keys = Object.keys(groups);
+        document.getElementById('mapStat').textContent = keys.length
+          ? pins.length + ' reels · ' + keys.length + ' places 🎉'
+          : 'no pins yet';
+        if (!keys.length) { document.getElementById('mapEmpty').hidden = false; return; }
+        document.getElementById('mapEmpty').hidden = true;
+        const bounds = [];
+        const routePts = [];
+        let delay = 0;
+        for (const key of keys.sort((a, b) => groups[a].lng - groups[b].lng)) {
+          const g = groups[key];
+          bounds.push([g.lat, g.lng]);
+          routePts.push([g.lat, g.lng]);
+          const badge = g.reels.length > 1 ? '<div class="pin-badge">' + g.reels.length + '</div>' : '';
+          const icon = L.divIcon({ className: '',
+            html: '<div class="pin-wrap"><div class="pin-shadow"></div><div class="pin-blob">' + mapEmojiFor(g.cats) + '</div>' + badge + '</div>',
+            iconSize: [54, 60], iconAnchor: [27, 54], popupAnchor: [0, -46] });
+          const list = g.reels.map(r =>
+            '<div class="map-pop-item"><div class="map-pop-name">' + escapeHtml(r.item_name || r.reel_id) + '</div>'
+            + (r.url ? '<a class="map-pop-link" href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">▶ watch reel</a>' : '')
+            + '</div>').join('');
+          const marker = L.marker([g.lat, g.lng], { icon, opacity: 0 });
+          marker.addTo(map).bindPopup(
+            '<div class="map-pop-place">' + escapeHtml(g.place) + '</div>'
+            + '<div class="map-pop-sub">you saved ' + g.reels.length + ' reel' + (g.reels.length > 1 ? 's' : '') + ' here! 🎒</div>' + list,
+            { maxWidth: 250 });
+          setTimeout(() => marker.setOpacity(1), delay += 110);
+        }
+        if (routePts.length > 1) {
+          L.polyline(routePts, { color: '#ef476f', weight: 4, dashArray: '2 12', lineCap: 'round', opacity: .85 }).addTo(map);
+        }
+        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 6, minZoom: 3 });
+        setTimeout(() => map.invalidateSize(), 150);
+      } catch (e) {
+        document.getElementById('mapStat').textContent = 'could not load your places 😢';
+      }
+    }
+
+    /* ---------- RECIPE CARD (per-reel, in-app overlay) ---------- */
+    function showRecipeCard(card, reelUrl) {
+      let ov = document.getElementById('recipeOverlay');
+      if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'recipeOverlay'; ov.className = 'recipe-overlay';
+        document.body.appendChild(ov);
+        ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('show'); });
+      }
+      const ing = (card.ingredients || []).map(i => '<li>' + escapeHtml(i) + '</li>').join('');
+      const steps = (card.steps || []).map(s => '<li>' + escapeHtml(s) + '</li>').join('');
+      ov.innerHTML = '<div class="recipe-card">'
+        + '<button class="recipe-close" type="button" aria-label="Close recipe">✕</button>'
+        + '<h2>🍳 ' + escapeHtml(card.title || 'Recipe') + '</h2>'
+        + '<div class="recipe-meta">'
+        + (card.total_time ? '<span class="recipe-chip">⏱ ' + escapeHtml(card.total_time) + '</span>' : '')
+        + (card.servings ? '<span class="recipe-chip">🍽 serves ' + escapeHtml(card.servings) + '</span>' : '')
+        + '<span class="recipe-chip">🥘 ' + (card.ingredients || []).length + ' ingredients</span>'
+        + '</div>'
+        + '<h3>Ingredients — tap to tick off</h3><ul class="recipe-ing">' + ing + '</ul>'
+        + '<h3>Steps</h3><ol class="recipe-steps">' + steps + '</ol>'
+        + (reelUrl ? '<a class="recipe-watch" href="' + escapeHtml(reelUrl) + '" target="_blank" rel="noopener">▶ watch the reel</a>' : '')
+        + '</div>';
+      ov.querySelector('.recipe-close').addEventListener('click', () => ov.classList.remove('show'));
+      ov.querySelectorAll('.recipe-ing li').forEach(li =>
+        li.addEventListener('click', () => li.classList.toggle('done')));
+      ov.classList.add('show');
+    }
+    function attachRecipeAction(item) {
+      if (!state.session?.authenticated || !item.reel_id) return;
+      fetch('/api/reel-recipe?reel_id=' + encodeURIComponent(item.reel_id) + '&user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => {
+          if (!d || d.status === 'none') return;
+          const listEl = actionSheet.querySelector('.sheet-list');
+          if (!listEl || document.getElementById('recipeItem')) return;
+          const b = document.createElement('button');
+          b.id = 'recipeItem'; b.className = 'sheet-row action'; b.type = 'button';
+          b.innerHTML = '<span>🍳 ' + (d.status === 'recipe' ? 'View Recipe' : 'Get Recipe') + '</span><span>›</span>';
+          listEl.insertBefore(b, listEl.firstChild);
+          b.addEventListener('click', async () => {
+            if (d.status === 'recipe') { showRecipeCard(d.card, item.url); return; }
+            b.disabled = true; b.firstElementChild.textContent = '🍳 Reading the reel…';
+            try {
+              const r = await fetch('/api/reel-recipe/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+                body: JSON.stringify({ user_id: USER_ID, reel_id: item.reel_id }) });
+              const out = await r.json();
+              if (out.status === 'recipe') {
+                d.status = 'recipe'; d.card = out.card;
+                b.disabled = false; b.firstElementChild.textContent = '🍳 View Recipe';
+                showRecipeCard(out.card, item.url);
+              } else {
+                b.firstElementChild.textContent = '🙅 No step-by-step recipe in this reel';
+                setTimeout(() => b.remove(), 2000);
+              }
+            } catch (e) {
+              b.disabled = false; b.firstElementChild.textContent = '🍳 Get Recipe';
+            }
+          });
+        })
+        .catch(() => {});
+    }
+
     /* ---------- PROFILE ---------- */
     function renderProfile() {
       const totalItems = sortedCollections().reduce((sum, list) => sum + list.real_count, 0);
@@ -2440,6 +2676,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('sheetMedia').addEventListener('click', playFromSheet);
       document.getElementById('deleteItem').addEventListener('click', deleteCurrentItem);
       document.getElementById('retryItem')?.addEventListener('click', retryCurrentItem);
+      attachRecipeAction(item);
       document.getElementById('shareItem').addEventListener('click', (event) => {
         const link = item.url || window.location.href;
         if (navigator.share) { navigator.share({ title: item.name, url: link }).catch(() => {}); return; }

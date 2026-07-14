@@ -1,41 +1,19 @@
-"""Discover routes: the reel map and recipes pages + their data endpoints."""
+"""Discover data APIs: reel-map pins and per-reel recipe cards.
+
+No standalone pages here — the map is a full-screen overlay INSIDE the main
+app (users install the web app to their home screen, so everything must stay
+on one URL), and recipes are per-reel actions in the reel sheet.
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from app.services.auth import current_user, ensure_user_access
-from app.services.discover import build_map_pins, build_recipes
+from app.services.auth import ensure_user_access
+from app.services.discover import build_map_pins, extract_reel_recipe, reel_recipe_status
 from app.services.library import is_demo_user
-from app.ui_ux.discover_pages import build_map_html, build_recipes_html
 
 router = APIRouter(tags=["discover"])
-
-
-def _page_user(request: Request, user_id: str) -> str | None:
-    """Resolve who the page is for: the logged-in user, or the demo account
-    (so the pages can be previewed without a session, matching /app/{demo})."""
-    if user_id and is_demo_user(user_id):
-        return user_id
-    user = current_user(request)
-    return user["id"] if user else None
-
-
-@router.get("/map", response_class=HTMLResponse)
-def map_page(request: Request, user_id: str = Query(default="")):
-    resolved = _page_user(request, user_id)
-    if not resolved:
-        return RedirectResponse(url="/", status_code=303)
-    return HTMLResponse(build_map_html(resolved))
-
-
-@router.get("/recipes", response_class=HTMLResponse)
-def recipes_page(request: Request, user_id: str = Query(default="")):
-    resolved = _page_user(request, user_id)
-    if not resolved:
-        return RedirectResponse(url="/", status_code=303)
-    return HTMLResponse(build_recipes_html(resolved))
 
 
 @router.get("/api/map-data")
@@ -46,9 +24,23 @@ def map_data(request: Request, user_id: str = Query(default="")):
     return build_map_pins(resolved)
 
 
-@router.get("/api/recipes-data")
-def recipes_data(request: Request, user_id: str = Query(default="")):
+@router.get("/api/reel-recipe")
+def reel_recipe(request: Request, reel_id: str = Query(default=""), user_id: str = Query(default="")):
+    if not reel_id:
+        raise HTTPException(status_code=400, detail="reel_id required")
     if user_id and is_demo_user(user_id):
-        return {"recipes": []}
+        return {"status": "none"}
     resolved = ensure_user_access(request, user_id)
-    return build_recipes(resolved)
+    return reel_recipe_status(resolved, reel_id)
+
+
+@router.post("/api/reel-recipe/extract")
+def reel_recipe_extract(request: Request, payload: dict = Body(...)):
+    reel_id = str(payload.get("reel_id", ""))
+    if not reel_id:
+        raise HTTPException(status_code=400, detail="reel_id required")
+    user_id = str(payload.get("user_id", ""))
+    if user_id and is_demo_user(user_id):
+        return {"status": "none"}
+    resolved = ensure_user_access(request, user_id)
+    return extract_reel_recipe(resolved, reel_id)
