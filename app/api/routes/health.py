@@ -83,6 +83,20 @@ def _queue_debug() -> dict:
             ]
         info["running_started_at"] = [f"{row['job_type']}:{row['started_at']}" for row in rows]
         info["reels_columns"] = reel_columns
+        with get_connection() as connection:
+            failure_rows = connection.execute(
+                """
+                SELECT reel_id, error_message, finished_at
+                FROM processing_jobs
+                WHERE status = 'failed'
+                ORDER BY id DESC
+                LIMIT 8
+                """
+            ).fetchall()
+        info["recent_failures"] = [
+            f"{row['finished_at']} {row['reel_id']}: {(row['error_message'] or '')[:200]}"
+            for row in failure_rows
+        ]
     except Exception as exc:
         info["error"] = str(exc)[:200]
     return info
