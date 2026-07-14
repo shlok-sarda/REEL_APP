@@ -94,7 +94,7 @@ def _queue_debug() -> dict:
                 """
             ).fetchall()
         info["recent_failures"] = [
-            f"{row['finished_at']} {row['reel_id']}: {(row['error_message'] or '')[:200]}"
+            f"{row['finished_at']} {row['reel_id']}: {row['error_message'] or ''}"
             for row in failure_rows
         ]
     except Exception as exc:

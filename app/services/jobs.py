@@ -261,7 +261,9 @@ def fail_job(job_id: int, error_message: str, claim_started_at: str | None = Non
         SET status = 'failed', error_message = ?, finished_at = ?
         WHERE id = ?
     """
-    params: list = [(error_message or "")[:500], _now(), job_id]
+    # Keep the TAIL: for tracebacks the actual exception is the last line;
+    # storing the head kept 20 stack frames and threw away the error.
+    params: list = [(error_message or "")[-500:], _now(), job_id]
     if claim_started_at:
         query += " AND status = 'running' AND started_at = ?"
         params.append(claim_started_at)
