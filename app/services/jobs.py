@@ -15,17 +15,32 @@ MAX_REBUILD_ATTEMPTS = 2
 # as dead regardless of what the worker lock file claims.
 STALE_RUNNING_GRACE_SECONDS = 600
 
+# A single-reel job is one download + one transcript + a handful of LLM calls.
+# PROCESSOR_TIMEOUT_SECONDS may be set very high to let full library rebuilds
+# finish, but a process_reel run past this bound is dead, whatever the env says.
+MAX_SINGLE_REEL_SECONDS = 900
+
+# A lock whose mtime hasn't moved in this long belongs to a wedged worker: the
+# one-job-per-process chain refreshes the mtime on every (re)start.
+WORKER_WEDGE_SECONDS = MAX_SINGLE_REEL_SECONDS + STALE_RUNNING_GRACE_SECONDS
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _stale_running_cutoff() -> str:
-    grace = settings.processor_timeout_seconds + STALE_RUNNING_GRACE_SECONDS
+def job_timeout_seconds(job_type: str) -> int:
+    if job_type == "process_reel":
+        return min(settings.processor_timeout_seconds, MAX_SINGLE_REEL_SECONDS)
+    return settings.processor_timeout_seconds
+
+
+def _stale_cutoff_for(job_type: str) -> str:
+    grace = job_timeout_seconds(job_type) + STALE_RUNNING_GRACE_SECONDS
     return (datetime.now() - timedelta(seconds=grace)).isoformat(timespec="seconds")
 
 
-def _fail_exhausted_jobs(connection, status: str, stale_cutoff: str | None = None) -> None:
+def _fail_exhausted_jobs(connection, status: str, stale_only: bool = False) -> None:
     """Flip jobs of the given status that are out of attempts to 'failed'."""
     for job_type, max_attempts, label in (
         ("process_reel", MAX_PROCESS_REEL_ATTEMPTS, "Reel processing interrupted repeatedly"),
@@ -44,39 +59,42 @@ def _fail_exhausted_jobs(connection, status: str, stale_cutoff: str | None = Non
               AND attempts >= ?
         """
         params: list = [label, _now(), status, job_type, max_attempts]
-        if stale_cutoff is not None:
+        if stale_only:
             query += " AND started_at < ?"
-            params.append(stale_cutoff)
+            params.append(_stale_cutoff_for(job_type))
         connection.execute(query, params)
 
 
 def recover_stale_running_jobs(connection) -> int:
     """Requeue 'running' jobs whose subprocess must be long dead.
 
-    Every job run is hard-capped at processor_timeout_seconds, so a job still
-    marked 'running' well past that cutoff is an orphan — its worker was killed
+    Every job run is hard-capped (per job type), so a job still marked
+    'running' well past that cutoff is an orphan — its worker was killed
     mid-job (deploy/restart/OOM) or a stale lock file is blocking the normal
     recovery path. This check is purely time-based and deliberately ignores the
     worker lock: the one live worker can only ever hold a claim younger than
     the cutoff, so requeueing older claims can never touch an in-flight job.
     """
-    cutoff = _stale_running_cutoff()
-    _fail_exhausted_jobs(connection, "running", stale_cutoff=cutoff)
-    cursor = connection.execute(
-        """
-        UPDATE processing_jobs
-        SET status = 'pending',
-            started_at = '',
-            error_message = CASE
-                WHEN error_message = '' THEN 'Recovered after stalled run'
-                ELSE error_message
-            END
-        WHERE status = 'running'
-          AND started_at < ?
-        """,
-        (cutoff,),
-    )
-    return cursor.rowcount
+    _fail_exhausted_jobs(connection, "running", stale_only=True)
+    recovered = 0
+    for job_type in ("process_reel", "rebuild_library"):
+        cursor = connection.execute(
+            """
+            UPDATE processing_jobs
+            SET status = 'pending',
+                started_at = '',
+                error_message = CASE
+                    WHEN error_message = '' THEN 'Recovered after stalled run'
+                    ELSE error_message
+                END
+            WHERE status = 'running'
+              AND job_type = ?
+              AND started_at < ?
+            """,
+            (job_type, _stale_cutoff_for(job_type)),
+        )
+        recovered += cursor.rowcount
+    return recovered
 
 
 def enqueue_reel_job(reel_id: str, user_id: str = "default", job_type: str = "process_reel") -> dict:
@@ -303,7 +321,25 @@ def is_worker_running() -> bool:
         return False
 
     if _pid_is_worker(pid):
-        return True
+        # The one-job-per-process chain refreshes the lock mtime every time it
+        # (re)starts, so a stale mtime means this worker is wedged mid-job —
+        # e.g. stuck in a network call with no timeout. A wedged worker blocks
+        # the whole queue (its lock stops new workers from spawning), so put it
+        # down; the PID's command line was just verified to be our worker.
+        try:
+            wedged = (time.time() - lock_file.stat().st_mtime) > WORKER_WEDGE_SECONDS
+        except OSError:
+            return False
+        if not wedged:
+            return True
+        try:
+            os.kill(pid, 9)
+            print(f"[jobs] killed wedged worker pid={pid}", flush=True)
+        except OSError:
+            pass
+        lock_file.unlink(missing_ok=True)
+        return False
+
     lock_file.unlink(missing_ok=True)
     return False
 
@@ -498,9 +534,13 @@ def create_worker_lock() -> bool:
         os.close(fd)
         return True
     except FileExistsError:
-        # A worker that re-exec'd between jobs keeps its PID: adopt our own lock.
+        # A worker that re-exec'd between jobs keeps its PID: adopt our own lock
+        # and refresh its mtime — the heartbeat that proves we aren't wedged.
         try:
-            return int(settings.worker_lock_file.read_text().strip()) == os.getpid()
+            if int(settings.worker_lock_file.read_text().strip()) == os.getpid():
+                os.utime(settings.worker_lock_file)
+                return True
+            return False
         except Exception:
             return False
 

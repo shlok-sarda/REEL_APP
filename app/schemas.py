@@ -131,6 +131,7 @@ class HealthResponse(BaseModel):
     media_storage_mode: str = "local_only"
     r2_enabled: bool = False
     queue: dict = {}
+    queue_debug: dict = {}
 
 
 class DashboardResponse(BaseModel):

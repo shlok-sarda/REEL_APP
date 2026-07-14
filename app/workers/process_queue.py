@@ -11,7 +11,14 @@ if __package__ in {None, ""}:
 from app.config import settings
 from app.db.database import get_connection
 from app.db.init_db import initialize_database
-from app.services.jobs import claim_next_job, complete_job, create_worker_lock, fail_job, release_worker_lock
+from app.services.jobs import (
+    claim_next_job,
+    complete_job,
+    create_worker_lock,
+    fail_job,
+    job_timeout_seconds,
+    release_worker_lock,
+)
 from app.services.reel_ingest import get_reel_by_id
 
 
@@ -32,7 +39,7 @@ def failure_summary_for_reel(reel_id: str) -> str:
     return "Reel processor returned failed output"
 
 
-def run_processor(cmd: list[str]) -> subprocess.CompletedProcess:
+def run_processor(cmd: list[str], timeout_seconds: int) -> subprocess.CompletedProcess:
     """Run the processor in its own process group so a timeout kills the whole
     tree. A plain subprocess.run timeout only kills the direct child, leaving
     yt-dlp/ffmpeg grandchildren (spawned without their own timeout) running."""
@@ -45,7 +52,7 @@ def run_processor(cmd: list[str]) -> subprocess.CompletedProcess:
         start_new_session=True,
     )
     try:
-        stdout, stderr = process.communicate(timeout=settings.processor_timeout_seconds)
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -61,6 +68,7 @@ def run_processor(cmd: list[str]) -> subprocess.CompletedProcess:
 
 def process_job(job: dict):
     claim_token = job.get("started_at") or None
+    timeout_seconds = job_timeout_seconds(job["job_type"])
     try:
         cmd = [
             sys.executable,
@@ -74,9 +82,9 @@ def process_job(job: dict):
                 fail_job(job["id"], "Missing reel for job", claim_token)
                 return
             cmd += ["--only-url", reel["url"]]
-        result = run_processor(cmd)
+        result = run_processor(cmd, timeout_seconds)
     except subprocess.TimeoutExpired:
-        fail_job(job["id"], f"Processor timed out after {settings.processor_timeout_seconds}s", claim_token)
+        fail_job(job["id"], f"Processor timed out after {timeout_seconds}s", claim_token)
         return
     except Exception as exc:
         detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
