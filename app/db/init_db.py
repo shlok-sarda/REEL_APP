@@ -303,6 +303,39 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS reel_locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        reel_id TEXT NOT NULL,
+        place TEXT NOT NULL,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
+        display TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        UNIQUE(reel_id),
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS geocode_cache (
+        place TEXT PRIMARY KEY,
+        result_json TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reel_recipes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        reel_id TEXT NOT NULL,
+        is_recipe INTEGER NOT NULL DEFAULT 0,
+        recipe_json TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        UNIQUE(reel_id),
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS folder_memberships (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,

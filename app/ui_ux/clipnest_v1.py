@@ -1579,6 +1579,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
         window.scrollTo({ top: 0, behavior: 'instant' });
         render();
       });
+      document.getElementById('mapButton')?.addEventListener('click', () => { window.location.href = '/map'; });
+      document.getElementById('recipesButton')?.addEventListener('click', () => { window.location.href = '/recipes'; });
       const notifButton = document.getElementById('notifButton');
       notifButton?.addEventListener('click', (event) => {
         event.stopPropagation();
