@@ -456,6 +456,20 @@ def build_clipnest_v1_html(user_id: str) -> str:
       border:1px solid var(--line);
     }
     .m-thumb img, .m-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    /* Image cards flow at their natural height for a dense Pinterest-style
+       pack; capped so one panorama can't eat the column. Video/empty cells
+       keep the fixed 9/13 aspect above so they never collapse. */
+    .m-thumb.natural { aspect-ratio:auto; min-height:110px; }
+    .m-thumb.natural img { height:auto; min-height:110px; max-height:64vh; }
+    .m-thumb.broken::after, .recent-thumb.broken::after {
+      content:'▶';
+      position:absolute;
+      inset:0;
+      display:grid;
+      place-items:center;
+      color:rgba(255,255,255,.55);
+      font-size:1.7em;
+    }
     .m-badges {
       position:absolute;
       left:9px;
@@ -479,8 +493,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
-      /* Reserve two lines so cards in the same grid row stay level. */
-      min-height:2.44em;
     }
     .m-kebab { color:var(--faint); font-weight:800; letter-spacing:1px; }
     .m-summary {
@@ -493,7 +505,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
-      min-height:2.7em;
     }
     .buy-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
     .buy-link {
@@ -583,12 +594,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
       background:var(--soft);
     }
     .ph-glyph {
+      /* Overlay-centered so it stays visible on top of a <video> that hasn't
+         painted a frame yet (iOS shows those as solid black). */
+      position:absolute;
+      inset:0;
       display:grid;
       place-items:center;
-      width:100%;
-      height:100%;
-      color:rgba(255,255,255,.5);
+      color:rgba(255,255,255,.55);
       font-size:1.1em;
+      pointer-events:none;
     }
     .m-thumb .ph-glyph, .recent-thumb .ph-glyph { font-size:1.7em; }
     .result-thumb img, .result-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
@@ -1443,15 +1457,23 @@ def build_clipnest_v1_html(user_id: str) -> str:
     // never a topical emoji, which would misleadingly look like the reel's content.
     function reelThumb(item, className, loading = 'lazy', inner = '') {
       const src = mediaFor(item);
+      const isVideo = Boolean(src) && /\\.mp4($|[?#])/i.test(src);
+      const isImage = Boolean(src) && !isVideo;
       const label = item.name || item.list_title || 'reel';
-      const media = src ? renderMedia(item, loading) : '<span class="ph-glyph">▶</span>';
-      return `<span class="${className}" style="background:${gradFor(label)}">${media}${inner}</span>`;
+      // Images flow at natural height (dense masonry). Video-only and empty
+      // cells keep a fixed aspect AND a visible ▶ glyph — an unloaded <video>
+      // paints as a solid black rectangle on iOS, which reads as dead space.
+      const media = src ? renderMedia(item, loading) : '';
+      const glyph = isImage ? '' : '<span class="ph-glyph">▶</span>';
+      return `<span class="${className}${isImage ? ' natural' : ''}" style="background:${gradFor(label)}">${media}${glyph}${inner}</span>`;
     }
     function renderMedia(item, loading = 'lazy') {
       const src = mediaFor(item);
       if (!src) return '<div aria-hidden="true"></div>';
       if (/\\.mp4($|[?#])/i.test(src)) return `<video src="${escapeHtml(src)}#t=0.1" muted playsinline preload="metadata"></video>`;
-      return `<img src="${escapeHtml(src)}" alt="" loading="${loading}" onerror="this.remove()" />`;
+      // On failure, fall back to the fixed-aspect gradient WITH a glyph — a
+      // silently removed image left a dark block that read as dead space.
+      return `<img src="${escapeHtml(src)}" alt="" loading="${loading}" onerror="this.parentNode.classList.remove('natural');this.parentNode.classList.add('broken');this.remove()" />`;
     }
     function coverItem(list) {
       return list.items.find((item) => mediaFor(item)) || list.items[0] || {};
@@ -1504,6 +1526,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <h1 class="greeting">${escapeHtml(greeting())}</h1>
           <div class="icon-row">
+            <button class="icon-button" type="button" aria-label="Recipes from your reels" id="recipesButton" style="font-size:18px">🍳</button>
+            <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton" style="font-size:18px">🗺️</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
             <div id="notifPopover" class="notif-popover" ${state.notifOpen ? '' : 'hidden'}>
