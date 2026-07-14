@@ -327,6 +327,19 @@ USER_EXTRA_COLUMNS = {
     "updated_at": "TEXT NOT NULL DEFAULT ''",
 }
 
+# Same migrate-by-ALTER pattern for reels: a long-lived production table was
+# created by an older CREATE TABLE and silently lacks columns that newer code
+# UPDATEs — the statement then throws "no such column" and rolls back whatever
+# transaction it was part of (this froze queue recovery in production).
+REEL_EXTRA_COLUMNS = {
+    "media_status": "TEXT NOT NULL DEFAULT 'not_downloaded'",
+    "local_video_path": "TEXT NOT NULL DEFAULT ''",
+    "thumbnail_path": "TEXT NOT NULL DEFAULT ''",
+    "source": "TEXT NOT NULL DEFAULT 'telegram'",
+    "created_at": "TEXT NOT NULL DEFAULT ''",
+    "updated_at": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def create_tables():
     with get_connection() as connection:
@@ -339,6 +352,13 @@ def create_tables():
         for column_name, column_type in USER_EXTRA_COLUMNS.items():
             if column_name not in existing_columns:
                 connection.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+        existing_reel_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(reels)").fetchall()
+        }
+        for column_name, column_type in REEL_EXTRA_COLUMNS.items():
+            if column_name not in existing_reel_columns:
+                connection.execute(f"ALTER TABLE reels ADD COLUMN {column_name} {column_type}")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_instagram_user_id ON users(instagram_user_id) WHERE instagram_user_id IS NOT NULL AND instagram_user_id != ''")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_user_id ON reel_item_features(user_id)")

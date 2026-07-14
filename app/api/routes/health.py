@@ -78,7 +78,11 @@ def _queue_debug() -> dict:
             rows = connection.execute(
                 "SELECT job_type, started_at FROM processing_jobs WHERE status = 'running' ORDER BY id DESC LIMIT 25"
             ).fetchall()
+            reel_columns = [
+                row["name"] for row in connection.execute("PRAGMA table_info(reels)").fetchall()
+            ]
         info["running_started_at"] = [f"{row['job_type']}:{row['started_at']}" for row in rows]
+        info["reels_columns"] = reel_columns
     except Exception as exc:
         info["error"] = str(exc)[:200]
     return info

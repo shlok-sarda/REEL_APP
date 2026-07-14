@@ -411,7 +411,15 @@ def recover_orphaned_jobs() -> int:
                 """
             )
             recovered += cursor.rowcount
-        reconciled = reconcile_stuck_reels(connection)
+    # Reel reconciliation runs in its OWN transaction: get_connection() rolls
+    # back the whole block on any exception, and a reconcile failure (e.g.
+    # schema drift on the reels table) must never undo the job recovery above.
+    reconciled = 0
+    try:
+        with get_connection() as connection:
+            reconciled = reconcile_stuck_reels(connection)
+    except Exception as exc:
+        print(f"[jobs] reel reconcile failed: {exc}", flush=True)
     if reconciled:
         # Keep the CSV mirror in sync when reels leave the non-terminal state.
         # Lazy import avoids a circular dependency with reel_ingest.
