@@ -1,5 +1,11 @@
+import os
+
+
 def build_clipnest_v1_html(user_id: str) -> str:
     safe_user_id = user_id.replace("\\", "\\\\").replace("'", "\\'")
+    # Render exposes the deployed commit; locally this shows "dev". Surfaced in
+    # Profile so a stale cached build can be spotted from the phone instantly.
+    build_sha = (os.getenv("RENDER_GIT_COMMIT") or "dev")[:7]
     html = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2096,6 +2102,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <h2 class="set-title">Account</h2>
           <div class="set-card">
             <div class="set-row">Signed in as <span class="value">${escapeHtml(USER_ID)}</span></div>
+            <div class="set-row">App build <span class="value">__BUILD_SHA__</span></div>
             <div class="set-row">Instagram <span class="value">${instagramStatusLabel()}</span></div>
             ${renderInstagramRows()}
             <button class="set-row danger" type="button" id="logoutButton">Log out</button>
@@ -2644,4 +2651,4 @@ def build_clipnest_v1_html(user_id: str) -> str:
   </script>
 </body>
 </html>"""
-    return html.replace("__USER_ID__", safe_user_id)
+    return html.replace("__USER_ID__", safe_user_id).replace("__BUILD_SHA__", build_sha)

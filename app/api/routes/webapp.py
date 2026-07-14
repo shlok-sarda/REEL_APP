@@ -3036,10 +3036,17 @@ def build_legacy_web_app_html(user_id: str) -> str:
 </html>"""
 
 
+# App-shell pages must NEVER be browser-cached: with no Cache-Control header,
+# iOS Safari (especially saved-to-home-screen) serves a days-old cached build
+# after deploys, so users keep seeing bugs that are already fixed in prod.
+def app_shell(html: str) -> HTMLResponse:
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
 @router.get("/", response_class=HTMLResponse)
 def root_app(request: Request):
     csrf_token = create_login_csrf(request)
-    return HTMLResponse(build_landing_html(csrf_token, current_user(request)))
+    return app_shell(build_landing_html(csrf_token, current_user(request)))
 
 
 @router.get("/privacy", response_class=HTMLResponse)
@@ -3067,7 +3074,7 @@ def my_app(request: Request):
     user = current_user(request)
     if not user:
         return RedirectResponse(url="/", status_code=303)
-    return HTMLResponse(build_web_app_html(user["id"]))
+    return app_shell(build_web_app_html(user["id"]))
 
 
 @router.get("/folders-app", response_class=HTMLResponse)
@@ -3079,16 +3086,16 @@ def folders_app(request: Request):
 
     if not folders_enabled(user["id"]):
         return RedirectResponse(url="/app", status_code=303)
-    return HTMLResponse(build_folders_html(user["id"]))
+    return app_shell(build_folders_html(user["id"]))
 
 
 @router.get("/app/{user_id}", response_class=HTMLResponse)
 def user_app(user_id: str, request: Request):
     if is_demo_user(user_id):
-        return HTMLResponse(build_web_app_html(user_id))
+        return app_shell(build_web_app_html(user_id))
     user = current_user(request)
     if not user:
         return RedirectResponse(url="/", status_code=303)
     if user["id"] != user_id:
         return RedirectResponse(url="/app", status_code=303)
-    return HTMLResponse(build_web_app_html(user_id))
+    return app_shell(build_web_app_html(user_id))
