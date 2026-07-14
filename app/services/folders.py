@@ -65,6 +65,16 @@ def _tokens(text: str) -> list[str]:
 
 # ---------- reel content + embeddings ----------
 
+_JUNK_SUMMARY_MARKERS = ("could not be processed", "processing error")
+
+
+def _clean_summary(text) -> str:
+    """Drop the pipeline's failure placeholders — embedding 'this reel could
+    not be processed' would poison the fingerprint."""
+    value = str(text or "").strip()
+    return "" if any(m in value.lower() for m in _JUNK_SUMMARY_MARKERS) else value
+
+
 def _reel_text(row: dict) -> str:
     """High-signal 'what this reel is' text for embedding, from prod fields."""
     doc = {}
@@ -73,20 +83,35 @@ def _reel_text(row: dict) -> str:
             doc = json.loads(row["document_json"])
         except Exception:
             doc = {}
+    item_name = str(row.get("item_name") or "").strip()
+    summary = _clean_summary(row.get("summary"))
     # Lead with the "what is this reel actually about" fields (main subject,
     # item, topic) so routing keys on the subject, not incidental details.
     parts = [
         doc.get("main_subject"),
-        row.get("item_name"),
+        item_name,
         doc.get("primary_topic"),
         row.get("primary_category"), row.get("specific_category"),
         _join(doc.get("subtopics")), _join(doc.get("entities")),
-        row.get("summary"),
+        summary,
         _join(_loads(row.get("canonical_entities_json"))),
         _join(_loads(row.get("canonical_subdomains_json"))),
         doc.get("visual_summary"),
     ]
+    if not item_name and not summary:
+        # Half-extracted reel (pipeline failure left only the visual pass):
+        # fall back to the raw fields deep search matches on, so the reel is
+        # not invisible to folder routing while it awaits reprocessing.
+        parts += [
+            _join(doc.get("visible_text"))[:500],
+            str(doc.get("caption") or "")[:600],
+            str(doc.get("transcript") or "")[:1500],
+        ]
     return "\n".join(str(p).strip() for p in parts if p and str(p).strip())
+
+
+def _text_hash(text: str) -> str:
+    return hashlib.sha256((text or "").encode()).hexdigest()[:16]
 
 
 def _join(v) -> str:
@@ -127,60 +152,65 @@ def _reel_rows(conn, user_id: str) -> dict[str, dict]:
     return {row["reel_id"]: dict(row) for row in rows}
 
 
+def _store_vector(conn, reel_id: str, vector: list[float], thash: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO embedding_store "
+        "(object_type, object_id, model, version, vector_json, source_text_hash, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL, "v2",
+         json.dumps(vector), thash, _now(), _now()),
+    )
+
+
+def _cached_vector(conn, reel_id: str):
+    return conn.execute(
+        "SELECT vector_json, source_text_hash FROM embedding_store "
+        "WHERE object_type=? AND object_id=? AND model=? AND version='v2'",
+        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL),
+    ).fetchone()
+
+
 def _warm_vectors(conn, rows: dict[str, dict]) -> None:
-    """Batch-embed every reel that doesn't have a cached v2 vector yet — one
-    API call per ~96 reels instead of one per reel, so scanning a whole library
-    takes seconds, not tens of seconds. reel_vector() falls back to per-reel
-    embedding if this fails, so errors here are safe to swallow."""
-    missing = [
-        (rid, row) for rid, row in rows.items()
-        if not conn.execute(
-            "SELECT 1 FROM embedding_store WHERE object_type=? AND object_id=? "
-            "AND model=? AND version='v2'",
-            (EMB_OBJECT_TYPE, rid, EMBEDDING_MODEL),
-        ).fetchone()
-    ]
-    if not missing:
+    """Batch-embed every reel whose cached vector is missing OR whose content
+    changed since it was fingerprinted (source_text_hash mismatch — e.g. a
+    half-extracted reel that got reprocessed). One API call per ~96 reels.
+    reel_vector() falls back per-reel if this fails, so errors are safe."""
+    stale = []
+    for rid, row in rows.items():
+        text = _reel_text(row)
+        thash = _text_hash(text)
+        cached = _cached_vector(conn, rid)
+        if not cached or cached["source_text_hash"] != thash:
+            stale.append((rid, text, thash))
+    if not stale:
         return
     try:
         from api_config import get_openai_client
 
         client = get_openai_client()
-        for i in range(0, len(missing), 96):
-            chunk = missing[i:i + 96]
-            texts = [(_reel_text(row) or "empty")[:6000] for _, row in chunk]
+        for i in range(0, len(stale), 96):
+            chunk = stale[i:i + 96]
+            texts = [(text or "empty")[:6000] for _, text, _ in chunk]
             resp = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
-            for (rid, _row), item in zip(chunk, resp.data):
-                conn.execute(
-                    "INSERT OR REPLACE INTO embedding_store "
-                    "(object_type, object_id, model, version, vector_json, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    (EMB_OBJECT_TYPE, rid, EMBEDDING_MODEL, "v2",
-                     json.dumps(l2_normalize(item.embedding)), _now(), _now()),
-                )
+            for (rid, _text, thash), item in zip(chunk, resp.data):
+                _store_vector(conn, rid, l2_normalize(item.embedding), thash)
     except Exception:
         pass
 
 
 def reel_vector(conn, reel_id: str, row: dict) -> list[float] | None:
-    """Get cached folder embedding for a reel, or compute it. Returns None if we
-    could only get a deterministic fallback (no meaning -> unroutable)."""
-    cached = conn.execute(
-        "SELECT vector_json, model FROM embedding_store "
-        "WHERE object_type=? AND object_id=? AND model=? AND version='v2'",
-        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL),
-    ).fetchone()
-    if cached:
+    """Cached folder embedding for a reel, recomputed when the reel's content
+    changes (hash mismatch). Returns the stale vector if a fresh embed fails,
+    and None only when no meaningful vector can be produced at all."""
+    text = _reel_text(row)
+    thash = _text_hash(text)
+    cached = _cached_vector(conn, reel_id)
+    if cached and cached["source_text_hash"] == thash:
         return json.loads(cached["vector_json"])
-    vector, model = embed_text(_reel_text(row))
-    if model != EMBEDDING_MODEL:  # deterministic-fallback -> don't cache/route
-        return None
-    conn.execute(
-        "INSERT OR REPLACE INTO embedding_store "
-        "(object_type, object_id, model, version, vector_json, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (EMB_OBJECT_TYPE, reel_id, EMBEDDING_MODEL, "v2", json.dumps(vector), _now(), _now()),
-    )
+    vector, model = embed_text(text)
+    if model != EMBEDDING_MODEL:  # embed failed / deterministic fallback
+        return json.loads(cached["vector_json"]) if cached else None
+    _store_vector(conn, reel_id, vector, thash)
     return vector
 
 
@@ -307,13 +337,22 @@ def llm_verdict(folder: dict, row: dict) -> str | None:
         from api_config import get_openai_client
         doc = json.loads(row.get("document_json") or "{}")
         client = get_openai_client()
+        item_name = str(row.get("item_name") or "").strip()
+        summary = _clean_summary(row.get("summary"))[:400]
+        extra = ""
+        if not item_name and not summary:
+            # half-extracted reel — judge from the raw signals instead
+            extra = (f"Caption: {str(doc.get('caption') or '')[:300]}\n"
+                     f"Transcript: {str(doc.get('transcript') or '')[:500]}\n"
+                     f"Visuals: {_join(doc.get('visual_entities'))[:200]}\n")
         prompt = (
             "A user has a folder of saved Instagram reels.\n"
             f"Folder: {folder['name']}\nDescription: {folder['description']}\n\n"
             "A new reel arrived:\n"
-            f"Title: {row.get('item_name','')}\nSummary: {str(row.get('summary',''))[:400]}\n"
-            f"Topic: {doc.get('primary_topic','')}\nEntities: {_join(doc.get('entities'))}\n\n"
-            "Does this reel belong in this folder? Treat alternate names for the same "
+            f"Title: {item_name}\nSummary: {summary}\n"
+            f"Topic: {doc.get('primary_topic','')}\nEntities: {_join(doc.get('entities'))}\n"
+            + extra +
+            "\nDoes this reel belong in this folder? Treat alternate names for the same "
             'thing as matches. Reply JSON only: {"belongs": true/false}'
         )
         resp = client.chat.completions.create(
