@@ -118,6 +118,8 @@ class LibraryResponse(BaseModel):
     user_id: str
     standard: list[LibraryCollection]
     personalized: list[LibraryCollection]
+    # Authoritative "Recently saved" list from the reels table, newest first.
+    recents: list[dict] = []
 
 
 class HealthResponse(BaseModel):

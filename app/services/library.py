@@ -683,6 +683,67 @@ def load_personalized_collections(user_id: str) -> list[dict]:
     return []
 
 
+def load_recent_reels(user_id: str, limit: int = 120) -> list[dict]:
+    """Authoritative "Recently saved" list, straight from the reels table.
+
+    Ordered strictly by save time (received_at DESC), with created_at and id as
+    deterministic tiebreakers so the order NEVER changes between refreshes.
+    Deliberately independent of the personalization engine — that engine
+    reorders clusters non-deterministically and was dropping received_at, which
+    made recents look random. This is the source of truth for "what I saved".
+    """
+    if is_demo_user(user_id):
+        rows = _demo_rows_with_media()
+        # Newest-first for the demo: reverse the seed order.
+        return [
+            {
+                "reel_id": row["Reel ID"],
+                "name": row["Item Name"],
+                "summary": row.get("Summary", ""),
+                "url": row.get("URL", ""),
+                "thumbnail_url": row.get("Thumbnail URL", ""),
+                "received_at": row.get("Received At", ""),
+            }
+            for row in reversed(rows)
+        ][:limit]
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                reels.id AS reel_id,
+                reels.url AS url,
+                reels.received_at AS received_at,
+                reels.local_video_path AS local_video_path,
+                reels.thumbnail_path AS thumbnail_path,
+                COALESCE(reel_items.item_name, reel_item_features.item_name, '') AS name,
+                COALESCE(reel_items.summary, reel_item_features.summary, '') AS summary
+            FROM reels
+            LEFT JOIN reel_items ON reel_items.reel_id = reels.id
+            LEFT JOIN reel_item_features ON reel_item_features.reel_id = reels.id
+            WHERE reels.user_id = ?
+            GROUP BY reels.id
+            ORDER BY reels.received_at DESC, reels.created_at DESC, reels.id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    recents = []
+    for row in rows:
+        item = dict(row)
+        name = (item.get("name") or "").strip()
+        # Skip reels that never produced a real item (still processing / failed);
+        # they have no title or media to show yet.
+        if not name or name.lower() == "processing failed":
+            continue
+        item["thumbnail_url"] = _media_url_from_path(item.get("thumbnail_path") or "")
+        item["local_video_url"] = _media_url_from_path(item.get("local_video_path") or "")
+        recents.append(item)
+        if len(recents) >= limit:
+            break
+    return recents
+
+
 def load_library_payload(user_id: str) -> dict:
     personalized = load_personalized_collections(user_id)
     standard = [] if personalized else load_standard_collections(user_id)
@@ -690,6 +751,7 @@ def load_library_payload(user_id: str) -> dict:
         "user_id": user_id,
         "standard": standard,
         "personalized": personalized,
+        "recents": load_recent_reels(user_id),
     }
 
 

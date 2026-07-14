@@ -1168,6 +1168,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const USER_ID = '__USER_ID__';
     const state = {
       data: [],
+      recents: [],
       dashboard: {},
       jobs: [],
       diagnostics: [],
@@ -1615,7 +1616,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
 
     /* ---------- RECENTLY SAVED (full view) ---------- */
+    // The server sends an authoritative, already-ordered recents list (reels
+    // table, newest-saved first, deterministic). We trust it verbatim — no
+    // client re-sorting, so the order can't drift between refreshes.
     function allRecentsSorted() {
+      if (Array.isArray(state.recents) && state.recents.length) return state.recents;
+      // Fallback only if the server list is unavailable: dedupe library items.
       const seen = new Set();
       const items = [];
       for (const item of flatItems()) {
@@ -1624,9 +1630,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
         seen.add(key);
         items.push(item);
       }
-      // Newest saved first. Safari rejects "YYYY-MM-DD HH:MM:SS" (space
-      // separator), so normalize to ISO 'T' before parsing; anything
-      // unparseable sinks to the bottom in stable original order.
       const savedAt = (v) => {
         const t = Date.parse(String(v || '').trim().replace(' ', 'T'));
         return Number.isFinite(t) ? t : 0;
@@ -2514,6 +2517,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         ]);
         const library = await libraryRes.json();
         state.data = normalizeCollections(library.personalized?.length ? library.personalized : library.standard || []);
+        state.recents = Array.isArray(library.recents) ? library.recents : [];
         state.dashboard = await dashboardRes.json();
         state.jobs = await jobsRes.json();
         state.diagnostics = await diagnosticsRes.json();
