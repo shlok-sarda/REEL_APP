@@ -133,19 +133,30 @@ def _run_inline_fix() -> dict:
             report["raw_requeued_stale"] = cursor.rowcount
     except Exception as exc:
         report["raw_requeue_error"] = repr(exc)[:300]
-    # Stage 3: can the worker module even be imported in this environment?
+    # Stage 3: run the real worker synchronously with output captured. If it
+    # crashes before creating its lock we finally see the traceback; if it's
+    # healthy we see it claim a job (the 25s kill orphans that claim, which
+    # stale recovery requeues — acceptable for a manual diagnostic).
     try:
         repo_root = settings.worker_script.parent.parent.parent
-        probe = subprocess.run(
-            [sys.executable, "-c", "import app.workers.process_queue; print('import_ok')"],
-            capture_output=True,
-            text=True,
-            timeout=45,
-            cwd=str(repo_root),
-        )
-        report["worker_import"] = (probe.stdout.strip() + " " + probe.stderr.strip())[-500:].strip()
+        try:
+            probe = subprocess.run(
+                [sys.executable, str(settings.worker_script)],
+                capture_output=True,
+                text=True,
+                timeout=25,
+                cwd=str(repo_root),
+            )
+            output = (probe.stdout or "") + "\n" + (probe.stderr or "")
+            report["worker_run"] = f"exit={probe.returncode} {output[-600:].strip()}"
+        except subprocess.TimeoutExpired as exc:
+            out = (exc.stdout or b"", exc.stderr or b"")
+            text_out = " ".join(
+                part.decode("utf-8", "replace") if isinstance(part, bytes) else part for part in out
+            )
+            report["worker_run"] = f"still_running_at_25s {text_out[-600:].strip()}"
     except Exception as exc:
-        report["worker_import_error"] = repr(exc)[:300]
+        report["worker_run_error"] = repr(exc)[:300]
     # Stage 4: kick the janitor, give a spawned worker a moment, then inspect.
     try:
         from app.services.jobs import ensure_background_progress
