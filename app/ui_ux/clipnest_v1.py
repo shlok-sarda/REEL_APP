@@ -13,8 +13,6 @@ def build_clipnest_v1_html(user_id: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0a0b" />
   <title>ClipNest</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: dark;
@@ -1058,82 +1056,72 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
     .sug-chip { font-size:.66rem; color:#fff; background:var(--brand-grad); border-radius:20px; padding:2px 8px; margin-left:6px; }
     .skip-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-    /* ---------- reel map overlay (cartoon mode) ---------- */
-    .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:#aee3f2;
-      font-family:'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif; }
+    /* ---------- reel map overlay (ClipNest dark) ---------- */
+    .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:var(--bg); }
     .map-overlay.show { display:block; }
     #reelMap { position:absolute; inset:0; }
-    #reelMap .leaflet-tile-pane { filter:saturate(1.55) hue-rotate(-8deg) brightness(1.05) contrast(.97); }
-    .map-hud { position:absolute; z-index:600; top:16px; left:14px; background:#fff7e6;
-      border:4px solid #2d2a26; border-radius:24px; padding:12px 18px; max-width:74vw;
-      box-shadow:5px 7px 0 rgba(45,42,38,.35); transform:rotate(-2deg); }
-    .map-hud h2 { margin:0; font-size:20px; font-weight:800; color:#2d2a26; }
-    .map-hud p { margin:2px 0 0; font-size:12.5px; color:#8a7d68; font-weight:600; }
-    .map-close { position:absolute; z-index:600; top:16px; right:14px; width:52px; height:52px;
-      background:#ef476f; color:#fff; border:4px solid #2d2a26; border-radius:50%;
-      font:800 22px/1 'Fredoka', sans-serif; cursor:pointer; transform:rotate(3deg);
-      box-shadow:4px 5px 0 rgba(45,42,38,.35); }
-    .map-close:active { transform:rotate(3deg) translate(2px,2px); box-shadow:1px 1px 0 rgba(45,42,38,.35); }
-    .map-doodle { position:absolute; z-index:590; font-size:34px; pointer-events:none;
-      animation:cloudfloat 7s ease-in-out infinite; filter:drop-shadow(2px 3px 0 rgba(45,42,38,.18)); }
-    @keyframes cloudfloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-12px); } }
-    .map-empty { position:absolute; z-index:600; left:50%; top:50%; transform:translate(-50%,-50%) rotate(-1deg);
-      background:#fff7e6; border:4px solid #2d2a26; border-radius:22px; padding:18px 22px;
-      font-weight:700; color:#2d2a26; text-align:center; box-shadow:5px 7px 0 rgba(45,42,38,.35); max-width:82vw; }
-    .map-empty span { font-weight:500; font-size:13px; }
-    .pin-wrap { position:relative; width:54px; height:60px; }
-    .pin-blob { position:absolute; left:2px; top:0; width:50px; height:50px; background:#fff;
-      border:4px solid #2d2a26; border-radius:53% 47% 55% 45% / 52% 55% 45% 48%;
-      transform:rotate(-7deg); display:flex; align-items:center; justify-content:center;
-      font-size:25px; box-shadow:4px 5px 0 rgba(45,42,38,.28);
+    /* Dark cartography: invert OSM tiles into the app's night palette. */
+    #reelMap .leaflet-tile-pane { filter:invert(.92) hue-rotate(200deg) saturate(.4) brightness(.92) contrast(.92); }
+    .map-hud { position:absolute; z-index:600; top:calc(14px + var(--safe-top)); left:14px; background:var(--card);
+      border:1px solid var(--line); border-radius:16px; padding:12px 16px; max-width:74vw; }
+    .map-hud h2 { margin:0; font-family:var(--serif); font-size:1.25rem; font-weight:600; color:var(--text); }
+    .map-hud p { margin:3px 0 0; font-size:.75rem; color:var(--muted); font-weight:600; }
+    .map-close { position:absolute; z-index:600; top:calc(14px + var(--safe-top)); right:14px; width:44px; height:44px;
+      background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:50%;
+      font-size:18px; cursor:pointer; }
+    .map-close:active { background:var(--soft); }
+    .map-doodle { display:none; }
+    .map-empty { position:absolute; z-index:600; left:50%; top:50%; transform:translate(-50%,-50%);
+      background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px 22px;
+      font-weight:650; color:var(--text); text-align:center; max-width:82vw; }
+    .map-empty span { font-weight:500; font-size:.8rem; color:var(--muted); }
+    .pin-wrap { position:relative; width:48px; height:54px; }
+    .pin-blob { position:absolute; left:2px; top:0; width:44px; height:44px; background:var(--card);
+      border:2px solid var(--brand-purple); border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:22px; box-shadow:0 6px 18px rgba(139,92,246,.35);
       animation:pinplop .5s cubic-bezier(.34,1.65,.6,1) both; }
-    .pin-wrap:hover .pin-blob { animation:pinwiggle .45s ease-in-out infinite; }
-    .pin-shadow { position:absolute; left:14px; bottom:0; width:26px; height:8px;
-      background:rgba(45,42,38,.25); border-radius:50%; }
-    .pin-badge { position:absolute; right:-5px; top:-8px; min-width:24px; height:24px;
-      background:#ffd166; color:#2d2a26; border:3px solid #2d2a26; border-radius:999px;
-      font:800 12.5px/18px 'Fredoka', sans-serif; text-align:center; padding:0 5px;
-      transform:rotate(8deg); }
-    @keyframes pinplop { from { transform:scale(0) rotate(-7deg) translateY(-30px); } to { transform:scale(1) rotate(-7deg) translateY(0); } }
-    @keyframes pinwiggle { 0%,100% { transform:rotate(-13deg); } 50% { transform:rotate(5deg); } }
-    .map-overlay .leaflet-popup-content-wrapper { background:#fff7e6; color:#2d2a26;
-      border:4px solid #2d2a26; border-radius:20px; box-shadow:5px 6px 0 rgba(45,42,38,.3);
-      font-family:'Fredoka', sans-serif; }
-    .map-overlay .leaflet-popup-tip { background:#fff7e6; border:2px solid #2d2a26; }
-    .map-pop-place { font-weight:800; font-size:17px; }
-    .map-pop-sub { font-size:12px; color:#8a7d68; font-weight:600; margin-bottom:8px; }
-    .map-pop-item { margin:7px 0; padding:8px 10px; background:#fff; border:3px solid #2d2a26; border-radius:14px; }
-    .map-pop-name { font-weight:700; font-size:13.5px; color:#2d2a26; }
-    .map-pop-link { font-size:12.5px; color:#e07a2f; text-decoration:none; font-weight:700; }
-    /* ---------- recipe card overlay ---------- */
-    .recipe-overlay { position:fixed; inset:0; z-index:90; display:none; background:rgba(30,25,20,.55);
-      align-items:flex-end; justify-content:center; font-family:'Fredoka', ui-rounded, system-ui, sans-serif; }
+    .pin-shadow { position:absolute; left:13px; bottom:0; width:22px; height:7px;
+      background:rgba(0,0,0,.45); border-radius:50%; }
+    .pin-badge { position:absolute; right:-6px; top:-7px; min-width:22px; height:22px;
+      background:var(--brand-grad); color:#fff; border:2px solid var(--bg); border-radius:999px;
+      font-size:12px; font-weight:800; line-height:18px; text-align:center; padding:0 5px; }
+    @keyframes pinplop { from { transform:scale(0) translateY(-26px); } to { transform:scale(1) translateY(0); } }
+    .map-overlay .leaflet-popup-content-wrapper { background:var(--card); color:var(--text);
+      border:1px solid var(--line); border-radius:16px; box-shadow:0 18px 44px rgba(0,0,0,.5); }
+    .map-overlay .leaflet-popup-tip { background:var(--card); border:1px solid var(--line); }
+    .map-pop-place { font-weight:700; font-size:1rem; font-family:var(--serif); }
+    .map-pop-sub { font-size:.72rem; color:var(--muted); font-weight:600; margin-bottom:8px; }
+    .map-pop-item { margin:7px 0; padding:8px 10px; background:var(--soft); border:1px solid var(--line); border-radius:12px; }
+    .map-pop-name { font-weight:650; font-size:.82rem; color:var(--text); }
+    .map-pop-link { font-size:.78rem; color:var(--accent); text-decoration:none; font-weight:700; }
+    /* ---------- recipe card overlay (ClipNest dark) ---------- */
+    .recipe-overlay { position:fixed; inset:0; z-index:90; display:none; background:rgba(10,10,11,.7);
+      backdrop-filter:blur(6px); align-items:flex-end; justify-content:center; }
     .recipe-overlay.show { display:flex; }
-    .recipe-card { background:#fdf6ec; color:#2d2a26; border:4px solid #2d2a26; border-radius:26px 26px 0 0;
-      border-bottom:none; width:min(560px,100%); max-height:88vh; overflow-y:auto; padding:20px 18px 30px;
-      box-shadow:0 -8px 0 rgba(45,42,38,.25); }
-    .recipe-card h2 { margin:0 0 6px; font-size:22px; font-weight:800; padding-right:50px; }
-    .recipe-close { position:sticky; top:0; float:right; width:44px; height:44px; background:#ef476f;
-      color:#fff; border:3.5px solid #2d2a26; border-radius:50%; font:800 18px/1 'Fredoka';
-      cursor:pointer; box-shadow:3px 4px 0 rgba(45,42,38,.3); }
+    .recipe-card { background:var(--card); color:var(--text); border:1px solid var(--line); border-bottom:none;
+      border-radius:22px 22px 0 0; width:min(560px,100%); max-height:88vh; overflow-y:auto;
+      padding:20px 18px calc(26px + var(--safe-bottom)); }
+    .recipe-card h2 { margin:0 0 6px; font-family:var(--serif); font-size:1.4rem; font-weight:600; padding-right:50px; }
+    .recipe-close { position:sticky; top:0; float:right; width:40px; height:40px; background:var(--soft);
+      color:var(--text); border:1px solid var(--line); border-radius:50%; font-size:16px; cursor:pointer; }
     .recipe-meta { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 4px; }
-    .recipe-chip { background:#ffe8c2; border:3px solid #2d2a26; border-radius:999px;
-      font-size:12.5px; font-weight:700; padding:4px 13px; }
-    .recipe-card h3 { font-size:13px; margin:16px 0 8px; color:#8a7d68; text-transform:uppercase; letter-spacing:.7px; }
+    .recipe-chip { background:var(--soft); border:1px solid var(--line); border-radius:999px;
+      font-size:.75rem; font-weight:650; color:var(--muted); padding:5px 13px; }
+    .recipe-card h3 { font-size:.7rem; margin:18px 0 8px; color:var(--accent); text-transform:uppercase; letter-spacing:.8px; }
     .recipe-ing { list-style:none; margin:0; padding:0; }
-    .recipe-ing li { padding:8px 12px; margin:6px 0; background:#fff; border:3px solid #2d2a26;
-      border-radius:14px; font-size:14.5px; font-weight:600; cursor:pointer; user-select:none; }
-    .recipe-ing li.done { text-decoration:line-through; opacity:.4; }
+    .recipe-ing li { padding:9px 12px; margin:6px 0; background:var(--soft); border:1px solid var(--line);
+      border-radius:12px; font-size:.88rem; font-weight:550; cursor:pointer; user-select:none; }
+    .recipe-ing li.done { text-decoration:line-through; opacity:.38; }
     .recipe-steps { margin:0; padding:0; counter-reset:rstep; list-style:none; }
     .recipe-steps li { counter-increment:rstep; position:relative; padding:9px 12px 9px 46px; margin:8px 0;
-      background:#fff; border:3px solid #2d2a26; border-radius:14px; font-size:14.5px; line-height:1.5; font-weight:500; }
-    .recipe-steps li::before { content:counter(rstep); position:absolute; left:9px; top:9px; width:27px; height:27px;
-      background:#ef476f; color:#fff; border:3px solid #2d2a26; border-radius:999px; font-weight:800;
-      font-size:13px; display:flex; align-items:center; justify-content:center; }
-    .recipe-watch { display:inline-block; margin-top:14px; background:#ffd166; color:#2d2a26;
-      border:3.5px solid #2d2a26; border-radius:999px; font:700 14.5px 'Fredoka'; padding:10px 20px;
-      text-decoration:none; box-shadow:3px 4px 0 rgba(45,42,38,.3); }
-    .recipe-watch:active { transform:translate(2px,2px); box-shadow:1px 1px 0 rgba(45,42,38,.3); }
+      background:var(--soft); border:1px solid var(--line); border-radius:12px; font-size:.88rem; line-height:1.5; }
+    .recipe-steps li::before { content:counter(rstep); position:absolute; left:9px; top:9px; width:26px; height:26px;
+      background:var(--brand-grad); color:#fff; border-radius:999px; font-weight:800;
+      font-size:12.5px; display:flex; align-items:center; justify-content:center; }
+    .recipe-watch { display:inline-block; margin-top:14px; background:var(--brand-grad); color:#fff;
+      border:0; border-radius:22px; font-weight:700; font-size:.9rem; padding:11px 20px; text-decoration:none; }
+    .recipe-watch:active { filter:brightness(1.1); }
     .folder-desc {
       color:var(--muted);
       font-size:.85rem;
