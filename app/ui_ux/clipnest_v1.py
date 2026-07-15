@@ -11,6 +11,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0b" />
   <title>ClipNest</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -24,7 +25,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       --text:#f4f4f5;
       --muted:#8e8e96;
       --faint:#5c5c64;
-      --accent:#8b7bff;
+      /* Brand palette from the ClipNest logo: pink -> purple gradient on black,
+         violet glow, lavender for accent text. */
+      --accent:#a78bfa;
+      --brand-pink:#ff5b8f;
+      --brand-purple:#8b5cf6;
+      --brand-grad:linear-gradient(135deg, #ff5b8f 0%, #8b5cf6 100%);
       --danger:#ff5b4d;
       --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
       --safe-top:env(safe-area-inset-top, 0px);
@@ -131,16 +137,26 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .search-plus {
       position:absolute; right:7px; top:50%; transform:translateY(-50%);
       width:36px; height:36px; border-radius:50%; border:0; padding:0;
-      background:#a9744a; color:#fff; font-size:1.5rem; line-height:1;
+      background:var(--brand-grad); color:#fff; font-size:1.5rem; line-height:1;
       display:grid; place-items:center; cursor:pointer;
     }
     .search-plus:active { filter:brightness(1.1); }
-    .search-plus.active { background:#e0736b; }
-    /* loading spinner for search */
+    .search-plus { transition:transform .18s ease, background .18s ease; }
+    /* Selecting mode: the + rotates into an x and hollows out = "cancel". */
+    .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-pink); color:var(--brand-pink); transform:translateY(-50%) rotate(45deg); }
+    /* Brand loader: the logo's bookmark, gradient-filled, gently pulsing. */
     .load-wrap { display:flex; justify-content:center; padding:44px 0; }
-    .spinner { width:34px; height:34px; border-radius:50%; border:3px solid var(--line);
-      border-top-color:#a9744a; animation:spin .8s linear infinite; }
-    @keyframes spin { to { transform:rotate(360deg); } }
+    .spinner {
+      width:30px; height:38px; border:0; border-radius:0;
+      background:var(--brand-grad);
+      -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
+      mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
+      animation:bookmarkPulse 1.1s ease-in-out infinite;
+    }
+    @keyframes bookmarkPulse {
+      0%, 100% { transform:scale(1); opacity:.55; }
+      50% { transform:scale(1.14); opacity:1; }
+    }
     /* tappable section header (Recently saved) */
     .section-head-btn { width:100%; background:none; border:0; padding:0; cursor:pointer;
       text-align:left; color:inherit; }
@@ -410,7 +426,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       align-items:center;
       gap:6px;
     }
-    .chip.active { background:#fff; color:#000; }
+    .chip.active { background:var(--brand-grad); color:#fff; }
 
     /* ---------- folder screen ---------- */
     .list-heading {
@@ -825,7 +841,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-weight:650;
     }
     .nav-button svg { width:23px; height:23px; }
-    .nav-button.active { color:var(--text); }
+    .nav-button.active { color:#c9b3ff; }
 
     /* ---------- mini player ---------- */
     .reel-player {
@@ -1012,15 +1028,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-toolbar { display:flex; justify-content:flex-end; margin:8px 0 2px; }
     .folder-toolbar[hidden] { display:none; }
     .newlist-btn { display:inline-flex; align-items:center; gap:6px; font-size:.8rem; font-weight:650;
-      color:#fff; background:#a9744a; border:none; border-radius:20px; padding:7px 15px; cursor:pointer; }
-    .newlist-btn.ghost { background:none; color:var(--accent); border:1px solid rgba(169,116,74,.6); }
+      color:#fff; background:var(--brand-grad); border:none; border-radius:20px; padding:7px 15px; cursor:pointer; }
+    .newlist-btn.ghost { background:none; color:var(--accent); border:1px solid rgba(139,92,246,.55); }
     .newlist-btn:disabled { opacity:.45; }
     .m-card.selectable { cursor:pointer; position:relative; }
-    .m-card.selected { outline:2px solid #a9744a; outline-offset:-2px; border-radius:16px; }
+    .m-card.selected { outline:2px solid var(--brand-purple); outline-offset:-2px; border-radius:16px; }
     .m-card .selring { position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:50%;
       border:2px solid rgba(255,255,255,.7); background:rgba(0,0,0,.35); z-index:3; display:none; }
     .m-card.selectable .selring { display:block; }
-    .m-card.selected .selring { background:#a9744a; border-color:#a9744a; }
+    .m-card.selected .selring { background:var(--brand-purple); border-color:var(--brand-purple); }
     .m-card.selected .selring::after { content:"✓"; color:#fff; font-size:13px; position:absolute; top:-1px; left:4px; }
     .selbar { position:fixed; left:50%; transform:translateX(-50%); bottom:84px; z-index:40; width:min(720px,92%);
       background:rgba(16,20,27,.96); border:1px solid var(--line); border-radius:16px; padding:10px 14px;
@@ -1040,7 +1056,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:13px 15px; margin-top:10px; cursor:pointer; }
     .folder-card h3 { margin:0 0 3px; font-size:1rem; } .folder-card .sub { color:var(--muted); font-size:.82rem; line-height:1.4; }
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
-    .sug-chip { font-size:.66rem; color:#08121f; background:var(--accent); border-radius:20px; padding:2px 8px; margin-left:6px; }
+    .sug-chip { font-size:.66rem; color:#fff; background:var(--brand-grad); border-radius:20px; padding:2px 8px; margin-left:6px; }
     .skip-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     /* ---------- reel map overlay (cartoon mode) ---------- */
     .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:#aee3f2;
@@ -1213,6 +1229,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .sheet-row.danger { color:var(--danger); }
     .hidden { display:none !important; }
+    /* Tactile press feedback on every tappable card/row — subtle scale-down. */
+    .m-card button, .recent-card, .lib-row, .quick-action, .cat-tile {
+      transition:transform .12s ease;
+    }
+    .m-card button:active, .recent-card:active, .lib-row:active, .quick-action:active {
+      transform:scale(.97);
+    }
     @media (min-width:760px) {
       body { background:#000; }
       .phone-shell {
@@ -1526,10 +1549,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function mediaFor(item) {
       return item.item_thumbnail || item.reel_thumbnail || thumbnailFor(item) || videoFor(item);
     }
+    // Placeholder gradients stay inside the brand family (purples, violets,
+    // magentas on near-black) so empty cards still look like ClipNest.
     const PH_PALETTES = [
-      ['#1c2b4a', '#3d5a80'], ['#2d1b3d', '#6d3b6e'], ['#1b3a2d', '#3f7a5a'],
-      ['#3a2a1b', '#7a5a3f'], ['#1b2d3a', '#3f5f7a'], ['#3a1b1f', '#7a3f4a'],
-      ['#26203a', '#4f4478'], ['#33301b', '#6e683f'],
+      ['#241833', '#4c2f63'], ['#2a1230', '#5b2b6e'], ['#301024', '#6e2b52'],
+      ['#1c1533', '#3f2f78'], ['#251d3d', '#4e3a8c'], ['#331327', '#7a2f5c'],
+      ['#1f1a3a', '#443a7a'], ['#2d1638', '#63307a'],
     ];
     function gradFor(name) {
       let hash = 0;
