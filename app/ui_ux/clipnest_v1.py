@@ -145,13 +145,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .search-plus { transition:transform .18s ease, background .18s ease; }
     /* Selecting mode: the + rotates into an x and hollows out = "cancel". */
     .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-pink); color:var(--brand-pink); transform:translateY(-50%) rotate(45deg); }
-    /* Brand loader: the mascot bookmark (white, with the face), gently pulsing. */
+    /* Brand loader: the mascot itself (transparent cutout of the logo
+       character), gently pulsing on the dark background. */
     .load-wrap { display:flex; justify-content:center; padding:44px 0; }
     .spinner {
-      width:38px; height:47px; border:0; display:block;
+      width:42px; height:62px; border:0; display:block;
+      background:url('/static/mascot.png') center/contain no-repeat;
       animation:bookmarkPulse 1.1s ease-in-out infinite;
     }
-    .spinner svg { width:100%; height:100%; display:block; }
     @keyframes bookmarkPulse {
       0%, 100% { transform:scale(1); opacity:.6; }
       50% { transform:scale(1.12); opacity:1; }
@@ -1342,16 +1343,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const sheetBackdrop = document.getElementById('sheetBackdrop');
 
     const SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
-    // Loader mascot: the logo's white bookmark character (eyes + smile), tilted
-    // like the logo art. Simple, single mark — pulses via .spinner.
-    const MASCOT_SVG = '<svg viewBox="0 0 26 32" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(6 13 16)">'
-      + '<path d="M6 1.5h14a3.5 3.5 0 0 1 3.5 3.5v25l-10.5-6.7L2.5 30V5A3.5 3.5 0 0 1 6 1.5z" fill="#f4eff6"/>'
-      + '<ellipse cx="9.6" cy="11.2" rx="1.6" ry="2.1" fill="#17131c"/>'
-      + '<ellipse cx="16" cy="10.7" rx="1.6" ry="2.1" fill="#17131c"/>'
-      + '<path d="M7.8 7.6q1.3-1.1 2.7-.6M14.2 6.9q1.3-.8 2.6 0" fill="none" stroke="#17131c" stroke-width=".9" stroke-linecap="round"/>'
-      + '<path d="M11.4 15.2q1.4 1.2 2.8-.2" fill="none" stroke="#17131c" stroke-width="1" stroke-linecap="round"/>'
-      + '</g></svg>';
-    const LOADER_HTML = '<div class="load-wrap"><span class="spinner" aria-label="Loading">' + MASCOT_SVG + '</span></div>';
+    // Loader: the actual 3D mascot from the logo (transparent cutout), pulsing.
+    const LOADER_HTML = '<div class="load-wrap"><span class="spinner" aria-label="Loading"></span></div>';
     const CHEV_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
     const BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
     const ARROW_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
