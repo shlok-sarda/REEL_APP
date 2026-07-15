@@ -91,7 +91,12 @@ def startup_event():
             print(f"[startup] purged failed reels: {result}")
     except Exception as exc:
         print(f"[startup] failed-reel purge skipped: {exc}")
-    threading.Thread(target=_queue_janitor_loop, daemon=True, name="queue-janitor").start()
+    import os
+
+    if os.getenv("QUEUE_JANITOR", "on").strip().lower() != "off":
+        threading.Thread(target=_queue_janitor_loop, daemon=True, name="queue-janitor").start()
+    else:
+        print("[startup] QUEUE_JANITOR=off — background job processing disabled (local dev)")
 
 
 app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")

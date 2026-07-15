@@ -96,7 +96,11 @@ def reject(request: Request, folder_id: int, payload: dict = Body(...)):
     reel_id = str(payload.get("reel_id", ""))
     if not reel_id:
         raise HTTPException(status_code=400, detail="reel_id required")
-    return folders_service.set_membership_status(resolved, folder_id, reel_id, "rejected")
+    # `reason` is the optional "why did you skip this" answer — it feeds the
+    # folder's adjudicator as a negative example. Sent either with the skip
+    # itself or as a follow-up call after the user answers the prompt.
+    return folders_service.set_membership_status(
+        resolved, folder_id, reel_id, "rejected", reason=str(payload.get("reason", "")))
 
 
 @router.delete("/{folder_id}")

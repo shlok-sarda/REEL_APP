@@ -11,14 +11,24 @@ Routing design (measured, not guessed):
   * profile = W_DESC*emb(description) + W_QUERY*emb(query) + W_CENTROID*centroid
     Folder NAMES are intentionally low-weight (W_QUERY); content drives it.
   * thresholds SELF-CALIBRATE from members' leave-one-out similarity
-    (mean - k*sigma), because absolute cosine scale is not comparable.
+    (mean - k*sigma), because absolute cosine scale is not comparable — but the
+    sigma margin is CAPPED and both bands sit on absolute floors, because a
+    diverse folder otherwise thresholds near zero and suggests the whole
+    library (observed 2026-07-15: a folder with no usable member vectors
+    suggested all 232 reels).
   * pure similarity cannot separate "same template, different subject", so
     AUTO additionally requires a rare-term ANCHOR hit when the folder has any.
-  * the SUGGEST band is adjudicated by a cheap LLM yes/no, cached per description.
+  * EVERY candidate — auto and suggest — must pass a cheap LLM yes/no before
+    it touches memberships; verdicts are cached per (reel, description-hash).
+    No verdict (API down) means the reel is skipped, never shown unvetted.
+  * user rejections (with their optional "why I skipped" reasons) are fed to
+    the adjudicator as negative examples, so each Skip tightens the folder.
 
 Reel embeddings are computed from the deep-search document text and cached in
 embedding_store (object_type='folder_reel'); we never use deterministic-fallback
-vectors for routing (they carry no meaning).
+vectors for routing (they carry no meaning) — and that now includes the
+description/query vectors, which previously fell back silently and poisoned
+the whole profile whenever the OpenAI key was down.
 """
 
 from __future__ import annotations
@@ -41,10 +51,24 @@ from app.services.personalization_v2.embeddings import (
 W_DESC, W_QUERY, W_CENTROID = 0.45, 0.05, 0.50
 AUTO_MARGIN_SIGMA, AUTO_MARGIN_FLOOR = 1.0, 0.05
 SUGGEST_MARGIN_SIGMA, SUGGEST_MARGIN_FLOOR = 2.0, 0.10
+# Cap how far member diversity (sigma) can widen the suggest band, and put
+# absolute floors under both bands: with text-embedding-3-small, unrelated
+# reels sit ~0.15-0.25 vs a folder profile, related ones ~0.35+ (measured on
+# real data 2026-07-15). Without the floors a noisy folder suggests everything.
+SUGGEST_MARGIN_CAP = 0.15
+ABS_AUTO_FLOOR, ABS_SUGGEST_FLOOR = 0.40, 0.30
+# The self-calibrated mean is meaningless when no member has a usable vector;
+# below this it reads as degenerate and routing fails closed.
+MIN_USABLE_MEAN = 0.05
 ANCHOR_MARGIN = 0.20
 ANCHOR_DF_MAX, STRONG_DF_MAX = 0.15, 0.06
 ADJUDICATION_MODEL = "gpt-4.1-mini"
+# Per scan (folder creation / rescan): at most this many fresh LLM verdicts.
+# Cached verdicts are free and don't count.
+MAX_SCAN_ADJUDICATIONS = 20
+MAX_REJECTION_EXAMPLES = 5
 EMB_OBJECT_TYPE = "folder_reel"
+TEXT_EMB_OBJECT_TYPE = "folder_text"
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "how",
@@ -65,12 +89,16 @@ def _tokens(text: str) -> list[str]:
 
 # ---------- reel content + embeddings ----------
 
-_JUNK_SUMMARY_MARKERS = ("could not be processed", "processing error")
+_JUNK_SUMMARY_MARKERS = (
+    "could not be processed", "processing error", "processing failed", "failed reels",
+)
 
 
 def _clean_summary(text) -> str:
     """Drop the pipeline's failure placeholders — embedding 'this reel could
-    not be processed' would poison the fingerprint."""
+    not be processed' would poison the fingerprint. Applied to item names and
+    categories too: 11 'Processing Failed' reels once embedded near-identically
+    and outranked every real reel in a folder scan."""
     value = str(text or "").strip()
     return "" if any(m in value.lower() for m in _JUNK_SUMMARY_MARKERS) else value
 
@@ -83,7 +111,7 @@ def _reel_text(row: dict) -> str:
             doc = json.loads(row["document_json"])
         except Exception:
             doc = {}
-    item_name = str(row.get("item_name") or "").strip()
+    item_name = _clean_summary(row.get("item_name"))
     summary = _clean_summary(row.get("summary"))
     # Lead with the "what is this reel actually about" fields (main subject,
     # item, topic) so routing keys on the subject, not incidental details.
@@ -91,7 +119,7 @@ def _reel_text(row: dict) -> str:
         doc.get("main_subject"),
         item_name,
         doc.get("primary_topic"),
-        row.get("primary_category"), row.get("specific_category"),
+        _clean_summary(row.get("primary_category")), _clean_summary(row.get("specific_category")),
         _join(doc.get("subtopics")), _join(doc.get("entities")),
         summary,
         _join(_loads(row.get("canonical_entities_json"))),
@@ -223,9 +251,40 @@ def _blend(*weighted) -> list[float]:
             continue
         if acc is None:
             acc = [0.0] * len(vec)
+        if len(vec) != len(acc):
+            continue  # never mix embedding spaces (96-dim fallback vs 1536 real)
         for i, x in enumerate(vec):
             acc[i] += w * x
     return l2_normalize(acc) if acc else []
+
+
+def _text_vector(conn, text: str) -> list[float]:
+    """Real-model embedding for folder text (description/query), cached by
+    content hash. NEVER returns a deterministic fallback — a garbage
+    description vector poisons the whole profile and made one folder suggest
+    random reels. Empty result means 'no meaningful vector available'."""
+    value = (text or "").strip()
+    if not value:
+        return []
+    thash = _text_hash(value)
+    cached = conn.execute(
+        "SELECT vector_json FROM embedding_store "
+        "WHERE object_type=? AND object_id=? AND model=? AND version='v2'",
+        (TEXT_EMB_OBJECT_TYPE, thash, EMBEDDING_MODEL),
+    ).fetchone()
+    if cached:
+        return json.loads(cached["vector_json"])
+    vector, model = embed_text(value)
+    if model != EMBEDDING_MODEL:
+        return []
+    conn.execute(
+        "INSERT OR REPLACE INTO embedding_store "
+        "(object_type, object_id, model, version, vector_json, source_text_hash, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (TEXT_EMB_OBJECT_TYPE, thash, EMBEDDING_MODEL, "v2",
+         json.dumps(vector), thash, _now(), _now()),
+    )
+    return vector
 
 
 def _profile_basis(folder: dict, member_ids: list[str]) -> str:
@@ -234,10 +293,14 @@ def _profile_basis(folder: dict, member_ids: list[str]) -> str:
 
 
 def compute_profile(conn, folder: dict, rows: dict) -> tuple[list[float], list[float], list[float]]:
-    desc_v, _ = embed_text(folder["description"])
-    query_v, _ = embed_text(folder.get("query") or folder["name"])
+    desc_v = _text_vector(conn, folder["description"])
+    query_v = _text_vector(conn, folder.get("query") or folder["name"])
     member_vecs = [v for v in (reel_vector(conn, m, rows[m]) for m in folder["member_ids"] if m in rows) if v]
     centroid = _mean(member_vecs) if member_vecs else desc_v
+    if not desc_v and not member_vecs:
+        # No meaningful signal at all (embeddings down, nothing cached):
+        # fail closed — an empty profile routes nothing, instead of routing noise.
+        return [], desc_v, query_v
     profile = _blend((W_DESC, desc_v), (W_QUERY, query_v), (W_CENTROID, centroid))
     return profile, desc_v, query_v
 
@@ -301,9 +364,19 @@ def evaluate_folder(conn, folder: dict, rows: dict) -> dict:
     profile, desc_v, query_v = compute_profile(conn, folder, rows)
     strong, weak = _anchors(folder, rows)
     mean, std = _member_stats(conn, folder, rows, desc_v, query_v)
-    t_auto = mean - max(AUTO_MARGIN_SIGMA * std, AUTO_MARGIN_FLOOR)
-    t_suggest = mean - max(SUGGEST_MARGIN_SIGMA * std, SUGGEST_MARGIN_FLOOR)
-    t_anchor = mean - ANCHOR_MARGIN
+    if not profile or mean <= MIN_USABLE_MEAN:
+        # Degenerate calibration (no profile, or no member has a usable
+        # vector): thresholds would sit near zero and the whole library would
+        # qualify — observed flooding 232 suggestions into one folder. Route
+        # nothing until vectors exist; the next scan self-heals via _warm_vectors.
+        return {"profile": profile, "candidates": [],
+                "thresholds": {"auto": 1.0, "suggest": 1.0}}
+    t_auto = max(mean - max(AUTO_MARGIN_SIGMA * std, AUTO_MARGIN_FLOOR), ABS_AUTO_FLOOR)
+    t_suggest = max(
+        mean - min(max(SUGGEST_MARGIN_SIGMA * std, SUGGEST_MARGIN_FLOOR), SUGGEST_MARGIN_CAP),
+        ABS_SUGGEST_FLOOR,
+    )
+    t_anchor = max(mean - ANCHOR_MARGIN, ABS_SUGGEST_FLOOR)
     member_set = set(folder["member_ids"])
 
     candidates = []
@@ -332,7 +405,64 @@ def evaluate_folder(conn, folder: dict, rows: dict) -> dict:
             "thresholds": {"auto": t_auto, "suggest": t_suggest}}
 
 
-def llm_verdict(folder: dict, row: dict) -> str | None:
+def _adjudication_hash(folder: dict) -> str:
+    """Verdict cache key component: verdicts are only valid for the exact
+    folder meaning they were judged against, so a description edit re-opens
+    every question."""
+    return _text_hash(f"{folder['name']}::{folder['description']}")
+
+
+def _cached_verdict(conn, folder_id: int, reel_id: str, desc_hash: str) -> str | None:
+    row = conn.execute(
+        "SELECT verdict FROM folder_adjudications WHERE folder_id=? AND reel_id=? AND desc_hash=?",
+        (folder_id, reel_id, desc_hash),
+    ).fetchone()
+    return row["verdict"] if row else None
+
+
+def _store_verdict(conn, user_id: str, folder_id: int, reel_id: str, desc_hash: str, verdict: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO folder_adjudications "
+        "(user_id, folder_id, reel_id, desc_hash, verdict, created_at) VALUES (?,?,?,?,?,?)",
+        (user_id, folder_id, reel_id, desc_hash, verdict, _now()),
+    )
+
+
+def _folder_rejections(conn, folder_id: int) -> list[tuple[str, str]]:
+    """Most recent (reel title, user's skip reason) pairs for this folder —
+    negative examples that teach the adjudicator where the boundary is."""
+    rows = conn.execute(
+        """
+        SELECT COALESCE(MAX(ri.item_name), fm.reel_id) AS name,
+               MAX(fm.reject_reason) AS reason
+        FROM folder_memberships fm
+        LEFT JOIN reel_items ri ON ri.reel_id = fm.reel_id
+        WHERE fm.folder_id=? AND fm.status='rejected'
+        GROUP BY fm.reel_id
+        ORDER BY MAX(fm.updated_at) DESC LIMIT ?
+        """,
+        (folder_id, MAX_REJECTION_EXAMPLES),
+    ).fetchall()
+    return [(str(r["name"] or ""), str(r["reason"] or "")) for r in rows]
+
+
+def folder_verdict(conn, user_id: str, folder_id: int, folder: dict, row: dict,
+                   rejections: list[tuple[str, str]] | None = None) -> str | None:
+    """Cached LLM yes/no for 'does this reel belong here'. Fresh verdicts are
+    stored; None (LLM unreachable) is never cached so it retries next scan."""
+    desc_hash = _adjudication_hash(folder)
+    cached = _cached_verdict(conn, folder_id, row.get("reel_id") or "", desc_hash)
+    if cached:
+        return cached
+    if rejections is None:
+        rejections = _folder_rejections(conn, folder_id)
+    verdict = llm_verdict(folder, row, rejections)
+    if verdict in ("yes", "no"):
+        _store_verdict(conn, user_id, folder_id, row.get("reel_id") or "", desc_hash, verdict)
+    return verdict
+
+
+def llm_verdict(folder: dict, row: dict, rejections: list[tuple[str, str]] | None = None) -> str | None:
     try:
         from api_config import get_openai_client
         doc = json.loads(row.get("document_json") or "{}")
@@ -345,15 +475,28 @@ def llm_verdict(folder: dict, row: dict) -> str | None:
             extra = (f"Caption: {str(doc.get('caption') or '')[:300]}\n"
                      f"Transcript: {str(doc.get('transcript') or '')[:500]}\n"
                      f"Visuals: {_join(doc.get('visual_entities'))[:200]}\n")
+        rejected_block = ""
+        if rejections:
+            lines = "\n".join(
+                f"- {name or 'a reel'}" + (f' (user said: "{reason}")' if reason else "")
+                for name, reason in rejections
+            )
+            rejected_block = (
+                "\nThe user removed these reels from this folder — reels like them "
+                "do NOT belong:\n" + lines + "\n"
+            )
         prompt = (
             "A user has a folder of saved Instagram reels.\n"
-            f"Folder: {folder['name']}\nDescription: {folder['description']}\n\n"
-            "A new reel arrived:\n"
+            f"Folder: {folder['name']}\nDescription: {folder['description']}\n"
+            + rejected_block +
+            "\nA new reel arrived:\n"
             f"Title: {item_name}\nSummary: {summary}\n"
             f"Topic: {doc.get('primary_topic','')}\nEntities: {_join(doc.get('entities'))}\n"
             + extra +
-            "\nDoes this reel belong in this folder? Treat alternate names for the same "
-            'thing as matches. Reply JSON only: {"belongs": true/false}'
+            "\nDoes this reel belong in this folder? The description is the rule: "
+            "sharing a place, domain, or one keyword with it is NOT enough — the reel's "
+            "actual subject must be what the description asks for. Treat alternate names "
+            'for the same thing as matches. Reply JSON only: {"belongs": true/false}'
         )
         resp = client.chat.completions.create(
             model=ADJUDICATION_MODEL, temperature=0, max_tokens=20,
@@ -482,7 +625,11 @@ def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
     insert anything that matches as a 'suggested' membership. Catches reels the
     ingest-time hook missed (worker timing, failures, reels saved before the
     folder existed). Reels already decided — member, suggested, or rejected —
-    are never touched, so a user's "No" stays a No."""
+    are never touched, so a user's "No" stays a No.
+
+    Every candidate must get an LLM 'yes' before entering the tray: embeddings
+    alone can't tell chest-workout from bicep-curl or eating-in-Bali from
+    Bali-belly-remedy. No verdict (LLM down) = not inserted, retried next scan."""
     folder = {"name": folder_row["name"], "description": folder_row["description"],
               "query": folder_row["query"],
               "member_ids": _members(conn, folder_row["id"])}
@@ -490,8 +637,21 @@ def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
     decided = {r["reel_id"] for r in conn.execute(
         "SELECT reel_id FROM folder_memberships WHERE folder_id=?", (folder_row["id"],))}
     ev = evaluate_folder(conn, folder, rows)
+    rejections = _folder_rejections(conn, folder_row["id"])
+    desc_hash = _adjudication_hash(folder)
+    fresh_calls = 0
     for cand in ev["candidates"]:
         if cand["reel_id"] in decided:
+            continue
+        verdict = _cached_verdict(conn, folder_row["id"], cand["reel_id"], desc_hash)
+        if verdict is None:
+            if fresh_calls >= MAX_SCAN_ADJUDICATIONS:
+                continue  # candidates are sorted by similarity; the tail can wait
+            fresh_calls += 1
+            verdict = llm_verdict(folder, rows[cand["reel_id"]], rejections)
+            if verdict in ("yes", "no"):
+                _store_verdict(conn, user_id, folder_row["id"], cand["reel_id"], desc_hash, verdict)
+        if verdict != "yes":
             continue
         conn.execute(
             "INSERT OR IGNORE INTO folder_memberships "
@@ -502,11 +662,54 @@ def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
         )
 
 
+def _prune_suggestions(conn, user_id: str, folder_row) -> None:
+    """Re-vet the existing Suggested tray against the current description.
+
+    Two passes: (1) free — drop suggestions whose similarity no longer clears
+    the suggest band (cleans trays polluted before the floors existed);
+    (2) adjudicated — drop survivors the LLM says don't belong. Rows are
+    DELETED, not marked rejected: the user never decided, so a future profile
+    may legitimately re-suggest them."""
+    folder = {"name": folder_row["name"], "description": folder_row["description"],
+              "query": folder_row["query"],
+              "member_ids": _members(conn, folder_row["id"])}
+    rows = _reel_rows(conn, user_id)
+    ev = evaluate_folder(conn, folder, rows)
+    if not ev["profile"]:
+        return  # embeddings unavailable: leave the tray alone rather than guess
+    t_suggest = ev["thresholds"]["suggest"]
+    suggested = [r["reel_id"] for r in conn.execute(
+        "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status='suggested'",
+        (folder_row["id"],))]
+    rejections = _folder_rejections(conn, folder_row["id"])
+    desc_hash = _adjudication_hash(folder)
+    fresh_calls = 0
+    for rid in suggested:
+        row = rows.get(rid)
+        vec = reel_vector(conn, rid, row) if row else None
+        sim = cosine_similarity(ev["profile"], vec) if vec else 0.0
+        verdict = None
+        if row is None or not vec or sim < t_suggest:
+            verdict = "no"
+        else:
+            verdict = _cached_verdict(conn, folder_row["id"], rid, desc_hash)
+            if verdict is None and fresh_calls < MAX_SCAN_ADJUDICATIONS:
+                fresh_calls += 1
+                verdict = llm_verdict(folder, row, rejections)
+                if verdict in ("yes", "no"):
+                    _store_verdict(conn, user_id, folder_row["id"], rid, desc_hash, verdict)
+        if verdict == "no":
+            conn.execute(
+                "DELETE FROM folder_memberships WHERE folder_id=? AND reel_id=? AND status='suggested'",
+                (folder_row["id"], rid),
+            )
+
+
 def rescan_folder(user_id: str, folder_id: int) -> dict | None:
-    """Manual re-scan (Rescan button / after a description edit): score the
-    library against this folder once and refresh the Suggested tray. Routing
-    otherwise happens only at ingest + once at folder creation — no per-open
-    scanning."""
+    """Manual re-scan (Rescan button / after a description edit): prune the
+    Suggested tray of anything that no longer belongs, then score the library
+    for new suggestions. Routing otherwise happens only at ingest + once at
+    folder creation — no per-open scanning."""
     with get_connection() as conn:
         f = conn.execute(
             "SELECT * FROM user_folders WHERE id=? AND user_id=? AND is_active=1",
@@ -514,6 +717,7 @@ def rescan_folder(user_id: str, folder_id: int) -> dict | None:
         ).fetchone()
         if not f:
             return None
+        _prune_suggestions(conn, user_id, f)
         _backfill_suggestions(conn, user_id, f)
     return folder_detail(user_id, folder_id)
 
@@ -539,12 +743,17 @@ def folder_detail(user_id: str, folder_id: int) -> dict | None:
                 "query": f["query"], "members": members, "suggestions": suggestions}
 
 
-def set_membership_status(user_id: str, folder_id: int, reel_id: str, status: str) -> dict:
+def set_membership_status(user_id: str, folder_id: int, reel_id: str, status: str,
+                          reason: str = "") -> dict:
+    """Accept/reject a suggestion. For rejections, `reason` is the user's
+    optional "why I skipped this" — it becomes a negative example in future
+    adjudications, so every explained Skip tightens the folder."""
     with get_connection() as conn:
         conn.execute(
-            "UPDATE folder_memberships SET status=?, source='manual', updated_at=? "
+            "UPDATE folder_memberships SET status=?, source='manual', reject_reason=?, updated_at=? "
             "WHERE folder_id=? AND reel_id=? AND user_id=?",
-            (status, _now(), folder_id, reel_id, user_id),
+            (status, (reason or "").strip()[:200] if status == "rejected" else "",
+             _now(), folder_id, reel_id, user_id),
         )
         if status == "member":
             _refresh_profile(conn, user_id, folder_id)
@@ -559,7 +768,11 @@ def delete_folder(user_id: str, folder_id: int) -> None:
 
 def route_reel(user_id: str, reel_id: str, adjudicate: bool = True) -> list[dict]:
     """Score one new reel against all the user's folders. Returns per-folder
-    decisions (auto/suggest) and writes suggested/auto memberships."""
+    decisions (auto/suggest) and writes suggested/auto memberships.
+
+    Nothing enters a folder — not even the Suggested tray — without an LLM
+    'yes' (cached per description). LLM unreachable = reel skipped; the next
+    manual rescan retries it."""
     with get_connection() as conn:
         rows = _reel_rows(conn, user_id)
         if reel_id not in rows:
@@ -582,10 +795,10 @@ def route_reel(user_id: str, reel_id: str, adjudicate: bool = True) -> list[dict
             if not match:
                 continue
             decision = match["decision"]
-            if decision == "auto" and adjudicate:
-                v = llm_verdict(folder, rows[reel_id])
-                if v == "no":
-                    decision = "suggest"
+            if adjudicate:
+                verdict = folder_verdict(conn, user_id, frow["id"], folder, rows[reel_id])
+                if verdict != "yes":
+                    continue
             status = "member" if decision == "auto" else "suggested"
             conn.execute(
                 "INSERT OR IGNORE INTO folder_memberships (user_id,folder_id,reel_id,source,status,score,created_at,updated_at) "

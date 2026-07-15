@@ -351,7 +351,26 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(reel_id) REFERENCES reels(id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS folder_adjudications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        folder_id INTEGER NOT NULL,
+        reel_id TEXT NOT NULL,
+        desc_hash TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(folder_id, reel_id, desc_hash),
+        FOREIGN KEY(folder_id) REFERENCES user_folders(id)
+    )
+    """,
 ]
+
+# Migrate-by-ALTER pattern (see USER_EXTRA_COLUMNS below): folder_memberships
+# shipped before skip-reasons existed, so live tables lack the column.
+FOLDER_MEMBERSHIP_EXTRA_COLUMNS = {
+    "reject_reason": "TEXT NOT NULL DEFAULT ''",
+}
 
 USER_EXTRA_COLUMNS = {
     "google_sub": "TEXT",
@@ -444,6 +463,13 @@ def create_tables():
         for column_name, column_type in REEL_EXTRA_COLUMNS.items():
             if column_name not in existing_reel_columns:
                 connection.execute(f"ALTER TABLE reels ADD COLUMN {column_name} {column_type}")
+        existing_membership_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(folder_memberships)").fetchall()
+        }
+        for column_name, column_type in FOLDER_MEMBERSHIP_EXTRA_COLUMNS.items():
+            if column_name not in existing_membership_columns:
+                connection.execute(f"ALTER TABLE folder_memberships ADD COLUMN {column_name} {column_type}")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_instagram_user_id ON users(instagram_user_id) WHERE instagram_user_id IS NOT NULL AND instagram_user_id != ''")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_user_id ON reel_item_features(user_id)")
@@ -457,6 +483,7 @@ def create_tables():
         connection.execute("CREATE INDEX IF NOT EXISTS idx_user_folders_user_id ON user_folders(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_folder_memberships_user_id ON folder_memberships(user_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_folder_memberships_folder_id ON folder_memberships(folder_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_folder_adjudications_folder_id ON folder_adjudications(folder_id)")
 
 
 def ensure_default_user():

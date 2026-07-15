@@ -1041,6 +1041,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card h3 { margin:0 0 3px; font-size:1rem; } .folder-card .sub { color:var(--muted); font-size:.82rem; line-height:1.4; }
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
     .sug-chip { font-size:.66rem; color:#08121f; background:var(--accent); border-radius:20px; padding:2px 8px; margin-left:6px; }
+    .skip-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
     /* ---------- reel map overlay (cartoon mode) ---------- */
     .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:#aee3f2;
       font-family:'Fredoka', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif; }
@@ -2154,7 +2155,38 @@ def build_clipnest_v1_html(user_id: str) -> str:
     async function folderDecide(id, reel, action) {
       await fetch(`/folders/${id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
         body: JSON.stringify({ user_id: USER_ID, reel_id: reel }) });
+      // The skip itself is already saved; the why-prompt is optional and
+      // non-blocking — answering it teaches the list (negative example for
+      // the router), dismissing it costs nothing.
+      if (action === 'reject') openSkipWhy(id, reel);
       await openFolderDetail(id);
+    }
+    function openSkipWhy(folderId, reelId) {
+      document.getElementById('skipWhy')?.remove();
+      const ov = document.createElement('div');
+      ov.id = 'skipWhy'; ov.className = 'folder-overlay show';
+      ov.innerHTML = '<div class="folder-modal"><h3>Skipped</h3>'
+        + '<div class="sub">Why not this one? Your answer teaches this list what belongs.</div>'
+        + '<div class="skip-chips">'
+        + '<button class="newlist-btn ghost" type="button" data-why="Different topic">Different topic</button>'
+        + '<button class="newlist-btn ghost" type="button" data-why="Related, but not what this list is about">Related, not this</button>'
+        + '<button class="newlist-btn ghost" type="button" data-why="Just do not want this one here">Just this one</button></div>'
+        + '<label>Or say it in your own words</label>'
+        + '<input id="skipWhyText" type="text" placeholder="e.g. remedies are not restaurants" />'
+        + '<div class="row"><button class="newlist-btn ghost" id="skipWhyClose" type="button">No reason</button>'
+        + '<button class="newlist-btn" id="skipWhySave" type="button">Save</button></div></div>';
+      document.body.appendChild(ov);
+      const send = async (reason) => {
+        ov.remove();
+        if (!reason) return;
+        try {
+          await fetch(`/folders/${folderId}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ user_id: USER_ID, reel_id: reelId, reason }) });
+        } catch (e) {}
+      };
+      ov.querySelectorAll('[data-why]').forEach((b) => b.addEventListener('click', () => send(b.dataset.why)));
+      document.getElementById('skipWhySave').addEventListener('click', () => send(document.getElementById('skipWhyText').value.trim()));
+      document.getElementById('skipWhyClose').addEventListener('click', () => send(''));
     }
 
     /* ---------- REEL MAP (in-app overlay) ---------- */

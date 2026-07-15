@@ -3089,6 +3089,22 @@ def folders_app(request: Request):
     return app_shell(build_folders_html(user["id"]))
 
 
+@router.get("/dev-login")
+def dev_login(request: Request, user_id: str = "default"):
+    """Local-only session shortcut so the app can be tested without Google.
+    Hard-disabled wherever sessions are https-only (prod/staging) and for any
+    non-localhost client."""
+    from app.services.auth import SESSION_USER_KEY, get_user_by_id
+
+    client_host = request.client.host if request.client else ""
+    if settings.session_https_only or client_host not in {"127.0.0.1", "::1"}:
+        return RedirectResponse(url="/", status_code=303)
+    if not get_user_by_id(user_id):
+        return RedirectResponse(url="/", status_code=303)
+    request.session[SESSION_USER_KEY] = user_id
+    return RedirectResponse(url="/app", status_code=303)
+
+
 @router.get("/app/{user_id}", response_class=HTMLResponse)
 def user_app(user_id: str, request: Request):
     if is_demo_user(user_id):
