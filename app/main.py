@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -100,6 +101,8 @@ def startup_event():
 
 
 app.mount("/media", StaticFiles(directory=str(settings.media_dir), check_dir=False), name="media")
+# Brand assets (logo, home-screen icons, manifest) shipped with the app code.
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static"), check_dir=False), name="static")
 
 app.include_router(health_router)
 app.include_router(auth_router)

@@ -1073,6 +1073,9 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ClipNest</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="manifest" href="/static/manifest.json" />
   __GOOGLE_SCRIPT__
   <style>
     /* Matches the in-app theme (app/ui_ux/clipnest_v1.py): near-black flat
@@ -1114,6 +1117,13 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       border-radius:20px;
       background:var(--card);
       padding:22px 20px;
+    }
+    .hero-logo {
+      width:72px;
+      height:72px;
+      border-radius:18px;
+      display:block;
+      margin:0 0 16px;
     }
     .kicker {
       margin:0 0 10px;
@@ -1311,6 +1321,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 <body>
   <main class="shell">
     <section class="hero">
+      <img class="hero-logo" src="/static/icon-192.png" alt="ClipNest" />
       <p class="kicker">Live Reel Library</p>
       <h1>Sign in once. Connect Instagram once. Your reels stay yours.</h1>
       <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets each person DM reels to your Instagram account without mixing libraries.</p>

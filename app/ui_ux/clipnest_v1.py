@@ -12,6 +12,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0a0a0b" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="manifest" href="/static/manifest.json" />
   <title>ClipNest</title>
   <style>
     :root {
@@ -142,19 +145,22 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .search-plus { transition:transform .18s ease, background .18s ease; }
     /* Selecting mode: the + rotates into an x and hollows out = "cancel". */
     .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-pink); color:var(--brand-pink); transform:translateY(-50%) rotate(45deg); }
-    /* Brand loader: the logo's bookmark, gradient-filled, gently pulsing. */
+    /* Brand loader: the actual ClipNest logo, gently pulsing. */
     .load-wrap { display:flex; justify-content:center; padding:44px 0; }
     .spinner {
-      width:30px; height:38px; border:0; border-radius:0;
-      background:var(--brand-grad);
-      -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
-      mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
+      width:58px; height:58px; border:0; border-radius:15px;
+      background:url('/static/icon-192.png') center/contain no-repeat;
       animation:bookmarkPulse 1.1s ease-in-out infinite;
     }
     @keyframes bookmarkPulse {
-      0%, 100% { transform:scale(1); opacity:.55; }
-      50% { transform:scale(1.14); opacity:1; }
+      0%, 100% { transform:scale(1); opacity:.6; }
+      50% { transform:scale(1.12); opacity:1; }
     }
+    .brand-mark {
+      width:34px; height:34px; border-radius:9px; flex:0 0 auto;
+      background:url('/static/icon-192.png') center/contain no-repeat;
+    }
+    .greeting-row { display:flex; align-items:center; gap:11px; min-width:0; }
     /* tappable section header (Recently saved) */
     .section-head-btn { width:100%; background:none; border:0; padding:0; cursor:pointer;
       text-align:left; color:inherit; }
@@ -1622,7 +1628,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const status = pipelineStatus();
       app.innerHTML = `
         <div class="home-head">
-          <h1 class="greeting">${escapeHtml(greeting())}</h1>
+          <div class="greeting-row"><span class="brand-mark" aria-hidden="true"></span><h1 class="greeting">${escapeHtml(greeting())}</h1></div>
           <div class="icon-row">
             <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton" style="font-size:18px">🗺️</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
