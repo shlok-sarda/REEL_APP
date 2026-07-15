@@ -26,12 +26,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       --text:#f4f4f5;
       --muted:#8e8e96;
       --faint:#5c5c64;
-      /* Brand palette from the ClipNest logo: pink -> purple gradient on black,
-         violet glow, lavender for accent text. */
-      --accent:#a78bfa;
-      --brand-pink:#ff5b8f;
-      --brand-purple:#8b5cf6;
-      --brand-grad:linear-gradient(135deg, #ff5b8f 0%, #8b5cf6 100%);
+      /* Brand palette from the ClipNest logo: charcoal mascot on warm cream,
+         orange sparks. Dark app shell + warm orange accents. */
+      --accent:#f2a866;
+      --brand-hi:#f9a660;
+      --brand-deep:#ee7f2f;
+      --brand-grad:linear-gradient(135deg, #f9a660 0%, #ee7f2f 100%);
       --danger:#ff5b4d;
       --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
       --safe-top:env(safe-area-inset-top, 0px);
@@ -144,13 +144,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .search-plus:active { filter:brightness(1.1); }
     .search-plus { transition:transform .18s ease, background .18s ease; }
     /* Selecting mode: the + rotates into an x and hollows out = "cancel". */
-    .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-pink); color:var(--brand-pink); transform:translateY(-50%) rotate(45deg); }
-    /* Brand loader: the mascot itself (transparent cutout of the logo
-       character), gently pulsing on the dark background. */
+    .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-hi); color:var(--brand-hi); transform:translateY(-50%) rotate(45deg); }
+    /* Brand loader, square one: the simple bookmark silhouette in the brand
+       gradient, gently pulsing. */
     .load-wrap { display:flex; justify-content:center; padding:44px 0; }
     .spinner {
-      width:42px; height:62px; border:0; display:block;
-      background:url('/static/mascot.png') center/contain no-repeat;
+      width:30px; height:38px; border:0; display:block;
+      background:var(--brand-grad);
+      -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
+      mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h12a2 2 0 0 1 2 2v18l-8-5.2L4 22V4a2 2 0 0 1 2-2z'/%3E%3C/svg%3E") center/contain no-repeat;
       animation:bookmarkPulse 1.1s ease-in-out infinite;
     }
     @keyframes bookmarkPulse {
@@ -846,7 +848,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-weight:650;
     }
     .nav-button svg { width:23px; height:23px; }
-    .nav-button.active { color:#c9b3ff; }
+    .nav-button.active { color:#f5b878; }
 
     /* ---------- mini player ---------- */
     .reel-player {
@@ -1034,14 +1036,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-toolbar[hidden] { display:none; }
     .newlist-btn { display:inline-flex; align-items:center; gap:6px; font-size:.8rem; font-weight:650;
       color:#fff; background:var(--brand-grad); border:none; border-radius:20px; padding:7px 15px; cursor:pointer; }
-    .newlist-btn.ghost { background:none; color:var(--accent); border:1px solid rgba(139,92,246,.55); }
+    .newlist-btn.ghost { background:none; color:var(--accent); border:1px solid rgba(238,127,47,.5); }
     .newlist-btn:disabled { opacity:.45; }
     .m-card.selectable { cursor:pointer; position:relative; }
-    .m-card.selected { outline:2px solid var(--brand-purple); outline-offset:-2px; border-radius:16px; }
+    .m-card.selected { outline:2px solid var(--brand-deep); outline-offset:-2px; border-radius:16px; }
     .m-card .selring { position:absolute; top:10px; right:10px; width:22px; height:22px; border-radius:50%;
       border:2px solid rgba(255,255,255,.7); background:rgba(0,0,0,.35); z-index:3; display:none; }
     .m-card.selectable .selring { display:block; }
-    .m-card.selected .selring { background:var(--brand-purple); border-color:var(--brand-purple); }
+    .m-card.selected .selring { background:var(--brand-deep); border-color:var(--brand-deep); }
     .m-card.selected .selring::after { content:"✓"; color:#fff; font-size:13px; position:absolute; top:-1px; left:4px; }
     .selbar { position:fixed; left:50%; transform:translateX(-50%); bottom:84px; z-index:40; width:min(720px,92%);
       background:rgba(16,20,27,.96); border:1px solid var(--line); border-radius:16px; padding:10px 14px;
@@ -1084,9 +1086,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .map-empty span { font-weight:500; font-size:.8rem; color:var(--muted); }
     .pin-wrap { position:relative; width:48px; height:54px; }
     .pin-blob { position:absolute; left:2px; top:0; width:44px; height:44px; background:var(--card);
-      border:2px solid var(--brand-purple); border-radius:50%;
+      border:2px solid var(--brand-deep); border-radius:50%;
       display:flex; align-items:center; justify-content:center;
-      font-size:22px; box-shadow:0 6px 18px rgba(139,92,246,.35);
+      font-size:22px; box-shadow:0 6px 18px rgba(238,127,47,.35);
       animation:pinplop .5s cubic-bezier(.34,1.65,.6,1) both; }
     .pin-shadow { position:absolute; left:13px; bottom:0; width:22px; height:7px;
       background:rgba(0,0,0,.45); border-radius:50%; }
@@ -1549,9 +1551,9 @@ def build_clipnest_v1_html(user_id: str) -> str:
     // Placeholder gradients stay inside the brand family (purples, violets,
     // magentas on near-black) so empty cards still look like ClipNest.
     const PH_PALETTES = [
-      ['#241833', '#4c2f63'], ['#2a1230', '#5b2b6e'], ['#301024', '#6e2b52'],
-      ['#1c1533', '#3f2f78'], ['#251d3d', '#4e3a8c'], ['#331327', '#7a2f5c'],
-      ['#1f1a3a', '#443a7a'], ['#2d1638', '#63307a'],
+      ['#2b2018', '#5c4327'], ['#33241a', '#6e4a2b'], ['#241d18', '#4d3a2a'],
+      ['#2e1e12', '#63401f'], ['#26211c', '#514436'], ['#301c10', '#6b4a24'],
+      ['#221a14', '#48362a'], ['#2c2216', '#5d4426'],
     ];
     function gradFor(name) {
       let hash = 0;

@@ -1089,8 +1089,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       --text:#f4f4f5;
       --muted:#8e8e96;
       --faint:#5c5c64;
-      --tan:#a78bfa;
-      --brand-grad:linear-gradient(135deg, #ff5b8f 0%, #8b5cf6 100%);
+      --tan:#f2a866;
+      --brand-grad:linear-gradient(135deg, #f9a660 0%, #ee7f2f 100%);
       --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -1304,8 +1304,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       width:100%;
       min-height:60px;
       border-radius:16px;
-      border:1px dashed rgba(139,92,246,.55);
-      background: rgba(139,92,246,.12);
+      border:1px dashed rgba(242,140,56,.55);
+      background: rgba(242,140,56,.12);
       display:grid;
       place-items:center;
       font-size:1.25rem;
