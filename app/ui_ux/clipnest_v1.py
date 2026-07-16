@@ -95,6 +95,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .name-ask-sub { margin:2px 0 10px; font-size:.75rem; color:var(--muted); }
     .name-ask-row { display:flex; gap:8px; }
     .name-ask-row input { flex:1; min-width:0; background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--text); font-size:.9rem; }
+    .name-ask-row input::placeholder { color:var(--faint); opacity:.6; }
     .name-ask-row button { background:var(--accent); color:var(--bg); border:none; border-radius:10px; padding:0 16px; font-weight:700; }
     .name-ask-skip { background:none; border:none; color:var(--muted); font-size:.75rem; margin-top:8px; padding:0; }
 
@@ -840,8 +841,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       z-index:30;
       width:min(430px, 100%);
       transform:translateX(-50%);
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
+      display:flex;
       border-top:1px solid var(--line);
       background:rgba(10,10,11,.86);
       -webkit-backdrop-filter:blur(18px);
@@ -849,6 +849,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       padding:10px 26px calc(10px + var(--safe-bottom));
     }
     .nav-button {
+      flex:1;
       display:grid;
       gap:4px;
       place-items:center;
@@ -1197,8 +1198,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
       font-size:.7rem;
       font-weight:750;
     }
-    .quick-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
-    .quick-action { display:grid; place-items:center; gap:6px; color:var(--muted); font-size:.68rem; font-weight:650; text-decoration:none; }
+    .quick-actions { display:flex; gap:8px; margin-bottom:16px; }
+    .quick-action { flex:1; display:grid; place-items:center; gap:6px; color:var(--muted); font-size:.68rem; font-weight:650; text-decoration:none; }
     .quick-action span {
       width:40px;
       height:40px;
@@ -2537,7 +2538,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       return '<section class="name-ask">'
         + '<p class="name-ask-title">What should we call you?</p>'
         + '<p class="name-ask-sub">Just your first name is fine.</p>'
-        + '<div class="name-ask-row"><input id="nameAskInput" type="text" maxlength="60" placeholder="' + escapeHtml(user.display_name || 'Your name') + '" autocomplete="name" />'
+        + '<div class="name-ask-row"><input id="nameAskInput" type="text" maxlength="60" placeholder="Type your name…" autocomplete="name" />'
         + '<button id="nameSaveBtn" type="button">Save</button></div>'
         + '<button id="nameSkipBtn" type="button" class="name-ask-skip">Skip for now</button>'
         + '</section>';
