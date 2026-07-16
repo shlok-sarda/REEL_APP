@@ -62,6 +62,14 @@ def _queue_debug(full: bool = False) -> dict:
     except Exception as exc:
         info["db_writable"] = False
         info["db_write_error"] = str(exc)[:200]
+    try:
+        from app.services.jobs import openai_pause_until
+
+        pause = openai_pause_until()
+        if pause:
+            info["openai_paused_until"] = pause
+    except Exception:
+        pass
     if not full:
         return info
     try:

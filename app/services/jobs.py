@@ -24,6 +24,70 @@ MAX_SINGLE_REEL_SECONDS = 900
 # one-job-per-process chain refreshes the mtime on every (re)start.
 WORKER_WEDGE_SECONDS = MAX_SINGLE_REEL_SECONDS + STALE_RUNNING_GRACE_SECONDS
 
+# When the OpenAI key hits 429/insufficient-quota, park the whole queue this
+# long instead of burning every reel's attempts against a dead key. The next
+# claim after the pause acts as the probe: it repauses if the key is still out.
+OPENAI_PAUSE_FLAG = "openai_pause_until"
+OPENAI_PAUSE_MINUTES = 15
+
+_QUOTA_ERROR_SIGNATURES = (
+    "insufficient_quota",
+    "ratelimiterror",
+    "rate_limit",
+    "rate limit",
+    "429",
+)
+
+
+def is_quota_failure(message: str) -> bool:
+    text = (message or "").lower()
+    return any(signature in text for signature in _QUOTA_ERROR_SIGNATURES)
+
+
+def openai_pause_until() -> str:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT executed_at FROM maintenance_flags WHERE flag = ? LIMIT 1",
+                (OPENAI_PAUSE_FLAG,),
+            ).fetchone()
+        return row["executed_at"] if row else ""
+    except Exception:
+        return ""
+
+
+def pause_queue_for_quota(job_id: int, claim_started_at: str | None = None) -> str:
+    """Requeue the job without burning an attempt and pause all claims.
+
+    A quota failure says nothing about the reel itself — failing it would
+    exhaust its attempts against a dead key and show the user a broken reel.
+    The job goes back to 'pending' (users keep seeing "processing"), and
+    claims resume automatically once the pause lapses.
+    """
+    until = (datetime.now() + timedelta(minutes=OPENAI_PAUSE_MINUTES)).isoformat(
+        timespec="seconds"
+    )
+    with get_connection() as connection:
+        query = """
+            UPDATE processing_jobs
+            SET status = 'pending',
+                started_at = '',
+                attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
+                error_message = 'Waiting for OpenAI quota/rate limit to recover'
+            WHERE id = ?
+        """
+        params: list = [job_id]
+        if claim_started_at:
+            query += " AND status = 'running' AND started_at = ?"
+            params.append(claim_started_at)
+        connection.execute(query, params)
+        connection.execute(
+            "INSERT OR REPLACE INTO maintenance_flags (flag, executed_at) VALUES (?, ?)",
+            (OPENAI_PAUSE_FLAG, until),
+        )
+    print(f"[jobs] OpenAI quota/rate-limit failure — queue paused until {until}", flush=True)
+    return until
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -201,6 +265,9 @@ def claim_next_job() -> dict | None:
             _fail_exhausted_jobs(connection, "pending")
     except Exception as exc:
         print(f"[jobs] pre-claim cleanup failed: {exc}", flush=True)
+    pause = openai_pause_until()
+    if pause and pause > _now():
+        return None
     with get_connection() as connection:
         row = connection.execute(
             """

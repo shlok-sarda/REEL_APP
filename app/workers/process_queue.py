@@ -16,7 +16,9 @@ from app.services.jobs import (
     complete_job,
     create_worker_lock,
     fail_job,
+    is_quota_failure,
     job_timeout_seconds,
+    pause_queue_for_quota,
     release_worker_lock,
 )
 from app.services.reel_ingest import get_reel_by_id
@@ -93,6 +95,9 @@ def process_job(job: dict):
 
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "Processor failed"
+        if is_quota_failure(message):
+            pause_queue_for_quota(job["id"], claim_token)
+            return
         fail_job(job["id"], message, claim_token)
         return
 
@@ -102,7 +107,11 @@ def process_job(job: dict):
             fail_job(job["id"], "Missing reel after processing", claim_token)
             return
         if reel.get("status") != "completed":
-            fail_job(job["id"], failure_summary_for_reel(job["reel_id"]), claim_token)
+            summary = failure_summary_for_reel(job["reel_id"])
+            if is_quota_failure(summary):
+                pause_queue_for_quota(job["id"], claim_token)
+                return
+            fail_job(job["id"], summary, claim_token)
             return
 
     try:
