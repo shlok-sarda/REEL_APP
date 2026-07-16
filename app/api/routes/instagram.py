@@ -118,6 +118,55 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     return sender_id, username
 
 
+def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) -> int:
+    """Ingest reels the sender shared before their link completed.
+
+    New users DM the link code and immediately start sharing reels; a reel
+    that outruns link completion arrives from a sender the webhook doesn't
+    recognize and used to be dropped silently. Those events are kept as
+    outcome='buffered' with the URL in detail — replay them the moment the
+    link lands. append_reel dedupes on (user_id, url), so replaying twice
+    can't duplicate a reel.
+    """
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT detail FROM instagram_webhook_events
+            WHERE kind = 'reel' AND outcome = 'buffered' AND sender_id = ?
+            ORDER BY id ASC
+            """,
+            (sender_id,),
+        ).fetchall()
+    saved = 0
+    for row in rows:
+        url = (row["detail"] or "").strip()
+        if not is_valid_instagram_url(url):
+            continue
+        try:
+            reel = append_reel(url, user_id=user_id, source="instagram")
+            enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+            saved += 1
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="saved", detail=f"drained after link: {url}",
+            )
+        except Exception as exc:
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="drain_failed", detail=f"{url} :: {exc}",
+            )
+    if saved:
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    "UPDATE instagram_webhook_events SET outcome = 'drained' WHERE kind = 'reel' AND outcome = 'buffered' AND sender_id = ?",
+                    (sender_id,),
+                )
+        except Exception:
+            pass
+    return saved
+
+
 @router.get("/webhook")
 def instagram_webhook_verify(
     hub_mode: str = Query(default="", alias="hub.mode"),
@@ -161,12 +210,14 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
         link_code = _extract_link_code(event)
         if link_code:
             try:
-                complete_instagram_link(link_code, sender_id, instagram_username=sender_username)
+                linked_user = complete_instagram_link(link_code, sender_id, instagram_username=sender_username)
                 linked_accounts += 1
                 _log_webhook_event(
                     "link", sender_id=sender_id, sender_username=sender_username,
                     link_code=link_code, outcome="linked",
                 )
+                if linked_user.get("id"):
+                    reels_saved += _drain_buffered_reels(sender_id, sender_username, linked_user["id"])
             except HTTPException as exc:
                 ignored_events += 1
                 _log_webhook_event(
@@ -177,11 +228,21 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
 
         user = get_user_by_instagram_user_id(sender_id)
         if not user:
+            # Buffer instead of drop: keep each URL so it can be replayed when
+            # this sender's link code arrives (possibly later in this same
+            # webhook delivery — event order within a payload is arbitrary).
+            buffered_urls = _extract_candidate_urls(event)
+            for url in buffered_urls:
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="buffered", detail=url,
+                )
+            if not buffered_urls:
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="ignored", detail="sender id not linked to any account",
+                )
             ignored_events += 1
-            _log_webhook_event(
-                "reel", sender_id=sender_id, sender_username=sender_username,
-                outcome="ignored", detail="sender id not linked to any account",
-            )
             continue
 
         urls = _extract_candidate_urls(event)
