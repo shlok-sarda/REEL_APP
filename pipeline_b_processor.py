@@ -213,6 +213,16 @@ def run_pipeline(url: str) -> dict:
     else:
         visual_status = "download_missing"
 
+    # Nothing was fetchable: no video, no caption, no transcript. Running the
+    # router/branch/judge calls anyway makes the model invent a category for
+    # empty air — the reel "completes" as a junk card. Raising here routes it
+    # through process_csv's failure row (Folder=failed), which the app shows
+    # as a clean "needs attention" state, and skips five pointless LLM calls.
+    if not video_path and not str(result.get("caption") or "").strip() and not str(result.get("transcript") or "").strip():
+        raise ValueError(
+            "Reel unavailable: no video, caption, or transcript could be fetched (deleted, private, or invalid link)"
+        )
+
     router = router_call(result, visual_data)
     branch_a = router["top_1_branch"]
     branch_b = router["top_2_branch"]
