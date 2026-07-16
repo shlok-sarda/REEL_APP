@@ -20,12 +20,14 @@ class GoogleLoginRequest(BaseModel):
 class UserProfile(BaseModel):
     id: str
     display_name: str = ""
+    preferred_name: str = ""
     email: str = ""
     picture_url: str = ""
     telegram_user_id: str = ""
     telegram_username: str = ""
     instagram_user_id: str = ""
     instagram_username: str = ""
+    is_admin: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -33,6 +35,10 @@ class SessionResponse(BaseModel):
     user: Optional[UserProfile] = None
     telegram_connected: bool = False
     instagram_connected: bool = False
+
+
+class ProfileNameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
 
 
 class TelegramLinkCompleteRequest(BaseModel):

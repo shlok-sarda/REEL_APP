@@ -53,6 +53,7 @@ def row_to_user(row) -> dict[str, Any] | None:
         "telegram_username": normalize(row["telegram_username"]),
         "instagram_user_id": normalize(row["instagram_user_id"]),
         "instagram_username": normalize(row["instagram_username"]),
+        "preferred_name": normalize(row["preferred_name"]),
         "created_at": normalize(row["created_at"]),
         "last_login_at": normalize(row["last_login_at"]),
         "updated_at": normalize(row["updated_at"]),
@@ -64,7 +65,7 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
             FROM users
             WHERE id = ?
             LIMIT 1
@@ -79,7 +80,7 @@ def get_user_by_google_sub(google_sub: str) -> dict[str, Any] | None:
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
             FROM users
             WHERE google_sub = ?
             LIMIT 1
@@ -94,7 +95,7 @@ def get_user_by_telegram_user_id(telegram_user_id: str) -> dict[str, Any] | None
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
             FROM users
             WHERE telegram_user_id = ?
             LIMIT 1
@@ -109,7 +110,7 @@ def get_user_by_instagram_user_id(instagram_user_id: str) -> dict[str, Any] | No
         row = connection.execute(
             """
             SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
-                   telegram_username, instagram_user_id, instagram_username, created_at, last_login_at, updated_at
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
             FROM users
             WHERE instagram_user_id = ?
             LIMIT 1
@@ -191,6 +192,59 @@ def require_user(request: Request) -> dict[str, Any]:
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
     return user
+
+
+def user_is_admin(user: dict[str, Any] | None) -> bool:
+    if not user:
+        return False
+    email = normalize(user.get("email")).lower()
+    return bool(email) and email in settings.admin_emails
+
+
+def require_admin(request: Request) -> dict[str, Any]:
+    user = require_user(request)
+    if not user_is_admin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return user
+
+
+def set_preferred_name(user_id: str, name: str) -> dict[str, Any] | None:
+    cleaned = normalize(name)[:60]
+    if not cleaned:
+        return get_user_by_id(user_id)
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE users SET preferred_name = ?, updated_at = ? WHERE id = ?",
+            (cleaned, iso_now(), user_id),
+        )
+    return get_user_by_id(user_id)
+
+
+def list_users_admin() -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT u.id, u.display_name, u.preferred_name, u.email, u.created_at, u.last_login_at,
+                   u.instagram_username, u.instagram_user_id,
+                   (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id) AS reel_count
+            FROM users u
+            ORDER BY (u.last_login_at = '') ASC, u.last_login_at DESC, u.created_at DESC
+            """
+        ).fetchall()
+    return [
+        {
+            "id": normalize(row["id"]),
+            "name": normalize(row["preferred_name"]) or normalize(row["display_name"]),
+            "google_name": normalize(row["display_name"]),
+            "email": normalize(row["email"]),
+            "created_at": normalize(row["created_at"]),
+            "last_login_at": normalize(row["last_login_at"]),
+            "instagram_username": normalize(row["instagram_username"]),
+            "instagram_connected": bool(normalize(row["instagram_user_id"])),
+            "reel_count": int(row["reel_count"] or 0),
+        }
+        for row in rows
+    ]
 
 
 def ensure_user_access(request: Request, requested_user_id: str | None, allow_demo: bool = False) -> str:

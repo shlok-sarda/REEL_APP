@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.schemas import GoogleLoginRequest, InstagramLinkStartResponse, SessionResponse, TelegramLinkCompleteRequest, UserProfile
+from app.schemas import GoogleLoginRequest, InstagramLinkStartResponse, ProfileNameRequest, SessionResponse, TelegramLinkCompleteRequest, UserProfile
 from app.services.auth import (
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
@@ -12,6 +12,8 @@ from app.services.auth import (
     create_login_csrf,
     current_user,
     login_or_create_google_user,
+    set_preferred_name,
+    user_is_admin,
     verify_google_credential,
 )
 
@@ -28,12 +30,14 @@ def _session_payload(request: Request) -> SessionResponse:
         user=UserProfile(
             id=user["id"],
             display_name=user["display_name"],
+            preferred_name=user["preferred_name"],
             email=user["email"],
             picture_url=user["picture_url"],
             telegram_user_id=user["telegram_user_id"],
             telegram_username=user["telegram_username"],
             instagram_user_id=user["instagram_user_id"],
             instagram_username=user["instagram_username"],
+            is_admin=user_is_admin(user),
         ),
         telegram_connected=bool(user["telegram_user_id"]),
         instagram_connected=bool(user["instagram_user_id"]),
@@ -57,6 +61,15 @@ def google_login(payload: GoogleLoginRequest, request: Request):
     user = login_or_create_google_user(token_payload)
     request.session[SESSION_USER_KEY] = user["id"]
     request.session[SESSION_CSRF_KEY] = create_login_csrf(request)
+    return _session_payload(request)
+
+
+@router.post("/profile-name", response_model=SessionResponse)
+def profile_name(payload: ProfileNameRequest, request: Request):
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    set_preferred_name(user["id"], payload.name)
     return _session_payload(request)
 
 

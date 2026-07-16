@@ -17,6 +17,9 @@ class Settings:
     session_secret: str = os.getenv("SESSION_SECRET", "change-me-before-launch")
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").strip()
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    admin_emails: frozenset = frozenset(
+        email.strip().lower() for email in os.getenv("ADMIN_EMAILS", "").split(",") if email.strip()
+    )
     telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
     telegram_ingest_secret: str = os.getenv("TELEGRAM_INGEST_SECRET", "").strip()
     instagram_app_username: str = os.getenv("INSTAGRAM_APP_USERNAME", "").strip().lstrip("@")

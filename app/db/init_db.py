@@ -379,6 +379,7 @@ USER_EXTRA_COLUMNS = {
     "telegram_username": "TEXT NOT NULL DEFAULT ''",
     "instagram_user_id": "TEXT NOT NULL DEFAULT ''",
     "instagram_username": "TEXT NOT NULL DEFAULT ''",
+    "preferred_name": "TEXT NOT NULL DEFAULT ''",
     "last_login_at": "TEXT NOT NULL DEFAULT ''",
     "updated_at": "TEXT NOT NULL DEFAULT ''",
 }

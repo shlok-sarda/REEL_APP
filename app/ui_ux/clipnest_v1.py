@@ -88,6 +88,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     .icon-button:active, .back-button:active { background:var(--soft); }
     .icon-button svg, .back-button svg { width:22px; height:22px; }
+    .icon-button.spinning svg { animation: cn-spin .7s linear infinite; }
+    @keyframes cn-spin { to { transform: rotate(360deg); } }
+    .name-ask { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px; margin:0 0 14px; }
+    .name-ask-title { margin:0; font-family:var(--serif); font-size:1.05rem; font-weight:600; color:var(--text); }
+    .name-ask-sub { margin:2px 0 10px; font-size:.75rem; color:var(--muted); }
+    .name-ask-row { display:flex; gap:8px; }
+    .name-ask-row input { flex:1; min-width:0; background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--text); font-size:.9rem; }
+    .name-ask-row button { background:var(--accent); color:var(--bg); border:none; border-radius:10px; padding:0 16px; font-weight:700; }
+    .name-ask-skip { background:none; border:none; color:var(--muted); font-size:.75rem; margin-top:8px; padding:0; }
 
     .section-head {
       display:flex;
@@ -1351,6 +1360,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
     const ARROW_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
     const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>';
+    const MAP_PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
     const BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 
     function escapeHtml(value) {
@@ -1635,7 +1645,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <div class="greeting-row"><span class="brand-mark" aria-hidden="true"></span><h1 class="greeting">${escapeHtml(greeting())}</h1></div>
           <div class="icon-row">
-            <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton" style="font-size:18px">🗺️</button>
+            <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton">${MAP_PIN_SVG}</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
             <div id="notifPopover" class="notif-popover" ${state.notifOpen ? '' : 'hidden'}>
@@ -1649,6 +1659,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
             </div>
           </div>
         </div>
+        ${renderNamePrompt()}
         <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /><button id="newListBtn" class="search-plus${state.selecting ? ' active' : ''}" type="button" aria-label="New list from search">+</button></label>
         <section id="homeResults" ${searching ? '' : 'hidden'}></section>
         <div id="homeBrowse" ${searching ? 'hidden' : ''}>
@@ -1705,7 +1716,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
           }
         });
       }
-      document.getElementById('refreshButton')?.addEventListener('click', loadData);
+      document.getElementById('refreshButton')?.addEventListener('click', manualRefresh);
+      document.getElementById('nameSaveBtn')?.addEventListener('click', saveName);
+      document.getElementById('nameSkipBtn')?.addEventListener('click', () => {
+        try { localStorage.setItem('cn_name_skip', '1'); } catch (_) {}
+        render();
+      });
+      document.getElementById('nameAskInput')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') saveName();
+      });
       bindChips();
       const recentsData = recentItems(24);
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
@@ -2393,13 +2412,15 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <section class="set-section">
           <h2 class="set-title">Account</h2>
           <div class="set-card">
-            <div class="set-row">Signed in as <span class="value">${escapeHtml(USER_ID)}</span></div>
+            <div class="set-row">Signed in as <span class="value">${escapeHtml(accountLabel())}</span></div>
+            <div class="set-row">Email <span class="value">${escapeHtml(state.session?.user?.email || '—')}</span></div>
             <div class="set-row">App build <span class="value">__BUILD_SHA__</span></div>
             <div class="set-row">Instagram <span class="value">${instagramStatusLabel()}</span></div>
             ${renderInstagramRows()}
             <button class="set-row danger" type="button" id="logoutButton">Log out</button>
           </div>
         </section>
+        ${renderAdminUsers()}
         <section class="set-section">
           <h2 class="set-title">Pipeline</h2>
           <div class="set-card">
@@ -2422,13 +2443,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
           </section>
         </section>
       `;
-      document.getElementById('profileRefresh')?.addEventListener('click', loadData);
+      document.getElementById('profileRefresh')?.addEventListener('click', manualRefresh);
       document.getElementById('retryUnsortedButton')?.addEventListener('click', retryUnsorted);
       document.getElementById('logoutButton')?.addEventListener('click', logout);
-      document.getElementById('unlinkInstagramButton')?.addEventListener('click', unlinkInstagram);
       document.getElementById('connectInstagramButton')?.addEventListener('click', connectInstagram);
       document.getElementById('igNewCodeButton')?.addEventListener('click', connectInstagram);
       document.getElementById('igLinkDoneButton')?.addEventListener('click', loadData);
+      loadAdminUsers();
     }
     async function retryUnsorted() {
       const button = document.getElementById('retryUnsortedButton');
@@ -2477,7 +2498,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const session = state.session;
       if (!session || !session.authenticated) return '';
       if (session.instagram_connected) {
-        return `<button class="set-row" type="button" id="unlinkInstagramButton">Unlink Instagram <span class="value">Start a fresh library</span></button>`;
+        return '';
       }
       if (state.igLink) {
         return `
@@ -2502,25 +2523,85 @@ def build_clipnest_v1_html(user_id: str) -> str:
       }
       renderProfile();
     }
-    async function unlinkInstagram() {
-      const confirmed = window.confirm(
-        'Unlink this Instagram account?\\n\\n' +
-        'Your current library stays saved on this account, but new reels will stop arriving here. ' +
-        'You can then sign in with another Google account and connect the same Instagram to build a fresh library.'
-      );
-      if (!confirmed) return;
-      const button = document.getElementById('unlinkInstagramButton');
-      if (button) { button.disabled = true; button.textContent = 'Unlinking…'; }
+    function accountLabel() {
+      const user = state.session && state.session.user;
+      if (!user) return USER_ID;
+      return user.preferred_name || user.display_name || user.email || USER_ID;
+    }
+    function renderNamePrompt() {
+      const user = state.session && state.session.authenticated && state.session.user;
+      if (!user || user.preferred_name) return '';
+      let skipped = false;
+      try { skipped = localStorage.getItem('cn_name_skip') === '1'; } catch (_) {}
+      if (skipped) return '';
+      return '<section class="name-ask">'
+        + '<p class="name-ask-title">What should we call you?</p>'
+        + '<p class="name-ask-sub">Just your first name is fine.</p>'
+        + '<div class="name-ask-row"><input id="nameAskInput" type="text" maxlength="60" placeholder="' + escapeHtml(user.display_name || 'Your name') + '" autocomplete="name" />'
+        + '<button id="nameSaveBtn" type="button">Save</button></div>'
+        + '<button id="nameSkipBtn" type="button" class="name-ask-skip">Skip for now</button>'
+        + '</section>';
+    }
+    async function saveName() {
+      const input = document.getElementById('nameAskInput');
+      const name = (input && input.value ? input.value : '').trim();
+      if (!name) { if (input) input.focus(); return; }
+      const button = document.getElementById('nameSaveBtn');
+      if (button) { button.disabled = true; button.textContent = 'Saving…'; }
       try {
-        const response = await fetch('/auth/instagram/disconnect', { method: 'POST', credentials: 'same-origin' });
-        if (!response.ok) throw new Error('Failed to unlink');
-        state.igLink = null;
-        window.alert('Instagram unlinked. Log out, then sign in with your other Google account and connect Instagram there.');
-      } catch (error) {
-        window.alert('Could not unlink Instagram. Please try again.');
-        if (button) { button.disabled = false; button.textContent = 'Unlink Instagram (start a fresh library)'; }
+        const response = await fetch('/auth/profile-name', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        if (!response.ok) throw new Error('save failed');
+        state.session = await response.json();
+      } catch (_) {
+        if (button) { button.disabled = false; button.textContent = 'Save'; }
+        return;
       }
-      loadData();
+      render();
+    }
+    function loginAgo(iso) {
+      if (!iso) return 'never';
+      const then = new Date(iso);
+      if (Number.isNaN(then.getTime())) return iso;
+      const mins = Math.max(0, Math.round((Date.now() - then.getTime()) / 60000));
+      if (mins < 2) return 'just now';
+      if (mins < 60) return mins + ' min ago';
+      const hours = Math.round(mins / 60);
+      if (hours < 24) return hours + 'h ago';
+      const days = Math.round(hours / 24);
+      return days + 'd ago';
+    }
+    function renderAdminUsers() {
+      if (!state.session?.user?.is_admin) return '';
+      const users = state.adminUsers;
+      const body = !users
+        ? '<div class="set-row">Loading users…</div>'
+        : (users.length ? users.map((u) => {
+            const name = u.name || (u.email ? u.email.split('@')[0] : u.id);
+            const ig = u.instagram_connected ? (u.instagram_username ? '@' + u.instagram_username : 'IG linked') : 'no IG';
+            return '<div class="set-row"><span>' + escapeHtml(name)
+              + '<br><small style="color:var(--muted)">' + escapeHtml(u.email || '—') + '</small></span>'
+              + '<span class="value" style="text-align:right">' + u.reel_count + ' reels · ' + escapeHtml(ig)
+              + '<br><small>seen ' + escapeHtml(loginAgo(u.last_login_at)) + '</small></span></div>';
+          }).join('') : '<div class="set-row">No signups yet</div>');
+      const count = users ? ' · ' + users.length : '';
+      return '<section class="set-section"><h2 class="set-title">People (admin' + count + ')</h2><div class="set-card">' + body + '</div></section>';
+    }
+    function loadAdminUsers() {
+      if (!state.session?.user?.is_admin || state.adminUsers || state.adminUsersLoading) return;
+      state.adminUsersLoading = true;
+      fetch('/admin/users', { credentials: 'same-origin' })
+        .then((response) => (response.ok ? response.json() : { users: [] }))
+        .then((payload) => {
+          state.adminUsers = payload.users || [];
+          state.adminUsersLoading = false;
+          render();
+        })
+        .catch(() => { state.adminUsers = []; state.adminUsersLoading = false; });
     }
     async function logout() {
       const button = document.getElementById('logoutButton');
@@ -2704,6 +2785,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     function openSheetForItem(item) {
       const media = mediaFor(item);
+      const isAdmin = !!(state.session && state.session.user && state.session.user.is_admin);
       actionSheet.innerHTML = `
         <div id="sheetMedia" class="sheet-media">
           ${/\\.mp4($|[?#])/i.test(media) ? `<video src="${escapeHtml(media)}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(media)}" alt="" onerror="this.remove()" />`}
@@ -2715,11 +2797,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
           <div class="sheet-title-row"><h2 class="sheet-title">${escapeHtml(item.name)}</h2><span class="type-badge">${videoFor(item) ? 'Video' : 'Saved'}</span></div>
           <div class="quick-actions">
             <button id="shareItem" class="quick-action" type="button"><span>⇧</span>Share</button>
-            <button id="copyLinkItem" class="quick-action" type="button"><span>⧉</span>Copy Link</button>
+            ${isAdmin ? '<button id="copyLinkItem" class="quick-action" type="button"><span>⧉</span>Copy Link</button>' : ''}
             <a class="quick-action" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>↗</span>Open</a>
           </div>
           <div class="sheet-list">
-            ${state.session?.authenticated && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
+            ${isAdmin && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
             <button id="deleteItem" class="sheet-row danger" type="button"><span>Delete Item</span><span>›</span></button>
           </div>
         </div>`;
@@ -2739,7 +2821,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         // No native share sheet (e.g. desktop): fall back to copying the link.
         copyItemLink(link, event.currentTarget, 'Share');
       });
-      document.getElementById('copyLinkItem').addEventListener('click', (event) => {
+      document.getElementById('copyLinkItem')?.addEventListener('click', (event) => {
         copyItemLink(item.url, event.currentTarget, 'Copy Link');
       });
     }
@@ -2847,7 +2929,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       else if (state.screen === 'recents') renderRecents();
       else renderLibrary();
     }
-    async function loadData() {
+    async function loadData(force = false) {
       const firstLoad = state.loading;
       if (firstLoad) render();
       try {
@@ -2874,12 +2956,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
       scheduleStatusPolling();
       // Background refreshes must never yank the UI out from under the user:
       // skip the re-render while they are typing, selecting, or in a sheet/player.
-      const typing = document.activeElement && document.activeElement.id === 'deepSearchInput' && state.magicQuery.trim();
-      const busy = !firstLoad && (state.selecting || typing
+      const active = document.activeElement;
+      const typing = active && ((active.id === 'deepSearchInput' && state.magicQuery.trim()) || active.id === 'nameAskInput');
+      const busy = !force && !firstLoad && (state.selecting || typing
         || actionSheet.classList.contains('visible')
         || miniPlayer.classList.contains('visible'));
       if (!busy) render();
       loadFolders();
+    }
+    function manualRefresh(event) {
+      // User-initiated refresh: show a spinner and always re-render when done.
+      const button = event.currentTarget;
+      if (button) button.classList.add('spinning');
+      loadData(true).finally(() => { if (button) button.classList.remove('spinning'); });
     }
     function scheduleStatusPolling() {
       clearTimeout(state.pollTimer);

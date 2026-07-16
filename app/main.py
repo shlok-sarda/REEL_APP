@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.deep_search import router as deep_search_router
@@ -106,6 +107,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent /
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(webapp_router)
 app.include_router(telegram_router)
 app.include_router(instagram_router)
