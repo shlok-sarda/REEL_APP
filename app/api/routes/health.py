@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+import secrets as _secrets
+
+from fastapi import APIRouter, HTTPException, status
 
 from app.config import settings
 from app.schemas import HealthResponse
@@ -23,8 +25,13 @@ def _queue_snapshot() -> dict:
         return {}
 
 
-def _queue_debug() -> dict:
-    """Read-only view of the recovery machinery's inputs, for remote triage."""
+def _queue_debug(full: bool = False) -> dict:
+    """Read-only view of the recovery machinery's inputs, for remote triage.
+
+    The default (public) view carries only operational vitals safe for an
+    unauthenticated endpoint. full=True adds worker/job forensics — including
+    other users' reel ids and error text — so it requires the debug token.
+    """
     import os
     import time
     from datetime import datetime
@@ -55,6 +62,8 @@ def _queue_debug() -> dict:
     except Exception as exc:
         info["db_writable"] = False
         info["db_write_error"] = str(exc)[:200]
+    if not full:
+        return info
     try:
         from app.services.jobs import _pid_is_worker, _stale_cutoff_for
 
@@ -209,24 +218,24 @@ def _run_inline_fix() -> dict:
     return report
 
 
+def _debug_authorized(token: str) -> bool:
+    # Reuses the ingest secret so no new env var is needed. Fails closed when
+    # the secret is unset — the full debug view stays off rather than open.
+    secret = settings.telegram_ingest_secret
+    return bool(secret) and _secrets.compare_digest(token.strip(), secret)
+
+
 @router.get("/health", response_model=HealthResponse)
-def health_check(fix: int = 0):
+def health_check(fix: int = 0, token: str = ""):
     ensure_storage()
+    authorized = _debug_authorized(token)
+    if fix and not authorized:
+        # fix=1 runs heavy recovery (25s synchronous worker probe, a paid
+        # OpenAI call) — not something the open internet gets to trigger.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debug token required")
+    debug = _queue_debug(full=authorized)
     if fix:
-        debug = _queue_debug()
         debug["fix_report"] = _run_inline_fix()
-        return HealthResponse(
-            service="reel-organizer-api",
-            endpoint="/instagram/webhook",
-            environment=settings.app_env,
-            storage_dir=str(settings.storage_dir),
-            media_dir=str(settings.media_dir),
-            csv_file=str(settings.reel_urls_csv),
-            media_storage_mode="r2+local_cache" if settings.r2_enabled else "local_only",
-            r2_enabled=settings.r2_enabled,
-            queue=_queue_snapshot(),
-            queue_debug=debug,
-        )
     return HealthResponse(
         service="reel-organizer-api",
         endpoint="/instagram/webhook",
@@ -237,5 +246,5 @@ def health_check(fix: int = 0):
         media_storage_mode="r2+local_cache" if settings.r2_enabled else "local_only",
         r2_enabled=settings.r2_enabled,
         queue=_queue_snapshot(),
-        queue_debug=_queue_debug(),
+        queue_debug=debug,
     )
