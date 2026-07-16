@@ -1,6 +1,7 @@
 import csv
 import json
 import re
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -180,6 +181,22 @@ def get_reel_by_url(url: str, user_id: str | None = None) -> dict | None:
 
 
 def append_reel(url: str, user_id: str = "default", source: str = "telegram") -> dict:
+    # Concurrent ingests can still collide two ways: a double-send of the same
+    # URL slips past the existence check (IntegrityError on UNIQUE(user_id,
+    # url) — the retry's existence check then returns the winner's row), and
+    # WAL read→write upgrades can hit a stale snapshot under write contention
+    # (OperationalError). Re-running the flow on a fresh connection resolves
+    # both.
+    last_error: Exception | None = None
+    for _ in range(5):
+        try:
+            return _append_reel_attempt(url, user_id=user_id, source=source)
+        except (sqlite3.IntegrityError, sqlite3.OperationalError) as exc:
+            last_error = exc
+    raise last_error
+
+
+def _append_reel_attempt(url: str, user_id: str = "default", source: str = "telegram") -> dict:
     normalized_user = ensure_user(user_id)
     normalized_url = normalize(url)
     shortcode = extract_shortcode(normalized_url)
@@ -199,40 +216,43 @@ def append_reel(url: str, user_id: str = "default", source: str = "telegram") ->
             sync_csv_from_db()
             return reel
 
-        reel = {
-            "id": next_reel_id(),
-            "user_id": normalized_user,
-            "url": normalized_url,
-            "shortcode": shortcode,
-            "received_at": timestamp,
-            "status": "pending",
-            "media_status": "not_downloaded",
-            "local_video_path": "",
-            "thumbnail_path": "",
-        }
+        # The id is computed inside the INSERT itself: SQLite allows only one
+        # writer at a time, so the MAX() subquery always sees the previous
+        # insert — unlike next_reel_id(), which max-scanned on a separate
+        # connection and handed two simultaneous ingests the same id.
         connection.execute(
             """
             INSERT INTO reels (
                 id, user_id, url, shortcode, received_at, status, media_status,
                 local_video_path, thumbnail_path, source, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                'reel_' || (
+                    SELECT COALESCE(MAX(CAST(SUBSTR(id, 6) AS INTEGER)), 0) + 1
+                    FROM reels
+                    WHERE id LIKE 'reel_%'
+                ),
+                ?, ?, ?, ?, 'pending', 'not_downloaded', '', '', ?, ?, ?
+            )
             """,
             (
-                reel["id"],
-                reel["user_id"],
-                reel["url"],
-                reel["shortcode"],
-                reel["received_at"],
-                reel["status"],
-                reel["media_status"],
-                reel["local_video_path"],
-                reel["thumbnail_path"],
+                normalized_user,
+                normalized_url,
+                shortcode,
+                timestamp,
                 normalize(source) or "telegram",
                 timestamp,
                 timestamp,
             ),
         )
+        row = connection.execute(
+            """
+            SELECT id, user_id, url, shortcode, received_at, status, media_status, local_video_path, thumbnail_path
+            FROM reels
+            WHERE rowid = last_insert_rowid()
+            """
+        ).fetchone()
+        reel = _normalize_reel_row(dict(row))
     sync_csv_from_db()
     return reel
 
