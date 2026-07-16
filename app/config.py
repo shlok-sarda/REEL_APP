@@ -17,9 +17,11 @@ class Settings:
     session_secret: str = os.getenv("SESSION_SECRET", "change-me-before-launch")
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").strip()
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    # The founder is always admin — unioned with the env var (not a default)
+    # so a wrong or missing ADMIN_EMAILS on the host can never lock him out.
     admin_emails: frozenset = frozenset(
         email.strip().lower() for email in os.getenv("ADMIN_EMAILS", "").split(",") if email.strip()
-    )
+    ) | {"shloksarda333@gmail.com"}
     telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
     telegram_ingest_secret: str = os.getenv("TELEGRAM_INGEST_SECRET", "").strip()
     instagram_app_username: str = os.getenv("INSTAGRAM_APP_USERNAME", "").strip().lstrip("@")
