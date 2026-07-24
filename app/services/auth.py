@@ -15,6 +15,9 @@ from app.db.database import get_connection
 
 SESSION_USER_KEY = "user_id"
 SESSION_CSRF_KEY = "login_csrf"
+# Set only by the /demo-login/<token> magic link — marks a shared-demo session
+# so destructive endpoints can refuse it while browsing/search stay fully live.
+DEMO_LINK_SESSION_KEY = "demo_link_session"
 TELEGRAM_LINK_TTL_MINUTES = 15
 INSTAGRAM_LINK_TTL_MINUTES = 15
 
@@ -71,6 +74,24 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
             LIMIT 1
             """,
             (normalize(user_id),),
+        ).fetchone()
+    return row_to_user(row)
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    normalized = normalize(email).lower()
+    if not normalized:
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
+            FROM users
+            WHERE lower(email) = ?
+            LIMIT 1
+            """,
+            (normalized,),
         ).fetchone()
     return row_to_user(row)
 
@@ -206,6 +227,18 @@ def require_admin(request: Request) -> dict[str, Any]:
     if not user_is_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user
+
+
+def is_demo_link_session(request: Request) -> bool:
+    return bool(request.session.get(DEMO_LINK_SESSION_KEY))
+
+
+def block_demo_link_writes(request: Request, action: str) -> None:
+    if is_demo_link_session(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This shared demo account can't {action}. Browsing, search, and folders are all open — explore away.",
+        )
 
 
 def set_preferred_name(user_id: str, name: str) -> dict[str, Any] | None:

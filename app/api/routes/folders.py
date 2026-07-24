@@ -11,7 +11,7 @@ import os
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from app.services.auth import ensure_user_access
+from app.services.auth import block_demo_link_writes, ensure_user_access
 from app.services import folders as folders_service
 
 router = APIRouter(prefix="/folders", tags=["folders"])
@@ -105,6 +105,7 @@ def reject(request: Request, folder_id: int, payload: dict = Body(...)):
 
 @router.delete("/{folder_id}")
 def delete(request: Request, folder_id: int, user_id: str = ""):
+    block_demo_link_writes(request, "delete folders")
     resolved = _gate(request, user_id)
     folders_service.delete_folder(resolved, folder_id)
     return {"ok": True}

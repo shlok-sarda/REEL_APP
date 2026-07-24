@@ -3117,6 +3117,37 @@ def dev_login(request: Request, user_id: str = "default"):
     return RedirectResponse(url="/app", status_code=303)
 
 
+@router.get("/demo-login/{token}")
+def demo_link_login(token: str, request: Request):
+    """Shareable magic link that signs the visitor into the curated demo account.
+
+    Enabled only when DEMO_ACCESS_TOKEN (16+ chars) and DEMO_ACCOUNT_EMAIL are
+    both set. Never opens an admin account, and marks the session so
+    destructive endpoints refuse it. Rotate DEMO_ACCESS_TOKEN to kill a leaked
+    link instantly."""
+    import secrets as _secrets
+
+    from app.services.auth import (
+        DEMO_LINK_SESSION_KEY,
+        SESSION_USER_KEY,
+        get_user_by_email,
+        user_is_admin,
+    )
+
+    expected = settings.demo_access_token
+    if not expected or len(expected) < 16 or not settings.demo_account_email:
+        return RedirectResponse(url="/", status_code=303)
+    if not _secrets.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
+        return RedirectResponse(url="/", status_code=303)
+    user = get_user_by_email(settings.demo_account_email)
+    if not user or user_is_admin(user):
+        return RedirectResponse(url="/", status_code=303)
+    request.session.clear()
+    request.session[SESSION_USER_KEY] = user["id"]
+    request.session[DEMO_LINK_SESSION_KEY] = True
+    return RedirectResponse(url="/app", status_code=303)
+
+
 @router.get("/app/{user_id}", response_class=HTMLResponse)
 def user_app(user_id: str, request: Request):
     if is_demo_user(user_id):

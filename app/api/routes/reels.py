@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from app.schemas import ReelRecord
-from app.services.auth import ensure_user_access, require_user
+from app.services.auth import block_demo_link_writes, ensure_user_access, require_user
 from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, ensure_background_progress
 from app.services.reel_ingest import (
     delete_reel,
@@ -40,6 +40,7 @@ def retry_unsorted_reels(
     pipeline's "could not be processed" placeholder summary), and completed
     reels missing their deep-search document. dry_run=1 returns the count
     without requeuing, so the UI can confirm before spending reprocess money."""
+    block_demo_link_writes(request, "re-run processing")
     resolved_user_id = ensure_user_access(request, user_id or "")
     placeholders = ",".join("?" for _ in GENERIC_CATEGORY_LABELS)
     from app.db.database import get_connection
@@ -232,6 +233,7 @@ def export_diagnostics_json(request: Request, user_id: Optional[str] = Query(def
 
 @router.delete("/{reel_id}")
 def remove_reel(reel_id: str, request: Request):
+    block_demo_link_writes(request, "delete reels")
     require_user(request)
     reel = get_reel_by_id(reel_id)
     if not reel:
@@ -252,6 +254,7 @@ def remove_reel(reel_id: str, request: Request):
 
 @router.post("/reset")
 def reset_library(request: Request, user_id: Optional[str] = Query(default=None)):
+    block_demo_link_writes(request, "reset the library")
     resolved_user_id = ensure_user_access(request, user_id or "")
     require_user(request)
     result = reset_user_library(resolved_user_id)
@@ -263,6 +266,7 @@ def reset_library(request: Request, user_id: Optional[str] = Query(default=None)
 
 @router.post("/rebuild")
 def rebuild_library(request: Request, user_id: Optional[str] = Query(default=None)):
+    block_demo_link_writes(request, "rebuild the library")
     resolved_user_id = ensure_user_access(request, user_id or "")
     require_user(request)
     invalidated = invalidate_user_library_outputs(resolved_user_id)
@@ -280,6 +284,7 @@ def rebuild_library(request: Request, user_id: Optional[str] = Query(default=Non
 
 @router.post("/{reel_id}/retry")
 def retry_reel(reel_id: str, request: Request):
+    block_demo_link_writes(request, "re-run processing")
     require_user(request)
     reel = get_reel_by_id(reel_id)
     if not reel:
