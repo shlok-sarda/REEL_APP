@@ -1060,11 +1060,22 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
         auth_section = f"""
       <div class="auth-card">
-        <p class="kicker">Step 1</p>
-        <h2>Continue with Google</h2>
-        <p>Use your Google account once. After that, your library stays attached to you and you can link Instagram as the ingest channel.</p>
         <div id="googleButton" class="google-button-shell"></div>
+        <p class="tiny auth-note">Free beta &middot; 2 minute setup</p>
+        <button id="setupVideoButton" type="button" class="ghost-button setup-link">&#9656; Watch the 40 second setup</button>
         {disabled_note}
+      </div>
+      <div id="setupModal" class="connect-modal hidden" aria-hidden="true">
+        <div class="connect-card">
+          <div class="connect-head">
+            <div>
+              <p class="kicker">Setup</p>
+              <h3 style="margin:0;">The whole setup, start to finish</h3>
+            </div>
+            <button id="setupModalClose" type="button" class="ghost-button small-ghost">Close</button>
+          </div>
+          <video id="setupVideo" class="setup-video" controls playsinline preload="none" src="/static/setup.mp4"></video>
+        </div>
       </div>
         """
     return """<!DOCTYPE html>
@@ -1125,6 +1136,33 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       display:block;
       margin:0 0 16px;
     }
+    .demo-wrap {
+      display:grid;
+      justify-items:center;
+      gap:8px;
+      margin:18px 0 6px;
+    }
+    .demo-video {
+      width:min(300px, 82%);
+      aspect-ratio:9/16;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:#000;
+      object-fit:cover;
+      display:block;
+    }
+    .demo-caption {
+      margin:0;
+      font-size:12.5px;
+      color:var(--muted);
+    }
+    .brand-row { display:flex; align-items:center; gap:10px; margin:0 0 18px; }
+    .brand-row .hero-logo { width:44px; height:44px; margin:0; border-radius:12px; }
+    .brand-name { font-family:var(--serif); font-size:20px; }
+    .sub { color:var(--muted); }
+    .auth-note { margin:10px 0 0; text-align:center; }
+    .setup-link { margin-top:10px; width:100%; }
+    .setup-video { width:100%; border-radius:14px; background:#000; margin-top:10px; }
     .kicker {
       margin:0 0 10px;
       color:var(--tan);
@@ -1321,19 +1359,54 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 <body>
   <main class="shell">
     <section class="hero">
-      <img class="hero-logo" src="/static/icon-192.png" alt="ClipNest" />
-      <p class="kicker">Live Reel Library</p>
-      <h1>Sign in once. Connect Instagram once. Your reels stay yours.</h1>
-      <p>Your app organizes saved Instagram reels into clean lists, keeps each person’s library separate, and lets each person DM reels to your Instagram account without mixing libraries.</p>
+      <div class="brand-row">
+        <img class="hero-logo" src="/static/icon-192.png" alt="ClipNest" />
+        <span class="brand-name">ClipNest</span>
+      </div>
+      <h1>Everything you saved. Finally findable.</h1>
+      <p class="sub">Share reels to ClipNest and it sorts them into lists that fill themselves, and finds any reel the moment you search.</p>
+      <div class="demo-wrap">
+        <video class="demo-video" autoplay muted loop playsinline controls preload="metadata" poster="/static/demo_poster.jpg">
+          <source src="/static/demo.mp4" type="video/mp4" />
+        </video>
+        <p class="demo-caption">40 seconds. This is the whole app.</p>
+      </div>
+      <script>
+        (function () {
+          var demoVideo = document.querySelector('.demo-video');
+          if (!demoVideo) { return; }
+          var kick = function () {
+            if (demoVideo.paused) { demoVideo.play().catch(function () {}); }
+          };
+          document.addEventListener('visibilitychange', kick);
+          window.addEventListener('touchstart', kick, { once: true });
+          window.addEventListener('click', kick, { once: true });
+          setTimeout(kick, 800);
+          setInterval(kick, 4000);
+
+          document.addEventListener('DOMContentLoaded', function () {
+            var setupBtn = document.getElementById('setupVideoButton');
+            var setupModal = document.getElementById('setupModal');
+            var setupClose = document.getElementById('setupModalClose');
+            var setupVideo = document.getElementById('setupVideo');
+            if (setupBtn && setupModal) {
+              setupBtn.addEventListener('click', function () {
+                setupModal.classList.remove('hidden');
+                setupModal.setAttribute('aria-hidden', 'false');
+                if (setupVideo) { setupVideo.play().catch(function () {}); }
+              });
+            }
+            if (setupClose && setupModal) {
+              setupClose.addEventListener('click', function () {
+                setupModal.classList.add('hidden');
+                setupModal.setAttribute('aria-hidden', 'true');
+                if (setupVideo) { setupVideo.pause(); }
+              });
+            }
+          });
+        })();
+      </script>
       __AUTH_SECTION__
-    </section>
-    <section class="card">
-      <p class="kicker">How It Works</p>
-      <ol>
-        <li>Continue with Google.</li>
-        <li>Tap Connect Instagram once and DM the one-time code to your app’s Instagram account.</li>
-        <li>From then on, send reel links in that DM and they appear in your own library.</li>
-      </ol>
     </section>
   </main>
   <script>
