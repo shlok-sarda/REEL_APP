@@ -1725,7 +1725,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <div class="greeting-row"><span class="brand-mark" aria-hidden="true"></span><h1 class="greeting">${escapeHtml(greeting())}</h1></div>
           <div class="icon-row">
-            <button class="icon-button" type="button" aria-label="Your recipes" id="recipesButton">${RECIPES_SVG}</button>
+            ${''/* Recipes hub button hidden until its /api/recipes backend ships —
+                  the hub UI landed ahead of its server route (parallel work).
+                  Restore this line when the endpoint is live:
+                  <button class="icon-button" type="button" aria-label="Your recipes" id="recipesButton">RECIPES_SVG</button> */}
             <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton">${MAP_PIN_SVG}</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
