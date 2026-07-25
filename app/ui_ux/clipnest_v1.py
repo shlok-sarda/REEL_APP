@@ -76,10 +76,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .greeting {
       margin:0;
       font-family:var(--serif);
-      font-size:2.1rem;
+      /* shrinks on narrow phones so the four header icons never overlap it */
+      font-size:clamp(1.55rem, 7.5vw, 2.1rem);
       line-height:1.05;
       font-weight:600;
       letter-spacing:.2px;
+      white-space:nowrap;
     }
     .icon-row { display:flex; align-items:center; gap:8px; }
     .icon-button, .back-button {
@@ -1080,6 +1082,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .folder-card .count { float:right; font-size:.72rem; color:var(--muted); border:1px solid var(--line); border-radius:20px; padding:2px 9px; }
     .sug-chip { font-size:.66rem; color:#fff; background:var(--brand-grad); border-radius:20px; padding:2px 8px; margin-left:6px; }
     .skip-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .list-pick-wrap { max-height:46vh; overflow-y:auto; margin-top:10px; }
+    .list-pick-row { display:flex; justify-content:space-between; align-items:center; gap:10px;
+      padding:11px 2px; border-bottom:1px solid var(--line); }
+    .list-pick-row:last-child { border-bottom:none; }
+    .list-pick-name { font-size:.92rem; display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .list-pick-name em { font-style:normal; color:var(--muted); font-size:.72rem; }
+    .in-chip { color:var(--accent); font-size:.8rem; font-weight:650; white-space:nowrap; }
     /* ---------- reel map overlay (ClipNest dark) ---------- */
     .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:var(--bg); }
     .map-overlay.show { display:block; }
@@ -1146,6 +1155,69 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .recipe-watch { display:inline-block; margin-top:14px; background:var(--brand-grad); color:#fff;
       border:0; border-radius:22px; font-weight:700; font-size:.9rem; padding:11px 20px; text-decoration:none; }
     .recipe-watch:active { filter:brightness(1.1); }
+
+    /* ---------- ingredient buy links + shop-the-recipe ---------- */
+    .recipe-ing li { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+    .recipe-ing li .ing-name { flex:1 1 auto; min-width:0; }
+    .recipe-ing li .ing-buy { flex:0 0 auto; color:var(--accent); font-size:.72rem; font-weight:700; }
+    .recipe-ing li .ing-buy.exact { color:#f5b878; }
+    .ing-links { flex-basis:100%; display:none; flex-wrap:wrap; gap:6px; padding-top:7px; }
+    .recipe-ing li.shopping-open .ing-links { display:flex; }
+    .qc-btn { display:inline-flex; align-items:center; gap:5px; min-height:28px; border-radius:14px;
+      padding:5px 11px; background:var(--bg); border:1px solid var(--line); color:var(--text);
+      text-decoration:none; font-size:.72rem; font-weight:650; }
+    .qc-btn .qc-dot { width:7px; height:7px; border-radius:999px; flex:none; }
+    .qc-btn .qc-exact { color:var(--accent); font-size:.6rem; font-weight:800; letter-spacing:.4px; }
+    .qc-btn.has-exact { border-color:rgba(238,127,47,.5); }
+    .qc-exact-line { flex-basis:100%; display:flex; align-items:center; gap:7px; padding-top:6px;
+      font-size:.75rem; color:var(--accent); }
+    .qc-exact-line a { color:var(--accent); text-decoration:none; border-bottom:1px dotted rgba(242,168,102,.5); min-width:0;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .qc-badge { flex:none; background:var(--brand-grad); color:#fff; border-radius:6px;
+      font-size:.56rem; font-weight:800; letter-spacing:.5px; padding:3px 6px; }
+    .shop-city-row { display:flex; align-items:center; gap:8px; margin:2px 0 10px; }
+    .shop-city-row label { color:var(--muted); font-size:.75rem; font-weight:650; }
+    .shop-city-row select { background:var(--soft); color:var(--text); border:1px solid var(--line);
+      border-radius:10px; padding:7px 10px; font-size:.8rem; font-weight:600; }
+    .shop-all-row { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 4px; }
+    .shop-all-btn { display:inline-flex; align-items:center; gap:6px; border-radius:18px; padding:9px 14px;
+      background:var(--soft); border:1px solid var(--line); color:var(--text); font-size:.78rem; font-weight:700; }
+    .shop-all-btn .qc-cnt { color:var(--muted); font-weight:600; }
+    .shop-all-btn.has-exact { border-color:rgba(238,127,47,.5); }
+    .shop-copy-btn { width:100%; margin:10px 0 2px; background:var(--brand-grad); color:#fff; border:0;
+      border-radius:14px; padding:12px; font-size:.82rem; font-weight:750; }
+    .shop-copy-btn.copied { background:none; border:1px solid rgba(238,127,47,.5); color:var(--accent); }
+    .shop-list { list-style:none; margin:0; padding:0; }
+    .shop-list a { display:flex; align-items:center; gap:11px; padding:11px 10px; margin:5px 0;
+      background:var(--soft); border:1px solid var(--line); border-radius:12px;
+      color:var(--text); text-decoration:none; font-size:.86rem; font-weight:550; }
+    .shop-list .shop-tick { width:23px; height:23px; border-radius:999px; border:2px solid var(--line);
+      flex:none; display:flex; align-items:center; justify-content:center; font-size:12px; color:transparent; }
+    .shop-list a.done .shop-tick { background:var(--brand-grad); border-color:transparent; color:#fff; }
+    .shop-list a.done .shop-nm { color:var(--faint); text-decoration:line-through; }
+    .shop-list .shop-nm { flex:1; min-width:0; }
+    .shop-list .shop-go { color:var(--muted); font-size:.72rem; font-weight:650; }
+    .shop-head { display:flex; align-items:center; gap:10px; margin:2px 0 8px; }
+    .shop-head .shop-back { width:36px; height:36px; border-radius:50%; background:var(--soft);
+      border:1px solid var(--line); color:var(--text); font-size:15px; }
+    .shop-head .shop-prog { margin-left:auto; color:var(--accent); font-size:.78rem; font-weight:700; }
+
+    /* ---------- recipes hub overlay ---------- */
+    .recipes-overlay { position:fixed; inset:0; z-index:85; display:none; flex-direction:column;
+      background:var(--bg); overflow-y:auto; }
+    .recipes-overlay.show { display:flex; }
+    .recipes-shell { width:min(430px,100%); margin:0 auto; padding:calc(16px + var(--safe-top)) 18px calc(40px + var(--safe-bottom)); }
+    .recipes-head { display:flex; align-items:center; gap:12px; margin:6px 0 4px; }
+    .recipes-head h1 { margin:0; font-family:var(--serif); font-size:1.7rem; font-weight:600; flex:1; }
+    .recipes-sub { color:var(--muted); font-size:.8rem; margin:0 0 14px; }
+    .rx-card { width:100%; text-align:left; background:var(--card); border:1px solid var(--line);
+      border-radius:18px; padding:16px 16px 14px; margin:0 0 12px; color:var(--text); }
+    .rx-card:active { background:var(--soft); }
+    .rx-card h2 { margin:0 0 6px; font-family:var(--serif); font-size:1.15rem; font-weight:600; }
+    .rx-meta { display:flex; flex-wrap:wrap; gap:6px; }
+    .rx-meta span { background:var(--soft); border:1px solid var(--line); border-radius:999px;
+      font-size:.68rem; font-weight:650; color:var(--muted); padding:4px 10px; }
+    .rx-meta .rx-exact { color:var(--accent); border-color:rgba(238,127,47,.5); }
     .folder-desc {
       color:var(--muted);
       font-size:.85rem;
@@ -1368,6 +1440,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     const ARROW_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
     const REFRESH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>';
     const MAP_PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+    const RECIPES_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a8 8 0 0 1 16 0"/><path d="M2 11h20"/><path d="M4 11v3a8 4 0 0 0 16 0v-3"/><path d="M12 3v2"/></svg>';
     const BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 
     function escapeHtml(value) {
@@ -1652,6 +1725,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <div class="greeting-row"><span class="brand-mark" aria-hidden="true"></span><h1 class="greeting">${escapeHtml(greeting())}</h1></div>
           <div class="icon-row">
+            <button class="icon-button" type="button" aria-label="Your recipes" id="recipesButton">${RECIPES_SVG}</button>
             <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton">${MAP_PIN_SVG}</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
@@ -1712,6 +1786,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         render();
       });
       document.getElementById('mapButton')?.addEventListener('click', openReelMap);
+      document.getElementById('recipesButton')?.addEventListener('click', openRecipesHub);
       const notifButton = document.getElementById('notifButton');
       notifButton?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -2353,7 +2428,37 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
 
     /* ---------- RECIPE CARD (per-reel, in-app overlay) ---------- */
-    function showRecipeCard(card, reelUrl) {
+    let qGeo = { apps: {}, cities: {}, default_apps: [] };
+    function captureGeo(payload) {
+      if (payload && payload.apps && Object.keys(payload.apps).length) {
+        qGeo = { apps: payload.apps, cities: payload.cities || {}, default_apps: payload.default_apps || [] };
+      }
+    }
+    function cityApps() {
+      const saved = localStorage.getItem('clipnest_city') || '';
+      return qGeo.cities[saved] || qGeo.default_apps || [];
+    }
+    function appLabel(a) { return (qGeo.apps[a] || {}).label || a; }
+    function appDot(a) {
+      return '<span class="qc-dot" style="background:' + escapeHtml((qGeo.apps[a] || {}).color || '#888') + '"></span>';
+    }
+    function shopDoneKey(reelKey, appKey) { return 'cn_shop_' + reelKey + '_' + appKey; }
+    function shopDoneSet(reelKey, appKey) {
+      try { return new Set(JSON.parse(localStorage.getItem(shopDoneKey(reelKey, appKey)) || '[]')); }
+      catch (e) { return new Set(); }
+    }
+    function cityPickerHtml() {
+      const saved = localStorage.getItem('clipnest_city') || '';
+      const names = Object.keys(qGeo.cities || {});
+      if (!names.length) return '';
+      const placeholder = saved ? '' : '<option value="" selected>Choose your city…</option>';
+      const opts = names.map(c =>
+        '<option value="' + escapeHtml(c) + '"' + (c === saved ? ' selected' : '') + '>' + escapeHtml(c) + '</option>').join('');
+      return '<div class="shop-city-row"><label for="cnCity">Deliver in</label><select id="cnCity">' + placeholder + opts + '</select></div>';
+    }
+
+    function showRecipeCard(card, reelUrl, reelKey, geoPayload) {
+      captureGeo(geoPayload);
       let ov = document.getElementById('recipeOverlay');
       if (!ov) {
         ov = document.createElement('div');
@@ -2361,24 +2466,191 @@ def build_clipnest_v1_html(user_id: str) -> str:
         document.body.appendChild(ov);
         ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('show'); });
       }
-      const ing = (card.ingredients || []).map(i => '<li>' + escapeHtml(i) + '</li>').join('');
-      const steps = (card.steps || []).map(s => '<li>' + escapeHtml(s) + '</li>').join('');
-      ov.innerHTML = '<div class="recipe-card">'
-        + '<button class="recipe-close" type="button" aria-label="Close recipe">✕</button>'
-        + '<h2>🍳 ' + escapeHtml(card.title || 'Recipe') + '</h2>'
-        + '<div class="recipe-meta">'
-        + (card.total_time ? '<span class="recipe-chip">⏱ ' + escapeHtml(card.total_time) + '</span>' : '')
-        + (card.servings ? '<span class="recipe-chip">🍽 serves ' + escapeHtml(card.servings) + '</span>' : '')
-        + '<span class="recipe-chip">🥘 ' + (card.ingredients || []).length + ' ingredients</span>'
-        + '</div>'
-        + '<h3>Ingredients — tap to tick off</h3><ul class="recipe-ing">' + ing + '</ul>'
-        + '<h3>Steps</h3><ol class="recipe-steps">' + steps + '</ol>'
-        + (reelUrl ? '<a class="recipe-watch" href="' + escapeHtml(reelUrl) + '" target="_blank" rel="noopener">▶ watch the reel</a>' : '')
-        + '</div>';
-      ov.querySelector('.recipe-close').addEventListener('click', () => ov.classList.remove('show'));
-      ov.querySelectorAll('.recipe-ing li').forEach(li =>
-        li.addEventListener('click', () => li.classList.toggle('done')));
+      const rid = reelKey || card.reel_id || (card.title || 'recipe').replaceAll(' ', '-');
+      const shopping = card.shopping || [];
+      const shoppable = shopping.filter(s => s && s.links);
+
+      function ingredientLi(text, index) {
+        const row = shopping[index] && shopping[index].links ? shopping[index] : null;
+        if (!row) return '<li><span class="ing-name">' + escapeHtml(text) + '</span></li>';
+        const apps = cityApps().filter(a => row.links[a]);
+        const exactApps = apps.filter(a => row.exact && row.exact[a]);
+        const cue = exactApps.length
+          ? '<span class="ing-buy exact">exact ›</span>'
+          : '<span class="ing-buy">buy ›</span>';
+        const cleanName = [row.brand, row.query].filter(Boolean).join(' ');
+        const exactLines = exactApps.map(a =>
+          '<span class="qc-exact-line"><span class="qc-badge">EXACT</span>'
+          + '<a href="' + escapeHtml(row.exact[a].url) + '" target="_blank" rel="noopener noreferrer">'
+          + escapeHtml(cleanName) + ' on ' + escapeHtml(appLabel(a)) + ' ↗</a></span>').join('');
+        const btns = apps.map(a =>
+          '<a class="qc-btn' + (row.exact && row.exact[a] ? ' has-exact' : '') + '" target="_blank" rel="noopener noreferrer" href="'
+          + escapeHtml(row.exact && row.exact[a] ? row.exact[a].url : row.links[a]) + '">'
+          + appDot(a) + escapeHtml(appLabel(a))
+          + (row.exact && row.exact[a] ? '<span class="qc-exact">exact</span>' : '') + '</a>').join('');
+        return '<li data-shoppable="1"><span class="ing-name">' + escapeHtml(text) + '</span>' + cue
+          + '<span class="ing-links">' + exactLines + btns + '</span></li>';
+      }
+
+      function shopAllHtml() {
+        const items = shoppable.filter(s => !s.pantry);
+        if (items.length < 2) return '';
+        const btns = cityApps().filter(a => items.some(s => s.links[a])).map(a => {
+          const n = items.filter(s => s.links[a]).length;
+          const ex = items.filter(s => s.exact && s.exact[a]).length;
+          return '<button class="shop-all-btn' + (ex ? ' has-exact' : '') + '" type="button" data-shop-app="' + a + '">'
+            + appDot(a) + escapeHtml(appLabel(a)) + '<span class="qc-cnt">buy all ' + n + '</span>'
+            + (ex ? '<span class="qc-exact">' + ex + ' exact</span>' : '') + '</button>';
+        }).join('');
+        if (!btns) return '';
+        return '<h3>Shop the recipe</h3>' + cityPickerHtml() + '<div class="shop-all-row">' + btns + '</div>';
+      }
+
+      function renderCardView() {
+        const ing = (card.ingredients || []).map((i, idx) => ingredientLi(i, idx)).join('');
+        const steps = (card.steps || []).map(s => '<li>' + escapeHtml(s) + '</li>').join('');
+        ov.innerHTML = '<div class="recipe-card">'
+          + '<button class="recipe-close" type="button" aria-label="Close recipe">✕</button>'
+          + '<h2>🍳 ' + escapeHtml(card.title || 'Recipe') + '</h2>'
+          + '<div class="recipe-meta">'
+          + (card.total_time ? '<span class="recipe-chip">⏱ ' + escapeHtml(card.total_time) + '</span>' : '')
+          + (card.servings ? '<span class="recipe-chip">🍽 serves ' + escapeHtml(card.servings) + '</span>' : '')
+          + '<span class="recipe-chip">🥘 ' + (card.ingredients || []).length + ' ingredients</span>'
+          + '</div>'
+          + shopAllHtml()
+          + '<h3>Ingredients — tap to tick off' + (shoppable.length ? ', tap buy › to order' : '') + '</h3>'
+          + '<ul class="recipe-ing">' + ing + '</ul>'
+          + '<h3>Steps</h3><ol class="recipe-steps">' + steps + '</ol>'
+          + (reelUrl ? '<a class="recipe-watch" href="' + escapeHtml(reelUrl) + '" target="_blank" rel="noopener">▶ watch the reel</a>' : '')
+          + '</div>';
+        ov.querySelector('.recipe-close').addEventListener('click', () => ov.classList.remove('show'));
+        ov.querySelectorAll('.recipe-ing li').forEach(li => {
+          const buyCue = li.querySelector('.ing-buy');
+          buyCue?.addEventListener('click', (e) => { e.stopPropagation(); li.classList.toggle('shopping-open'); });
+          li.addEventListener('click', (e) => {
+            if (e.target.closest('.ing-links')) return;
+            if (li.dataset.shoppable) { li.classList.toggle('shopping-open'); return; }
+            li.classList.toggle('done');
+          });
+        });
+        ov.querySelector('#cnCity')?.addEventListener('change', (e) => {
+          localStorage.setItem('clipnest_city', e.target.value);
+          renderCardView();
+        });
+        ov.querySelectorAll('[data-shop-app]').forEach(btn =>
+          btn.addEventListener('click', () => renderShopView(btn.dataset.shopApp)));
+      }
+
+      function renderShopView(appKey) {
+        const items = shoppable.filter(s => !s.pantry && s.links[appKey]);
+        const done = shopDoneSet(rid, appKey);
+        const rows = items.map((s, i) => {
+          const exact = s.exact && s.exact[appKey];
+          return '<li><a class="' + (done.has(i) ? 'done' : '') + '" data-shop-idx="' + i + '" target="_blank" rel="noopener noreferrer" href="'
+            + escapeHtml(exact ? exact.url : s.links[appKey]) + '">'
+            + '<span class="shop-tick">✓</span><span class="shop-nm">' + escapeHtml(s.display) + '</span>'
+            + (exact ? '<span class="qc-badge">EXACT</span>' : '')
+            + '<span class="shop-go">open ↗</span></a></li>';
+        }).join('');
+        const copyBtn = appKey === 'instamart'
+          ? '<button class="shop-copy-btn" type="button" id="shopCopyBtn">📋 Copy list — paste in Instamart › Shopping List › “Write it” to fill the whole cart</button>'
+          : '';
+        ov.innerHTML = '<div class="recipe-card">'
+          + '<div class="shop-head">'
+          + '<button class="shop-back" type="button" aria-label="Back">‹</button>'
+          + '<h2 style="margin:0; padding:0; font-size:1.15rem;">' + escapeHtml(appLabel(appKey)) + '</h2>'
+          + '<span class="shop-prog" id="shopProg">' + done.size + '/' + items.length + ' added</span>'
+          + '</div>'
+          + '<p class="recipes-sub" style="margin:0 0 8px;">Tap each item — ' + escapeHtml(appLabel(appKey))
+          + ' opens, hit ADD, come back. Ticks track your progress.</p>'
+          + copyBtn
+          + '<ul class="shop-list">' + rows + '</ul>'
+          + '</div>';
+        ov.querySelector('.shop-back').addEventListener('click', renderCardView);
+        ov.querySelectorAll('[data-shop-idx]').forEach(a =>
+          a.addEventListener('click', () => {
+            const i = Number(a.dataset.shopIdx);
+            const set = shopDoneSet(rid, appKey);
+            set.add(i);
+            localStorage.setItem(shopDoneKey(rid, appKey), JSON.stringify([...set]));
+            a.classList.add('done');
+            const prog = ov.querySelector('#shopProg');
+            if (prog) prog.textContent = set.size + '/' + items.length + ' added';
+          }));
+        ov.querySelector('#shopCopyBtn')?.addEventListener('click', () => {
+          const text = items.map(s => s.branded_query || s.query || s.display).join(String.fromCharCode(10));
+          navigator.clipboard.writeText(text).then(() => {
+            const b = ov.querySelector('#shopCopyBtn');
+            b.classList.add('copied');
+            b.textContent = '✓ Copied — open Instamart › Shopping List › “Write it” and paste';
+          }).catch(() => {});
+        });
+      }
+
+      renderCardView();
       ov.classList.add('show');
+    }
+
+    /* ---------- RECIPES HUB (all recipe cards, full-screen overlay) ---------- */
+    function openRecipesHub() {
+      let hub = document.getElementById('recipesHub');
+      if (!hub) {
+        hub = document.createElement('div');
+        hub.id = 'recipesHub'; hub.className = 'recipes-overlay';
+        document.body.appendChild(hub);
+      }
+      hub.innerHTML = '<div class="recipes-shell">'
+        + '<div class="recipes-head"><button class="back-button" type="button" id="recipesBack">‹</button>'
+        + '<h1>Recipes</h1></div>'
+        + '<p class="recipes-sub">Cook-along reels, turned into cards you can shop</p>'
+        + LOADER_HTML + '</div>';
+      hub.classList.add('show');
+      hub.querySelector('#recipesBack').addEventListener('click', () => hub.classList.remove('show'));
+      fetch('/api/recipes?user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => {
+          captureGeo(d);
+          const recipes = d.recipes || [];
+          const shell = hub.querySelector('.recipes-shell');
+          if (!recipes.length) {
+            shell.querySelector('.load-wrap')?.remove();
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = 'No recipes yet — save a few cooking reels and they will show up here.';
+            shell.appendChild(empty);
+            return;
+          }
+          const cards = recipes.map((r, i) => {
+            const exact = (r.shopping || []).filter(s => s.exact && Object.keys(s.exact).length).length;
+            return '<button class="rx-card" type="button" data-rx="' + i + '">'
+              + '<h2>' + escapeHtml(r.title || 'Recipe') + '</h2>'
+              + '<div class="rx-meta">'
+              + (r.total_time ? '<span>⏱ ' + escapeHtml(r.total_time) + '</span>' : '')
+              + '<span>🥘 ' + (r.ingredients || []).length + ' ingredients</span>'
+              + ((r.shopping || []).length ? '<span>🛒 shoppable</span>' : '')
+              + (exact ? '<span class="rx-exact">' + exact + ' exact match' + (exact === 1 ? '' : 'es') + '</span>' : '')
+              + '</div></button>';
+          }).join('');
+          shell.innerHTML = '<div class="recipes-head"><button class="back-button" type="button" id="recipesBack">‹</button>'
+            + '<h1>Recipes</h1></div>'
+            + '<p class="recipes-sub">' + recipes.length + ' cook-along reel' + (recipes.length === 1 ? '' : 's')
+            + ', turned into cards you can shop</p>'
+            + cityPickerHtml()
+            + cards;
+          shell.querySelector('#recipesBack').addEventListener('click', () => hub.classList.remove('show'));
+          shell.querySelector('#cnCity')?.addEventListener('change', (e) => {
+            localStorage.setItem('clipnest_city', e.target.value);
+          });
+          shell.querySelectorAll('[data-rx]').forEach(btn =>
+            btn.addEventListener('click', () => {
+              const r = recipes[Number(btn.dataset.rx)];
+              showRecipeCard(r, r.url, r.reel_id, d);
+            }));
+        })
+        .catch(() => {
+          const shell = hub.querySelector('.recipes-shell');
+          if (shell) shell.innerHTML += '<div class="empty">Could not load recipes. Pull to retry.</div>';
+        });
     }
     function attachRecipeAction(item) {
       if (!state.session?.authenticated || !item.reel_id) return;
@@ -2393,7 +2665,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
           b.innerHTML = '<span>🍳 ' + (d.status === 'recipe' ? 'View Recipe' : 'Get Recipe') + '</span><span>›</span>';
           listEl.insertBefore(b, listEl.firstChild);
           b.addEventListener('click', async () => {
-            if (d.status === 'recipe') { showRecipeCard(d.card, item.url); return; }
+            if (d.status === 'recipe') { showRecipeCard(d.card, item.url, item.reel_id, d); return; }
             b.disabled = true; b.firstElementChild.textContent = '🍳 Reading the reel…';
             try {
               const r = await fetch('/api/reel-recipe/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
@@ -2402,7 +2674,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
               if (out.status === 'recipe') {
                 d.status = 'recipe'; d.card = out.card;
                 b.disabled = false; b.firstElementChild.textContent = '🍳 View Recipe';
-                showRecipeCard(out.card, item.url);
+                showRecipeCard(out.card, item.url, item.reel_id, out);
               } else {
                 b.firstElementChild.textContent = '🙅 No step-by-step recipe in this reel';
                 setTimeout(() => b.remove(), 2000);
@@ -2824,6 +3096,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
             <a class="quick-action" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener"><span>↗</span>Open</a>
           </div>
           <div class="sheet-list">
+            ${item.reel_id ? '<button id="addToListBtn" class="sheet-row action" type="button"><span>＋ Add to List</span><span>›</span></button>' : ''}
             ${isAdmin && item.reel_id ? '<button id="retryItem" class="sheet-row action" type="button"><span>Retry Processing</span><span>›</span></button>' : ''}
             <button id="deleteItem" class="sheet-row danger" type="button"><span>Delete Item</span><span>›</span></button>
           </div>
@@ -2837,6 +3110,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('sheetMedia').addEventListener('click', playFromSheet);
       document.getElementById('deleteItem').addEventListener('click', deleteCurrentItem);
       document.getElementById('retryItem')?.addEventListener('click', retryCurrentItem);
+      document.getElementById('addToListBtn')?.addEventListener('click', () => openAddToList(item));
       attachRecipeAction(item);
       document.getElementById('shareItem').addEventListener('click', (event) => {
         const link = item.url || window.location.href;
@@ -2847,6 +3121,54 @@ def build_clipnest_v1_html(user_id: str) -> str:
       document.getElementById('copyLinkItem')?.addEventListener('click', (event) => {
         copyItemLink(item.url, event.currentTarget, 'Copy Link');
       });
+    }
+    async function openAddToList(item) {
+      // Manual add = the user correcting the router. Deliberately NO "why"
+      // prompt here (unlike Skip): the add itself is the signal, and asking
+      // would punish the user for fixing our mistake.
+      document.getElementById('listPick')?.remove();
+      const ov = document.createElement('div');
+      ov.id = 'listPick'; ov.className = 'folder-overlay show';
+      ov.style.zIndex = '95';
+      ov.innerHTML = '<div class="folder-modal"><h3>Add to a list</h3>'
+        + '<div class="sub">' + escapeHtml(item.name || 'This reel') + '</div>'
+        + '<div id="listPickRows" class="list-pick-wrap"><div class="empty">Loading your lists…</div></div>'
+        + '<div class="row"><button class="newlist-btn" id="listPickDone" type="button">Done</button></div></div>';
+      document.body.appendChild(ov);
+      const close = () => ov.remove();
+      document.getElementById('listPickDone').addEventListener('click', close);
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      let folders = [];
+      try {
+        const r = await fetch('/folders/for-reel?reel_id=' + encodeURIComponent(item.reel_id) + '&user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' });
+        folders = (await r.json()).folders || [];
+      } catch (e) {}
+      const wrap = document.getElementById('listPickRows');
+      if (!wrap) return;
+      if (!folders.length) {
+        wrap.innerHTML = '<div class="empty">No lists yet. Search your reels and tap the ＋ in the search bar to make one.</div>';
+        return;
+      }
+      wrap.innerHTML = folders.map((f, i) =>
+        '<div class="list-pick-row"><span class="list-pick-name">' + escapeHtml(f.name)
+        + '<em>' + f.item_count + (f.item_count === 1 ? ' reel' : ' reels') + '</em></span>'
+        + (f.state === 'member'
+          ? '<span class="in-chip">✓ In</span>'
+          : '<button class="newlist-btn ghost" type="button" data-addlist="' + i + '">Add</button>')
+        + '</div>').join('');
+      wrap.querySelectorAll('[data-addlist]').forEach((b) => b.addEventListener('click', async () => {
+        const f = folders[Number(b.dataset.addlist)];
+        b.disabled = true; b.textContent = '…';
+        try {
+          const r = await fetch('/folders/' + f.id + '/add-reel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ user_id: USER_ID, reel_id: item.reel_id }) });
+          if (!r.ok) throw new Error('add failed');
+          b.outerHTML = '<span class="in-chip">✓ In</span>';
+          state.foldersLoaded = false; loadFolders();
+        } catch (e) {
+          b.disabled = false; b.textContent = 'Add';
+        }
+      }));
     }
     function setQuickActionLabel(button, text) {
       for (const node of button.childNodes) {

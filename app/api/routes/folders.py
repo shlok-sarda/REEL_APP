@@ -63,6 +63,29 @@ def create(request: Request, payload: dict = Body(...)):
                                           str(payload.get("query", "")), reel_ids)
 
 
+# NB: declared BEFORE /{folder_id} so "for-reel" isn't parsed as a folder id.
+@router.get("/for-reel")
+def for_reel(request: Request, reel_id: str = "", user_id: str = ""):
+    resolved = _gate(request, user_id)
+    if not reel_id:
+        raise HTTPException(status_code=400, detail="reel_id required")
+    return {"folders": folders_service.folders_for_reel(resolved, reel_id)}
+
+
+@router.post("/{folder_id}/add-reel")
+def add_reel(request: Request, folder_id: int, payload: dict = Body(...)):
+    """Manual add from the reel sheet — the user correcting the router.
+    Deliberately no 'why' prompt (unlike Skip): the add IS the signal."""
+    resolved = _gate(request, str(payload.get("user_id", "")))
+    reel_id = str(payload.get("reel_id", ""))
+    if not reel_id:
+        raise HTTPException(status_code=400, detail="reel_id required")
+    result = folders_service.add_reel_to_folder(resolved, folder_id, reel_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="folder or reel not found")
+    return result
+
+
 @router.get("/{folder_id}")
 def detail(request: Request, folder_id: int, user_id: str = ""):
     resolved = _gate(request, user_id)

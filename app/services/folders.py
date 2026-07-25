@@ -528,8 +528,16 @@ def list_folders(user_id: str) -> list[dict]:
                 "SELECT COUNT(*) n FROM folder_memberships WHERE folder_id=? AND status='member'",
                 (f["id"],),
             ).fetchone()["n"]
+            # Router-miss meter: reels users had to place by hand. Not shown in
+            # the UI — a founder metric for how often auto-routing fell short.
+            manual_adds = conn.execute(
+                "SELECT COUNT(*) n FROM folder_memberships "
+                "WHERE folder_id=? AND status='member' AND source='manual_add'",
+                (f["id"],),
+            ).fetchone()["n"]
             out.append({"id": f["id"], "name": f["name"], "description": f["description"],
-                        "query": f["query"], "item_count": count, "created_at": f["created_at"]})
+                        "query": f["query"], "item_count": count,
+                        "manual_adds": manual_adds, "created_at": f["created_at"]})
         return out
 
 
@@ -537,6 +545,17 @@ def _members(conn, folder_id: int, statuses=("member",)) -> list[str]:
     q = "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status IN (%s)" % \
         ",".join("?" for _ in statuses)
     return [r["reel_id"] for r in conn.execute(q, (folder_id, *statuses)).fetchall()]
+
+
+def _profile_members(conn, folder_id: int) -> list[str]:
+    """Members that TEACH the routing profile. Manually-added reels
+    (source='manual_add') are members in the UI but are excluded here by
+    design: a manual add must not change how the list routes."""
+    return [r["reel_id"] for r in conn.execute(
+        "SELECT reel_id FROM folder_memberships "
+        "WHERE folder_id=? AND status='member' AND source != 'manual_add'",
+        (folder_id,),
+    ).fetchall()]
 
 
 def suggest_meta(user_id: str, query: str, reel_ids: list[str]) -> dict:
@@ -588,7 +607,7 @@ def _refresh_profile(conn, user_id: str, folder_id: int) -> None:
     if not frow:
         return
     folder = {"name": frow["name"], "description": frow["description"], "query": frow["query"],
-              "member_ids": _members(conn, folder_id)}
+              "member_ids": _profile_members(conn, folder_id)}
     rows = _reel_rows(conn, user_id)
     profile, _, _ = compute_profile(conn, folder, rows)
     conn.execute(
@@ -632,7 +651,7 @@ def _backfill_suggestions(conn, user_id: str, folder_row) -> None:
     Bali-belly-remedy. No verdict (LLM down) = not inserted, retried next scan."""
     folder = {"name": folder_row["name"], "description": folder_row["description"],
               "query": folder_row["query"],
-              "member_ids": _members(conn, folder_row["id"])}
+              "member_ids": _profile_members(conn, folder_row["id"])}
     rows = _reel_rows(conn, user_id)
     decided = {r["reel_id"] for r in conn.execute(
         "SELECT reel_id FROM folder_memberships WHERE folder_id=?", (folder_row["id"],))}
@@ -672,7 +691,7 @@ def _prune_suggestions(conn, user_id: str, folder_row) -> None:
     may legitimately re-suggest them."""
     folder = {"name": folder_row["name"], "description": folder_row["description"],
               "query": folder_row["query"],
-              "member_ids": _members(conn, folder_row["id"])}
+              "member_ids": _profile_members(conn, folder_row["id"])}
     rows = _reel_rows(conn, user_id)
     ev = evaluate_folder(conn, folder, rows)
     if not ev["profile"]:
@@ -743,6 +762,57 @@ def folder_detail(user_id: str, folder_id: int) -> dict | None:
                 "query": f["query"], "members": members, "suggestions": suggestions}
 
 
+def folders_for_reel(user_id: str, reel_id: str) -> list[dict]:
+    """Every active list with this reel's membership state — powers the
+    'Add to List' picker in the reel action sheet."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT f.id, f.name,
+                   (SELECT COUNT(*) FROM folder_memberships m
+                    WHERE m.folder_id = f.id AND m.status = 'member') AS item_count,
+                   (SELECT m2.status FROM folder_memberships m2
+                    WHERE m2.folder_id = f.id AND m2.reel_id = ?) AS state
+            FROM user_folders f
+            WHERE f.user_id = ? AND f.is_active = 1
+            ORDER BY f.created_at DESC
+            """,
+            (reel_id, user_id),
+        ).fetchall()
+        return [{"id": r["id"], "name": r["name"], "item_count": r["item_count"],
+                 "state": r["state"]} for r in rows]
+
+
+def add_reel_to_folder(user_id: str, folder_id: int, reel_id: str) -> dict | None:
+    """Manual add — the user correcting the router, so no questions asked.
+    An earlier Skip is overwritten (an explicit re-add beats an old rejection).
+
+    Deliberately does NOT teach the model (Shlok's rule: only skips teach):
+    no profile refresh here, and source='manual_add' keeps these members out
+    of the profile centroid and threshold calibration forever — the list shows
+    the reel but routes exactly as before. The distinct source doubles as the
+    "how often did the router miss" counter."""
+    with get_connection() as conn:
+        f = conn.execute(
+            "SELECT id FROM user_folders WHERE id=? AND user_id=? AND is_active=1",
+            (folder_id, user_id),
+        ).fetchone()
+        r = conn.execute(
+            "SELECT id FROM reels WHERE id=? AND user_id=?", (reel_id, user_id)
+        ).fetchone()
+        if not f or not r:
+            return None
+        conn.execute(
+            "INSERT INTO folder_memberships "
+            "(user_id, folder_id, reel_id, source, status, score, created_at, updated_at, reject_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,'') "
+            "ON CONFLICT(folder_id, reel_id) DO UPDATE SET "
+            "status='member', source='manual_add', reject_reason='', updated_at=excluded.updated_at",
+            (user_id, folder_id, reel_id, "manual_add", "member", 0, _now(), _now()),
+        )
+    return {"ok": True, "folder_id": folder_id, "reel_id": reel_id, "status": "member"}
+
+
 def set_membership_status(user_id: str, folder_id: int, reel_id: str, status: str,
                           reason: str = "") -> dict:
     """Accept/reject a suggestion. For rejections, `reason` is the user's
@@ -783,7 +853,7 @@ def route_reel(user_id: str, reel_id: str, adjudicate: bool = True) -> list[dict
         ).fetchall()
         for frow in folders:
             folder = {"name": frow["name"], "description": frow["description"], "query": frow["query"],
-                      "member_ids": _members(conn, frow["id"])}
+                      "member_ids": _profile_members(conn, frow["id"])}
             already = conn.execute(
                 "SELECT status FROM folder_memberships WHERE folder_id=? AND reel_id=?",
                 (frow["id"], reel_id),
