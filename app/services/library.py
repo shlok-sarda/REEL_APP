@@ -746,6 +746,22 @@ def load_recent_reels(user_id: str, limit: int = 120) -> list[dict]:
 
 def load_library_payload(user_id: str) -> dict:
     personalized = load_personalized_collections(user_id)
+    if personalized and not is_demo_user(user_id):
+        # Personalization only emits the themes it could cluster confidently.
+        # Whatever it left out must still reach the library as plain category
+        # shelves — a thin result (one cluster on a young account) used to
+        # hide every other processed reel from the collections view.
+        covered = {
+            item.get("reel_id")
+            for collection in personalized
+            for item in collection.get("items", [])
+            if item.get("reel_id")
+        }
+        for collection in load_standard_collections(user_id):
+            leftover = [item for item in collection.get("items", []) if item.get("reel_id") not in covered]
+            if leftover:
+                collection["items"] = leftover
+                personalized.append(collection)
     standard = [] if personalized else load_standard_collections(user_id)
     return {
         "user_id": user_id,
