@@ -744,6 +744,49 @@ def load_recent_reels(user_id: str, limit: int = 120) -> list[dict]:
     return recents
 
 
+# Founder-curated demo shelves for the promo video (2026-07-25): only these
+# exact shelf titles may appear on the demo account; anything else the engine
+# produces is dropped there. Temporary hard-coding until the collections
+# engine is reworked for confidence-gated shelves.
+_DEMO_SHOWCASE_KEEP_TITLES = frozenset({
+    "Restaurants in Bali",
+    "Exercise & Training",
+    "Nature & Weather",
+    "Movies",
+    "Productivity & Tools",
+    "Business & Culture",
+})
+
+# A reel contributing more than this many items to one shelf is a caption
+# listicle ("20 restaurants in Bali...") — it collapses to a single card.
+# Reels with a few genuine items (a two-exercise workout reel) keep them all.
+_DEMO_LISTICLE_ITEM_LIMIT = 3
+
+
+def _curate_demo_showcase_collections(collections: list[dict]) -> list[dict]:
+    curated = []
+    for collection in collections:
+        if collection.get("list_title") not in _DEMO_SHOWCASE_KEEP_TITLES:
+            continue
+        items = collection.get("items", [])
+        counts: dict = {}
+        for item in items:
+            key = item.get("reel_id") or item.get("url") or item.get("name")
+            counts[key] = counts.get(key, 0) + 1
+        collapsed: set = set()
+        kept = []
+        for item in items:
+            key = item.get("reel_id") or item.get("url") or item.get("name")
+            if counts[key] > _DEMO_LISTICLE_ITEM_LIMIT:
+                if key in collapsed:
+                    continue
+                collapsed.add(key)
+            kept.append(item)
+        collection["items"] = kept
+        curated.append(collection)
+    return curated
+
+
 def _is_demo_showcase_account(user_id: str) -> bool:
     """The real, shared account behind /demo-login — not the fake 'demo' user."""
     email = settings.demo_account_email
@@ -776,6 +819,7 @@ def load_library_payload(user_id: str) -> dict:
             if leftover:
                 collection["items"] = leftover
                 personalized.append(collection)
+        personalized = _curate_demo_showcase_collections(personalized)
     standard = [] if personalized else load_standard_collections(user_id)
     return {
         "user_id": user_id,
