@@ -744,9 +744,23 @@ def load_recent_reels(user_id: str, limit: int = 120) -> list[dict]:
     return recents
 
 
+def _is_demo_showcase_account(user_id: str) -> bool:
+    """The real, shared account behind /demo-login — not the fake 'demo' user."""
+    email = settings.demo_account_email
+    if not email or not user_id:
+        return False
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id FROM users WHERE lower(email) = ? LIMIT 1", (email,)
+        ).fetchone()
+    return bool(row) and row["id"] == user_id
+
+
 def load_library_payload(user_id: str) -> dict:
     personalized = load_personalized_collections(user_id)
-    if personalized and not is_demo_user(user_id):
+    # Founder is evaluating the merged view on the demo account before it
+    # rolls out to everyone — keep it demo-only until that verdict.
+    if personalized and _is_demo_showcase_account(user_id):
         # Personalization only emits the themes it could cluster confidently.
         # Whatever it left out must still reach the library as plain category
         # shelves — a thin result (one cluster on a young account) used to
