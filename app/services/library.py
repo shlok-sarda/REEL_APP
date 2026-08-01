@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
@@ -799,11 +800,89 @@ def _is_demo_showcase_account(user_id: str) -> bool:
     return bool(row) and row["id"] == user_id
 
 
+def collections_enabled(user_id: str) -> bool:
+    """Who currently sees Collections shelves.
+
+    The demo showcase account (for the promo link) plus anything listed in the
+    COLLECTIONS_ACCOUNTS env var, by email or user id. That env var is the
+    dial for putting the feature in a real library while its mistakes are
+    still being worked out — no deploy needed to add or drop an account.
+    """
+    if not user_id:
+        return False
+    if _is_demo_showcase_account(user_id):
+        return True
+    allowlist = settings.collections_accounts
+    if not allowlist:
+        return False
+    if user_id.strip().lower() in allowlist:
+        return True
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    return bool(row) and (row["email"] or "") in allowlist
+
+
+# Features are written ONLY by the personalization backfill, and that backfill
+# is only reachable when the strong-personalization engine returns nothing.
+# Once it publishes even one shelf the backfill stops running, so reels saved
+# after that never get features and never reach Collections. These accounts
+# are the ones actually evaluating the shelves, so keep their features in step
+# with their library — off the request thread, because a full rebuild takes
+# ~16s for 129 items and the UI already re-polls every 8-25s.
+_FEATURE_REFRESH_LOCK = threading.Lock()
+_FEATURE_REFRESH_IN_FLIGHT: set[str] = set()
+
+
+def _features_are_stale(user_id: str) -> bool:
+    item_count, max_reel_item_id = _current_reel_item_state(user_id)
+    if not item_count:
+        return False
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS count, COALESCE(MAX(reel_item_id), 0) AS max_reel_item_id
+            FROM reel_item_features
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    feature_count = int(row["count"] or 0) if row else 0
+    feature_max = int(row["max_reel_item_id"] or 0) if row else 0
+    return feature_count != item_count or feature_max != max_reel_item_id
+
+
+def _refresh_features_if_stale(user_id: str) -> None:
+    with _FEATURE_REFRESH_LOCK:
+        if user_id in _FEATURE_REFRESH_IN_FLIGHT:
+            return
+        try:
+            if not _features_are_stale(user_id):
+                return
+        except Exception as exc:
+            print(f"[library] feature staleness check failed for {user_id}: {exc}")
+            return
+        _FEATURE_REFRESH_IN_FLIGHT.add(user_id)
+
+    def run() -> None:
+        try:
+            PersonalizationV2Engine().backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
+        except Exception as exc:
+            print(f"[library] feature refresh failed for {user_id}: {exc}")
+        finally:
+            with _FEATURE_REFRESH_LOCK:
+                _FEATURE_REFRESH_IN_FLIGHT.discard(user_id)
+
+    threading.Thread(target=run, name=f"collections-refresh-{user_id}", daemon=True).start()
+
+
 def load_library_payload(user_id: str) -> dict:
+    collections_on = collections_enabled(user_id)
+    if collections_on:
+        _refresh_features_if_stale(user_id)
     personalized = load_personalized_collections(user_id)
-    # Founder is evaluating the merged view on the demo account before it
-    # rolls out to everyone — keep it demo-only until that verdict.
-    if personalized and _is_demo_showcase_account(user_id):
+    if personalized and collections_on:
         # Personalization only emits the themes it could cluster confidently.
         # Whatever it left out must still reach the library as plain category
         # shelves — a thin result (one cluster on a young account) used to
@@ -819,7 +898,12 @@ def load_library_payload(user_id: str) -> dict:
             if leftover:
                 collection["items"] = leftover
                 personalized.append(collection)
-        personalized = _curate_demo_showcase_collections(personalized)
+        # The promo account keeps its hand-picked shelf list so the demo link
+        # stays clean. Evaluation accounts get the engine's raw output, wrong
+        # shelves included — hiding the mistakes is what made them invisible
+        # for three weeks.
+        if _is_demo_showcase_account(user_id):
+            personalized = _curate_demo_showcase_collections(personalized)
     standard = [] if personalized else load_standard_collections(user_id)
     return {
         "user_id": user_id,

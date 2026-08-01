@@ -31,6 +31,12 @@ class Settings:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()
     demo_account_email: str = os.getenv("DEMO_ACCOUNT_EMAIL", "").strip().lower()
+    # Accounts allowed to see the auto-generated Collections shelves while the
+    # engine is still being polished. Comma-separated emails or user ids; the
+    # demo showcase account is always included on top of this.
+    collections_accounts: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("COLLECTIONS_ACCOUNTS", "").split(",") if value.strip()
+    )
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

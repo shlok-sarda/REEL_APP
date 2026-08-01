@@ -3,11 +3,12 @@ import os
 
 def build_clipnest_v1_html(user_id: str) -> str:
     safe_user_id = user_id.replace("\\", "\\\\").replace("'", "\\'")
-    # Collections shelves are visible only on the demo showcase account while
-    # the founder evaluates them; flip this to "1" for everyone to roll out.
-    from app.services.library import _is_demo_showcase_account
+    # Collections shelves are visible to the demo showcase account plus any
+    # account listed in COLLECTIONS_ACCOUNTS, so the engine can be polished
+    # against a real library. Return "1" unconditionally to roll out to all.
+    from app.services.library import collections_enabled
 
-    show_collections = "1" if _is_demo_showcase_account(user_id) else "0"
+    show_collections = "1" if collections_enabled(user_id) else "0"
     # Render exposes the deployed commit; locally this shows "dev". Surfaced in
     # Profile so a stale cached build can be spotted from the phone instantly.
     build_sha = (os.getenv("RENDER_GIT_COMMIT") or "dev")[:7]
