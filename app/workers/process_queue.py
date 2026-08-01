@@ -68,9 +68,41 @@ def run_processor(cmd: list[str], timeout_seconds: int) -> subprocess.CompletedP
     return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
 
+def rebuild_shelves_for(user_id: str) -> None:
+    """Route Collections shelves. Never raises — shelves are never worth a job.
+
+    Only for accounts that can actually SEE Collections: routing costs three
+    LLM calls per new reel, so running it for everyone while the feature is
+    behind an allowlist bills for shelves nobody is allowed to look at, and
+    that waste scales with the user base rather than with the allowlist.
+    """
+    try:
+        from app.services.collections import rebuild_user_shelves
+        from app.services.library import collections_enabled
+
+        if not collections_enabled(user_id):
+            return
+        summary = rebuild_user_shelves(user_id)
+        print(f"[collections] {user_id}: {summary['shelved']} reels on "
+              f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
+    except Exception as exc:
+        print(f"[collections] shelf rebuild skipped for {user_id}: {exc}")
+
+
 def process_job(job: dict):
     claim_token = job.get("started_at") or None
     timeout_seconds = job_timeout_seconds(job["job_type"])
+
+    # Shelves are routed BEFORE the processor on a library rebuild, not after.
+    # The processor re-runs the whole legacy pipeline and on a real library it
+    # exceeds the 600s timeout, which fails the job and returns early — so
+    # hanging routing off its success meant the shelves never built at all,
+    # no matter how many times the rebuild was triggered. Routing needs only
+    # deep_search_documents, which already exist, so it does not depend on
+    # that script finishing.
+    if job["job_type"] == "rebuild_library":
+        rebuild_shelves_for(job["user_id"])
+
     try:
         cmd = [
             sys.executable,
@@ -132,20 +164,10 @@ def process_job(job: dict):
     # account does not satisfy — the shelves would silently never build. Here
     # it runs after every successful job, reading the documents just rebuilt
     # above. Wrapped so routing can never fail reel processing.
-    # Only for accounts that can actually SEE Collections. Routing costs three
-    # LLM calls per new reel, so running it for everyone while the feature is
-    # behind an allowlist bills for shelves nobody is allowed to look at — and
-    # that waste scales with the user base, not with the allowlist.
-    try:
-        from app.services.collections import rebuild_user_shelves
-        from app.services.library import collections_enabled
-
-        if collections_enabled(job["user_id"]):
-            summary = rebuild_user_shelves(job["user_id"])
-            print(f"[collections] {job['user_id']}: {summary['shelved']} reels on "
-                  f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
-    except Exception as exc:
-        print(f"[collections] shelf rebuild skipped for {job['user_id']}: {exc}")
+    # A freshly processed reel gets routed onto the shelves here. Library
+    # rebuilds already routed before the processor ran, above.
+    if job["job_type"] != "rebuild_library":
+        rebuild_shelves_for(job["user_id"])
 
     # Auto-route the freshly-processed reel into the user's smart folders.
     # Wrapped so a routing failure can NEVER fail reel processing. No-op for
