@@ -953,32 +953,44 @@ def collections_status(user_id: str) -> dict:
         "reel_items": item_count,
         "features_built": feature_count,
         "features_stale": feature_count != item_count,
-        "rebuild_in_flight": user_id in _FEATURE_REFRESH_IN_FLIGHT,
         "demo_curation_applied": is_demo,
     }
     try:
-        from app.services.collections import ensure_schema
+        from app.services.collections import PROMPT_VERSION, ensure_schema, rebuild_status
 
         ensure_schema()
         with get_connection() as connection:
-            routes = connection.execute(
+            # Progress has to be counted against the CURRENT prompt version.
+            # Counting every row makes an in-flight rebuild look finished,
+            # because the previous version's verdicts are still sitting there.
+            done = connection.execute(
+                "SELECT COUNT(*) AS count FROM collection_routes WHERE user_id = ? AND prompt_version = ?",
+                (user_id, PROMPT_VERSION),
+            ).fetchone()
+            total = connection.execute(
                 "SELECT COUNT(*) AS count FROM collection_routes WHERE user_id = ?", (user_id,)
             ).fetchone()
             built = connection.execute(
                 "SELECT MAX(built_at) AS built_at FROM collection_shelves WHERE user_id = ?", (user_id,)
             ).fetchone()
+        routed_now = int(done["count"] or 0) if done else 0
         shelves = load_shelf_collections(user_id)
+        running = rebuild_status(user_id)
         status["engine"] = "shelf_router" if shelves else "fallback_categories"
-        status["routes_stored"] = int(routes["count"] or 0) if routes else 0
+        status["prompt_version"] = PROMPT_VERSION
+        status["rebuild_running"] = running
+        status["reels_routed_this_version"] = routed_now
+        status["reels_to_route"] = item_count
+        status["routes_stored_all_versions"] = int(total["count"] or 0) if total else 0
         status["shelves_built_at"] = (built["built_at"] if built else "") or ""
         status["shelves"] = [
             {"list_title": c.get("list_title", ""), "items": len(c.get("items", []))} for c in shelves
         ]
-        if not shelves:
-            status["hint"] = (
-                "No shelves yet — the router has not run. It runs inside the rebuild_library "
-                "job; POST /library/rebuild to queue one."
-            )
+        status["progress"] = (
+            f"rebuilding: {routed_now} reels routed so far" if running
+            else (f"done — {routed_now} reels routed on {PROMPT_VERSION}" if routed_now
+                  else "no rebuild has run for this prompt version yet")
+        )
     except Exception as exc:
         status["engine"] = "error"
         status["error"] = repr(exc)[:300]
