@@ -38,7 +38,7 @@ from collections import Counter
 from app.db.database import get_connection
 
 
-PROMPT_VERSION = "shelves_v3"
+PROMPT_VERSION = "shelves_v4"
 ROUTE_MODEL = "gpt-4.1-mini"
 ROUTE_SEEDS = (7, 8, 9)
 ROUTE_TEMPERATURE = 0
@@ -66,6 +66,14 @@ TRANSCRIPT_INCIDENTAL_CHARS = 80
 CARD_CAPTION_MAX = 220
 
 _FAIL_MARKERS = ("processing failed", "could not be processed", "failed reels")
+
+# What a shelf is CALLED on screen, separate from the vocabulary term the model
+# routes with. The term has to stay descriptive enough for the model to aim at;
+# the label the user reads should just be plain. Keeping them apart means a
+# rename is a display change and never re-routes a single reel.
+SHELF_DISPLAY_NAMES = {
+    "People & Performance": "People",
+}
 
 
 # Every definition is phrased as a PURPOSE — "the reel exists to..." — not as a
@@ -141,9 +149,11 @@ Never shelve the container.
 still make exactly the same point, then it is an example, not the subject. Shelve the point
 the reel is making, not the example it reached for.
 5. "none" is always allowed and is usually right. Most saved reels belong on no shelf.
-Never stretch a reel to fill a shelf. If two shelves both look arguable, or you are unsure,
-answer "none".
-6. When a shelf does fit, pick the BROADEST one that fits. Never narrow it.
+Never stretch a reel to fill a shelf. If you are unsure whether ANY shelf applies, answer
+"none".
+6. When two shelves both fit, take the one that names the specific kind of thing the reel
+is about, not the one that names the general situation it happens to sit in. A place you
+would eat at is a place to eat, even though it is also somewhere you could travel to.
 Reply JSON only: {"shelf":"<exact name from the list>"|"none"}
 """.strip()
 
@@ -677,7 +687,7 @@ def load_shelf_collections(user_id: str) -> list[dict]:
                 # whose category is a generic bucket and reads the parent
                 # first, so an empty parent lets the shelf stand on its name.
                 "parent_title": "",
-                "list_title": shelf["list_title"],
+                "list_title": SHELF_DISPLAY_NAMES.get(shelf["shelf_key"], shelf["list_title"]),
                 "shelf_key": shelf["shelf_key"],
                 "items": items,
             }
