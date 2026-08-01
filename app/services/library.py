@@ -534,8 +534,21 @@ def _load_or_build_v2_snapshot(user_id: str) -> dict:
         or snapshot_max_reel_item_id != current_max_reel_item_id
         or snapshot_is_outdated
     ):
-        engine = PersonalizationV2Engine(repo=repo)
-        snapshot = engine.backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
+        # backfill_user starts by wiping every feature, node and membership for
+        # the user. Two of those running at once — the background refresh and
+        # this inline path both fire on a cold account — means one resets the
+        # state the other is mid-way through writing. Only one rebuild at a
+        # time; the loser serves the current snapshot and catches up next call.
+        with _FEATURE_REFRESH_LOCK:
+            if user_id in _FEATURE_REFRESH_IN_FLIGHT:
+                return snapshot
+            _FEATURE_REFRESH_IN_FLIGHT.add(user_id)
+        try:
+            engine = PersonalizationV2Engine(repo=repo)
+            snapshot = engine.backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
+        finally:
+            with _FEATURE_REFRESH_LOCK:
+                _FEATURE_REFRESH_IN_FLIGHT.discard(user_id)
     return snapshot
 
 
@@ -875,6 +888,66 @@ def _refresh_features_if_stale(user_id: str) -> None:
                 _FEATURE_REFRESH_IN_FLIGHT.discard(user_id)
 
     threading.Thread(target=run, name=f"collections-refresh-{user_id}", daemon=True).start()
+
+
+def collections_status(user_id: str) -> dict:
+    """Why Collections are or aren't showing for this account.
+
+    Four things have to line up — the account is allowlisted, features exist,
+    an engine published something, and the shelf survives the UI's generic
+    title filter — and from the app you cannot tell which one failed. Open
+    /library/status while signed in and it says which.
+    """
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    email = (row["email"] if row else "") or ""
+    is_demo = _is_demo_showcase_account(user_id)
+    enabled = collections_enabled(user_id)
+    item_count, _ = _current_reel_item_state(user_id)
+    with get_connection() as connection:
+        feature_row = connection.execute(
+            "SELECT COUNT(*) AS count FROM reel_item_features WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    feature_count = int(feature_row["count"] or 0) if feature_row else 0
+
+    if enabled:
+        reason = "demo showcase account" if is_demo else "matched COLLECTIONS_ACCOUNTS"
+    elif not settings.collections_accounts:
+        reason = "COLLECTIONS_ACCOUNTS is not set on this server"
+    else:
+        reason = (
+            f"signed in as '{email or user_id}', which is not in COLLECTIONS_ACCOUNTS "
+            "(it must match your account email exactly, lowercase, no spaces)"
+        )
+
+    status = {
+        "user_id": user_id,
+        "email": email,
+        "collections_enabled": enabled,
+        "reason": reason,
+        "allowlist_configured": bool(settings.collections_accounts),
+        "reel_items": item_count,
+        "features_built": feature_count,
+        "features_stale": feature_count != item_count,
+        "rebuild_in_flight": user_id in _FEATURE_REFRESH_IN_FLIGHT,
+        "demo_curation_applied": is_demo,
+    }
+    try:
+        personalized = load_personalized_collections(user_id)
+        status["engine"] = (
+            "strong_personalization" if personalized and personalized[0].get("personalization_model")
+            else ("personalization_v2" if personalized else "none")
+        )
+        status["shelves"] = [
+            {"parent_title": c.get("parent_title", ""), "list_title": c.get("list_title", ""), "items": len(c.get("items", []))}
+            for c in personalized
+        ]
+    except Exception as exc:
+        status["engine"] = "error"
+        status["error"] = repr(exc)[:300]
+    return status
 
 
 def load_library_payload(user_id: str) -> dict:
