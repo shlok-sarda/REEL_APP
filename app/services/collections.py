@@ -37,15 +37,17 @@ from collections import Counter
 from app.db.database import get_connection
 
 
-PROMPT_VERSION = "shelves_v1"
+PROMPT_VERSION = "shelves_v2"
 ROUTE_MODEL = "gpt-4.1-mini"
 ROUTE_SEEDS = (7, 8, 9)
 ROUTE_TEMPERATURE = 0
 ROUTE_MAX_TOKENS = 25
 
-# A reel three passes cannot agree on is not squarely about anything, which is
-# the same thing as belonging on no shelf.
-ROUTE_MIN_VOTES = 2
+# Unanimous. Two-of-three let through everything the model was merely leaning
+# towards, and "leaning towards" is exactly the reel that has no clear intent.
+# Raising this trades coverage for precision, which is the trade the founder
+# asked for: he does not care how many reels end up on a shelf.
+ROUTE_MIN_VOTES = 3
 
 # Three, not five. The unit here is a REEL, so a single caption listicle can no
 # longer manufacture a shelf out of its own twelve items — that was what forced
@@ -78,10 +80,10 @@ CORE_VOCAB: dict[str, str] = {
     "Grooming & Personal Care": "hair, skin or grooming ROUTINES and products",
     "Movies & Shows": "a film or a series being discussed, recommended or clipped",
     "Money & Career": "jobs, business, study, funding, personal finance",
-    "People & Performance": (
-        "a person is the point: singing, dancing, modelling, getting ready, hanging out, "
-        "a transition or an edit. Nothing is being sold or taught"
-    ),
+    # There is deliberately NO shelf for "a person is the point". Reels saved
+    # just to watch someone — lip syncs, dances, outfit transitions, posing —
+    # have no intent to file under, so they must route to "none" rather than
+    # into a shelf that exists to catch them.
     "Home & Decor": "furniture, lighting, room styling and home objects",
     "Cars & Rides": "cars, bikes and vehicles",
     "Music": "songs, artists, instruments and music gear",
@@ -100,21 +102,24 @@ CORE_VOCAB: dict[str, str] = {
 _ROUTE_RULES = """
 Decide from the reel's MAIN SUBJECT only.
 
-1. ACTIVITY BEATS APPEARANCE. If the subject is doing a recognisable activity, the shelf
+1. ACTIVITY BEATS APPEARANCE. If the subject is DOING a recognisable activity, the shelf
 is that activity: lifting weights or training is Gym & Fitness, cooking is Recipes &
 Cooking, travelling or showing a place is Travel & Places, demonstrating an app is Apps &
-AI Tools.
-2. If the subject is a person simply being on camera - singing, dancing, modelling,
-getting ready, lip-syncing, an outfit transition, an edit, hanging out - and 'brands:
-none' + 'products: none' + 'spoken: none/incidental' confirm nobody is selling or teaching
-anything, the shelf is People & Performance, or none. NEVER Fashion, Grooming or Gadgets
-just because clothes, hair or objects are visible.
-3. Ignore incidental details completely: a presenter's outfit, background props, a brand
+AI Tools. This rule wins over every rule below it.
+2. Otherwise, if the subject is a person simply BEING ON CAMERA - singing, lip-syncing,
+dancing, modelling, posing, getting ready, an outfit transition, an edit, hanging out -
+then read the sell signal. If it says 'none', answer "none". Not Fashion, not Grooming,
+not Gadgets. A person wearing clothes is not a clothing reel, hair on a head is not a
+grooming reel, and an object in shot is not a gadget reel. This is the most common
+mistake: do not make it.
+3. A shelf about buying or learning something needs a real sell signal - a brand named,
+or someone explaining it on camera. "sell signal: none" means nobody is selling or
+teaching, so a shopping or grooming shelf is wrong by definition.
+4. Ignore incidental details completely: a presenter's outfit, background props, a brand
 mentioned in passing, where it happened to be filmed.
-4. "none" is always allowed and is the right answer whenever no shelf is squarely about
-this reel. Most reels belong on no shelf and that is correct. Never stretch a reel to fill
-a shelf.
-5. When a shelf does fit, pick the BROADEST one that fits. Never narrow it.
+5. "none" is always allowed and is usually right. Most reels belong on no shelf and that
+is correct. Never stretch a reel to fill a shelf. If you are unsure, answer "none".
+6. When a shelf does fit, pick the BROADEST one that fits. Never narrow it.
 Reply JSON only: {"shelf":"<exact name from the list>"|"none"}
 """.strip()
 
@@ -288,15 +293,27 @@ def build_card(row: dict) -> str | None:
     elif summary:
         about = f"about: {summary[:CARD_SUMMARY_MAX]}"
 
+    # The sell signal, not the product list, is what separates a fashion reel
+    # from a girl in a dress. Measured on the real library: reels actually
+    # saved for fashion name brands (Adidas, Versace, Milk Studios); reels
+    # saved to watch someone name none, and the only reason they looked like
+    # shopping was that the extractor wrote her outfit down as a "product"
+    # ("Black Halter Neck Floral Beach Dress"). Passing that product list to
+    # the model is what dragged those reels into Fashion, so it is not passed.
+    brands = _join(document.get("brands"))[:CARD_BRANDS_MAX]
+    teaches = spoken.startswith("spoken: explains")
+    if brands:
+        sell_signal = f"sell signal: brand named ({brands})"
+    elif teaches:
+        sell_signal = "sell signal: explained on camera"
+    else:
+        sell_signal = "sell signal: none - nobody is selling or teaching anything"
+
     lines = [
         f"subject: {main_subject or item_name or '(unknown)'}",
         f"subject type: {_text(row.get('main_subject_type')) or 'unknown'}",
         about,
-        # Brands and products are intent evidence only — the prompt uses
-        # "none/none/none" to recognise a watch-only reel. They are never a
-        # routing target, which is why they are capped rather than listed.
-        f"brands: {_join(document.get('brands'))[:CARD_BRANDS_MAX] or 'none'}",
-        f"products: {_join(document.get('product_names'))[:CARD_PRODUCTS_MAX] or 'none'}",
+        sell_signal,
         spoken,
     ]
     return " | ".join(line for line in lines if line)

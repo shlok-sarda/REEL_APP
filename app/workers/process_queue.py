@@ -126,6 +126,21 @@ def process_job(job: dict):
     except Exception:
         pass
 
+    # Rebuild the Collections shelves. This lives here rather than inside
+    # process_shlok_reels.py because the call site there sits behind
+    # `if paths.raw_output.exists()`, which a rebuild_library job on a fresh
+    # account does not satisfy — the shelves would silently never build. Here
+    # it runs after every successful job, reading the documents just rebuilt
+    # above. Wrapped so routing can never fail reel processing.
+    try:
+        from app.services.collections import rebuild_user_shelves
+
+        summary = rebuild_user_shelves(job["user_id"])
+        print(f"[collections] {job['user_id']}: {summary['shelved']} reels on "
+              f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
+    except Exception as exc:
+        print(f"[collections] shelf rebuild skipped for {job['user_id']}: {exc}")
+
     # Auto-route the freshly-processed reel into the user's smart folders.
     # Wrapped so a routing failure can NEVER fail reel processing. No-op for
     # users with no folders (the loop just doesn't run).
