@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from collections import Counter
 
@@ -549,6 +550,53 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
         "shelved": sum(total for _, total in published),
         "published_shelves": [{"shelf": term, "members": total} for term, total in published],
         "below_floor": [{"shelf": term, "members": total} for term, total in ordered if term not in published_terms],
+    }
+
+
+_REBUILD_LOCK = threading.Lock()
+_REBUILD_IN_FLIGHT: set[str] = set()
+
+
+def rebuild_status(user_id: str) -> bool:
+    with _REBUILD_LOCK:
+        return user_id in _REBUILD_IN_FLIGHT
+
+
+def start_shelf_rebuild(user_id: str) -> dict:
+    """Kick routing off on a background thread and return immediately.
+
+    Deliberately does NOT go through the job queue. A rebuild_library job runs
+    the whole legacy processor first, and on a real library that script blows
+    past its 600s timeout, fails the job and returns — which meant the shelves
+    could never build no matter how many times a rebuild was triggered.
+    Routing reads deep_search_documents and writes its own tables; it needs
+    none of that pipeline.
+
+    Cheap to call repeatedly: every verdict is cached against the hash of the
+    card that produced it, so a second run issues zero API calls.
+    """
+    ensure_schema()
+    with _REBUILD_LOCK:
+        if user_id in _REBUILD_IN_FLIGHT:
+            return {"ok": True, "started": False, "reason": "a rebuild is already running"}
+        _REBUILD_IN_FLIGHT.add(user_id)
+
+    def run() -> None:
+        try:
+            summary = rebuild_user_shelves(user_id)
+            print(f"[collections] {user_id}: {summary['shelved']} reels on "
+                  f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
+        except Exception as exc:
+            print(f"[collections] rebuild failed for {user_id}: {exc}")
+        finally:
+            with _REBUILD_LOCK:
+                _REBUILD_IN_FLIGHT.discard(user_id)
+
+    threading.Thread(target=run, name=f"shelf-rebuild-{user_id}", daemon=True).start()
+    return {
+        "ok": True,
+        "started": True,
+        "note": "Routing runs in the background. Poll /library/status and watch routes_stored climb.",
     }
 
 

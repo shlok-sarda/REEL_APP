@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, Request
 
 from app.schemas import LibraryResponse
 from app.services.auth import block_demo_link_writes, ensure_user_access
-from app.services.jobs import enqueue_library_rebuild_job
+from app.services.collections import start_shelf_rebuild
 from app.services.library import collections_status, load_library_payload
 
 
@@ -24,7 +24,13 @@ def get_library_status(request: Request, user_id: str = Query(default="")):
 
 @router.post("/rebuild")
 def post_library_rebuild(request: Request, user_id: str = Query(default="")):
-    """Queue a shelf rebuild. The routing itself happens in the worker, never here."""
+    """Rebuild the Collections shelves on a background thread.
+
+    Returns immediately — no LLM call happens on the request thread. This
+    bypasses the job queue on purpose: a rebuild_library job runs the legacy
+    processor first, which times out at 600s on a real library and takes the
+    shelves down with it.
+    """
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=False)
     block_demo_link_writes(request, "rebuild collections")
-    return enqueue_library_rebuild_job(resolved_user_id)
+    return start_shelf_rebuild(resolved_user_id)
