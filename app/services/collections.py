@@ -89,13 +89,20 @@ MIN_THEME_SUPPORT = 4
 MAX_DISCOVERED_TERMS = 16
 DISCOVERY_BATCH = 40
 
-# A shelf earns a sharper name once it is big enough for the evidence to
-# support one. Below this it stays broad, because three reels cannot tell you
-# whether "Recipes & Cooking" is really "Protein Recipes" — and a name that
-# narrows on thin evidence is worse than one that stays vague.
+# Sharper shelf names are OFF.
+#
+# The idea was sound — a shelf of fifteen protein recipes should say so — but
+# it was tried on the real library and did damage. "Gym & Fitness" became
+# "Upper Body Workouts" while still holding a motivational reel, and
+# "Recipes & Cooking" became "High Protein & Healthy Cooking" while still
+# holding a chocolate cake. A narrow name is a promise about every member, so
+# ONE outlier makes it a lie, and the model's own coverage self-report is not
+# reliable enough to catch that. Broad names are honest about a mixed shelf.
+#
+# Re-enable only behind a coverage check MEASURED against the members rather
+# than reported by the model.
+RENAME_ENABLED = False
 RENAME_MIN_MEMBERS = 8
-# ...and the sharper name has to describe nearly all of them, not just the
-# majority. A name that fits 60% of a shelf is a lie about the other 40%.
 RENAME_MIN_COVERAGE = 0.8
 
 
@@ -287,9 +294,12 @@ actually run through THIS collection.
 
 Rules:
 - A theme is a reason someone saves things, not a description of one reel.
-- BROAD umbrellas only. "Gym & Fitness", never "Chest Workout". "Recipes & Cooking", never
-  "Protein Pancakes". If a theme would describe fewer than a handful of these reels, it is
-  too narrow - widen it or leave it out.
+- BROAD umbrellas only. "Gym & Fitness", never "Chest Workout" or "Upper Body Workouts".
+  "Recipes & Cooking", never "Protein Pancakes" or "High Protein Cooking". If a theme would
+  describe fewer than a handful of these reels, it is too narrow - widen it or leave it out.
+- A theme is what reels are FOR, never what the people or things in them look like. "Casual
+  and Dressy Outfits" is a description of appearances and is never a theme; "Fashion &
+  Shopping" is a reason to save something and can be.
 - Name only themes you can actually see repeating here. Do not propose a theme because it
   is a common category in general; propose it because these reels show it.
 - Never name a brand, a person, a creator, a city or a specific product.
@@ -317,6 +327,51 @@ def _discover_themes(subjects: list[str]) -> list[dict]:
         messages=[
             {"role": "system", "content": DISCOVER_SYSTEM},
             {"role": "user", "content": f"{len(subjects)} saved reels:\n{listing}"},
+        ],
+    )
+    payload = json.loads(response.choices[0].message.content or "{}")
+    themes = payload.get("themes")
+    return themes if isinstance(themes, list) else []
+
+
+CONSOLIDATE_SYSTEM = """
+You are cleaning up a draft list of shelf names for one person's saved-reel library.
+
+The draft was written in separate passes that could not see each other, so it contains the
+same interest under several names, and sub-types listed alongside the thing they belong to.
+
+Merge it into a final list of BROAD shelves:
+- If two entries are the same interest worded differently, merge them into one.
+- If one entry is a SUB-TYPE of another, drop it and keep the broader one. "Upper Body
+  Workouts" belongs inside "Gym & Fitness". "High Protein Cooking" belongs inside
+  "Recipes & Cooking". Never keep both.
+- If an entry describes what people or things LOOK like rather than why a reel was saved,
+  drop it.
+- Prefer fewer, broader shelves. Ten good ones beat twenty overlapping ones.
+- Keep the definition phrased as "the reel exists to ...".
+
+Reply JSON only:
+{"themes":[{"name":"...","definition":"the reel exists to ...","approx_reels":<int>}]}
+""".strip()
+
+
+def _consolidate_themes(candidates: list[dict]) -> list[dict]:
+    """Merge the per-batch drafts into one vocabulary. One call."""
+    from api_config import get_openai_client
+
+    client = get_openai_client()
+    listing = "\n".join(
+        f"- {row['name']} ({row['support']} reels): {row['definition'][:110]}" for row in candidates
+    )
+    response = client.chat.completions.create(
+        model=ROUTE_MODEL,
+        temperature=0,
+        max_tokens=900,
+        seed=ROUTE_SEEDS[0],
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": CONSOLIDATE_SYSTEM},
+            {"role": "user", "content": f"Draft list:\n{listing}"},
         ],
     )
     payload = json.loads(response.choices[0].message.content or "{}")
@@ -372,7 +427,33 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
             else:
                 proposals[name.lower()] = {"name": name, "definition": definition, "support": support}
 
-    kept = [row for row in proposals.values() if row["support"] >= MIN_THEME_SUPPORT]
+    # The batches could not see each other, so the draft holds the same
+    # interest under several names and sub-types beside their parents. Merging
+    # on an exact name match — which is all this used to do — left "Upper Body
+    # Workouts" and "Fitness & Workout" standing as two shelves, and split one
+    # person's gym reels across both. Consolidate the whole draft in one pass.
+    draft = sorted(proposals.values(), key=lambda row: (-row["support"], row["name"].lower()))
+    try:
+        merged = _consolidate_themes(draft)
+    except Exception as exc:
+        print(f"[collections] theme consolidation failed for {user_id}: {exc}")
+        merged = []
+    final = []
+    for theme in merged or []:
+        name = _text(theme.get("name"))
+        definition = _text(theme.get("definition"))
+        if name and definition:
+            final.append({"name": name, "definition": definition, "support": int(theme.get("approx_reels") or 0)})
+    if not final:
+        final = draft
+
+    # A shelf has to cover a real slice of the library, not four reels out of
+    # eighty. Scaling the floor with library size is what actually keeps the
+    # vocabulary broad; a flat 4 let narrow themes through on any big library.
+    floor = max(MIN_THEME_SUPPORT, round(0.06 * len(subjects)))
+    kept = [row for row in final if row["support"] >= floor]
+    if not kept:
+        kept = sorted(final, key=lambda row: -row["support"])[:MAX_DISCOVERED_TERMS]
     kept.sort(key=lambda row: (-row["support"], row["name"].lower()))
     kept = kept[:MAX_DISCOVERED_TERMS]
     if not kept:
@@ -449,7 +530,7 @@ def refine_shelf_name(term: str, subjects: list[str]) -> str:
     term, so membership, the route cache and every stored verdict are
     untouched, and a rename costs one call rather than a re-route.
     """
-    if len(subjects) < RENAME_MIN_MEMBERS:
+    if not RENAME_ENABLED or len(subjects) < RENAME_MIN_MEMBERS:
         return term
     try:
         sharper = _refine_name(term, subjects)
