@@ -572,6 +572,46 @@ def rebuild_status(user_id: str) -> bool:
         return user_id in _REBUILD_IN_FLIGHT
 
 
+# Measured on the real library: ~1,318 input tokens per call (system prompt +
+# card) and ~10 out, at gpt-4.1-mini's $0.40/1M in and $1.60/1M out.
+_USD_PER_CALL = (1318 * 0.40 + 10 * 1.60) / 1_000_000
+_INR_PER_USD = 88
+
+
+def rebuild_estimate(user_id: str) -> dict:
+    """What a rebuild would cost, without calling anything.
+
+    Every verdict is cached against the hash of the card that produced it, so
+    only reels whose card is new or changed cost money. After a prompt change
+    that is all of them; on an ordinary day it is however many reels were
+    saved since the last run, and usually zero.
+    """
+    ensure_schema()
+    rows = _reel_rows(user_id)
+    routable = 0
+    cached = 0
+    with get_connection() as connection:
+        for row in rows:
+            card = build_card(row)
+            if not card:
+                continue
+            routable += 1
+            if _cached_route(connection, user_id, str(row["reel_id"]), card_hash(card)) is not None:
+                cached += 1
+    to_route = routable - cached
+    calls = to_route * len(ROUTE_SEEDS)
+    return {
+        "user_id": user_id,
+        "prompt_version": PROMPT_VERSION,
+        "reels_routable": routable,
+        "already_cached": cached,
+        "would_route": to_route,
+        "estimated_calls": calls,
+        "estimated_inr": round(calls * _USD_PER_CALL * _INR_PER_USD, 2),
+        "estimated_seconds": calls,
+    }
+
+
 def start_shelf_rebuild(user_id: str) -> dict:
     """Kick routing off on a background thread and return immediately.
 
