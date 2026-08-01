@@ -80,6 +80,10 @@ Breadth is enforced by **support**, not by curation: a theme needs several reels
 
 Every definition is phrased as a **purpose** — "the reel exists to teach you how to make something" — never as a list of contents, because a contents-phrased definition invites matching against the inventory.
 
+**Names sharpen as evidence accumulates.** Three reels cannot tell you whether "Recipes & Cooking" is really "Protein Recipes", so a small shelf keeps the broad label. Once a shelf passes `RENAME_MIN_MEMBERS` its actual members are re-read, and if they share something more specific that honestly covers ≥ `RENAME_MIN_COVERAGE` of them, the label sharpens. A name fitting 60% of a shelf is a lie about the other 40%, so it is refused.
+
+Only the **label** moves. `shelf_key` stays the vocabulary term, so membership, the route cache and every stored verdict are untouched — a rename costs one call, never a re-route.
+
 The prompt's rules are tests about evidence, never about a domain: the describer writes presence; repetition is not corroboration; **container test** (shelve the specific thing, never the thing that merely contains it); **swap test** (if a named thing could be swapped and the reel still makes the same point, it is an example, not the subject); when unsure, `none`.
 
 **Gate:** three calls at `temperature=0`, seeds 7/8/9, `gpt-4.1-mini`. All three must return **and** agree. A reel two seeds merely lean on is exactly the reel with no clear purpose. A shelf publishes at ≥ 3 members, capped at 12 shelves.

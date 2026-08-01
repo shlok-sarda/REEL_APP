@@ -70,13 +70,10 @@ CARD_CAPTION_MAX = 220
 
 _FAIL_MARKERS = ("processing failed", "could not be processed", "failed reels")
 
-# What a shelf is CALLED on screen, separate from the vocabulary term the model
-# routes with. The term has to stay descriptive enough for the model to aim at;
-# the label the user reads should just be plain. Keeping them apart means a
-# rename is a display change and never re-routes a single reel.
-SHELF_DISPLAY_NAMES = {
-    "People & Performance": "People",
-}
+# A shelf's LABEL and the vocabulary term it routes under are deliberately
+# separate columns. The term has to stay descriptive enough for the model to
+# aim at; the label is whatever the shelf's actual contents have earned. That
+# split is what makes renaming free — no re-route, no membership change.
 
 
 # Every definition is phrased as a PURPOSE — "the reel exists to..." — not as a
@@ -91,6 +88,15 @@ SHELF_DISPLAY_NAMES = {
 MIN_THEME_SUPPORT = 4
 MAX_DISCOVERED_TERMS = 16
 DISCOVERY_BATCH = 40
+
+# A shelf earns a sharper name once it is big enough for the evidence to
+# support one. Below this it stays broad, because three reels cannot tell you
+# whether "Recipes & Cooking" is really "Protein Recipes" — and a name that
+# narrows on thin evidence is worse than one that stays vague.
+RENAME_MIN_MEMBERS = 8
+# ...and the sharper name has to describe nearly all of them, not just the
+# majority. A name that fits 60% of a shelf is a lie about the other 40%.
+RENAME_MIN_COVERAGE = 0.8
 
 
 # Starting point only, for a library too small or too odd to derive anything
@@ -387,6 +393,72 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     return {row["name"]: row["definition"] for row in kept}
 
 
+REFINE_SYSTEM = """
+You are naming one shelf in a person's saved-reel library.
+
+You get the shelf's current broad name and the reels actually on it. Your job is to decide
+whether these reels share something more specific than the broad name says.
+
+Rules:
+- Only propose a sharper name if it honestly describes NEARLY ALL of these reels. If some
+  of them would not fit under it, keep the broad name.
+- The sharper name must come from what these reels have in common, not from what the broad
+  name suggests they might have in common.
+- Never name a brand, a creator, a person or a specific product.
+- Keep it short and plain, the kind of thing someone would call a folder.
+- Staying broad is a perfectly good answer and is usually right.
+
+Reply JSON only:
+{"name":"<sharper name, or the current name to keep it>","covers":<how many of the reels it honestly describes>}
+""".strip()
+
+
+def _refine_name(term: str, subjects: list[str]) -> str | None:
+    """Ask whether this shelf's members share something sharper than its name."""
+    from api_config import get_openai_client
+
+    client = get_openai_client()
+    listing = "\n".join(f"- {subject[:140]}" for subject in subjects)
+    response = client.chat.completions.create(
+        model=ROUTE_MODEL,
+        temperature=0,
+        max_tokens=60,
+        seed=ROUTE_SEEDS[0],
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": REFINE_SYSTEM},
+            {"role": "user", "content": f'Current name: "{term}"\n{len(subjects)} reels on this shelf:\n{listing}'},
+        ],
+    )
+    payload = json.loads(response.choices[0].message.content or "{}")
+    name = _text(payload.get("name"))
+    covers = int(payload.get("covers") or 0)
+    if not name or name.lower() == term.lower():
+        return None
+    if covers < RENAME_MIN_COVERAGE * len(subjects):
+        return None
+    return name
+
+
+def refine_shelf_name(term: str, subjects: list[str]) -> str:
+    """The label a shelf should carry, given what is actually on it.
+
+    Broad while a shelf is small, sharper once it is big enough to have earned
+    it — a folder of fifteen recipes that are all protein recipes should say
+    so. Renaming only ever changes the LABEL: shelf_key stays the vocabulary
+    term, so membership, the route cache and every stored verdict are
+    untouched, and a rename costs one call rather than a re-route.
+    """
+    if len(subjects) < RENAME_MIN_MEMBERS:
+        return term
+    try:
+        sharper = _refine_name(term, subjects)
+    except Exception as exc:
+        print(f"[collections] name refinement failed for {term}: {exc}")
+        return term
+    return sharper or term
+
+
 def vocabulary_for(user_id: str, rows: list[dict] | None = None) -> dict[str, str]:
     """This user's shelves. Derived from their library, persisted, then reused."""
     ensure_schema()
@@ -678,6 +750,21 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
     published = [(term, total) for term, total in ordered if total >= MIN_SHELF_MEMBERS][:MAX_SHELVES]
     published_terms = {term for term, _ in published}
 
+    # Let a big, tight shelf earn a sharper label than the broad term it was
+    # routed under. Only the label moves — shelf_key stays the vocabulary term.
+    subjects_by_term: dict[str, list[str]] = {}
+    for reel_id, shelf_key in labels.items():
+        if shelf_key not in published_terms:
+            continue
+        card = build_card(rows_by_reel.get(reel_id, {})) or ""
+        line = card.split("\n", 1)[0]
+        subjects_by_term.setdefault(shelf_key, []).append(line[14:] if line.startswith("SUBJECT LINE:") else line)
+    titles = {
+        term: refine_shelf_name(term, subjects_by_term.get(term, []))
+        for term in published_terms
+    }
+    renamed = {term: title for term, title in titles.items() if title != term}
+
     built_at = _now()
     with get_connection() as connection:
         connection.execute("DELETE FROM collection_shelves WHERE user_id = ?", (user_id,))
@@ -690,7 +777,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
                     (user_id, shelf_key, list_title, parent_title, member_count, status, rank, built_at)
                 VALUES (?, ?, ?, '', ?, ?, ?, ?)
                 """,
-                (user_id, term, term, total, status, rank, built_at),
+                (user_id, term, titles.get(term, term), total, status, rank, built_at),
             )
         for reel_id, shelf_key in labels.items():
             if shelf_key in published_terms:
@@ -880,7 +967,7 @@ def load_shelf_collections(user_id: str) -> list[dict]:
                 # whose category is a generic bucket and reads the parent
                 # first, so an empty parent lets the shelf stand on its name.
                 "parent_title": "",
-                "list_title": SHELF_DISPLAY_NAMES.get(shelf["shelf_key"], shelf["list_title"]),
+                "list_title": shelf["list_title"] or shelf["shelf_key"],
                 "shelf_key": shelf["shelf_key"],
                 "items": items,
             }
