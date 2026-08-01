@@ -892,6 +892,16 @@ def collections_enabled(user_id: str) -> bool:
     return bool(row) and (row["email"] or "") in allowlist
 
 
+def router_shelves_enabled(user_id: str) -> bool:
+    """Who actually DISPLAYS router-built shelves, which is who is worth routing.
+
+    Narrower than collections_enabled: the demo showcase account still renders
+    through the old curated path, so routing it would spend three calls per
+    reel building shelves that account never shows.
+    """
+    return collections_enabled(user_id) and not _is_demo_showcase_account(user_id)
+
+
 # Features are written ONLY by the personalization backfill, and that backfill
 # is only reachable when the strong-personalization engine returns nothing.
 # Once it publishes even one shelf the backfill stops running, so reels saved

@@ -71,16 +71,16 @@ def run_processor(cmd: list[str], timeout_seconds: int) -> subprocess.CompletedP
 def rebuild_shelves_for(user_id: str) -> None:
     """Route Collections shelves. Never raises — shelves are never worth a job.
 
-    Only for accounts that can actually SEE Collections: routing costs three
-    LLM calls per new reel, so running it for everyone while the feature is
-    behind an allowlist bills for shelves nobody is allowed to look at, and
-    that waste scales with the user base rather than with the allowlist.
+    Only for accounts that actually DISPLAY router shelves: routing costs three
+    LLM calls per new reel, so running it more widely bills for shelves nobody
+    ever looks at, and that waste scales with the user base rather than with
+    the allowlist.
     """
     try:
         from app.services.collections import rebuild_user_shelves
-        from app.services.library import collections_enabled
+        from app.services.library import router_shelves_enabled
 
-        if not collections_enabled(user_id):
+        if not router_shelves_enabled(user_id):
             return
         summary = rebuild_user_shelves(user_id)
         print(f"[collections] {user_id}: {summary['shelved']} reels on "
@@ -158,14 +158,9 @@ def process_job(job: dict):
     except Exception:
         pass
 
-    # Rebuild the Collections shelves. This lives here rather than inside
-    # process_shlok_reels.py because the call site there sits behind
-    # `if paths.raw_output.exists()`, which a rebuild_library job on a fresh
-    # account does not satisfy — the shelves would silently never build. Here
-    # it runs after every successful job, reading the documents just rebuilt
-    # above. Wrapped so routing can never fail reel processing.
-    # A freshly processed reel gets routed onto the shelves here. Library
-    # rebuilds already routed before the processor ran, above.
+    # A freshly processed reel gets routed onto the shelves here, reading the
+    # documents rebuilt just above. Library rebuilds already routed before the
+    # processor ran, since they must not depend on it finishing.
     if job["job_type"] != "rebuild_library":
         rebuild_shelves_for(job["user_id"])
 
