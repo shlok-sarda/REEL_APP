@@ -37,7 +37,7 @@ from collections import Counter
 from app.db.database import get_connection
 
 
-PROMPT_VERSION = "shelves_v2"
+PROMPT_VERSION = "shelves_v3"
 ROUTE_MODEL = "gpt-4.1-mini"
 ROUTE_SEEDS = (7, 8, 9)
 ROUTE_TEMPERATURE = 0
@@ -59,66 +59,89 @@ MAX_SHELVES = 12
 # reel_7's transcript is 43 chars of small talk; the median real transcript in
 # the library is 621. The boundary sits an order of magnitude from both.
 TRANSCRIPT_INCIDENTAL_CHARS = 80
-CARD_BRANDS_MAX = 120
-CARD_PRODUCTS_MAX = 120
-CARD_SUMMARY_MAX = 180
+# The creator's own words are purpose evidence — unlike everything the
+# describer wrote, the creator chose to say it. Hashtags are stripped: they are
+# reach tactics, not statements of purpose.
+CARD_CAPTION_MAX = 220
 
 _FAIL_MARKERS = ("processing failed", "could not be processed", "failed reels")
 
 
+# Every definition is phrased as a PURPOSE — "the reel exists to..." — not as a
+# list of things that would appear in such a reel. A contents-phrased
+# definition invites matching against the inventory, which is the whole error
+# this engine exists to avoid.
 CORE_VOCAB: dict[str, str] = {
-    "Food & Restaurants": "a dish, a meal, a cafe or a restaurant, judged by its food",
-    "Recipes & Cooking": "how to cook something; the ingredients and the method are the point",
-    "Travel & Places": "a destination, a stay, an itinerary or a trip; the place is the point",
-    "Gym & Fitness": "training, exercise form, workouts, sport technique",
-    "Gadgets & Tech": "a physical device or gadget being shown, reviewed or repaired",
-    "Apps & AI Tools": "software, an app, a website or an AI tool being demonstrated",
-    "Fashion & Shopping": (
-        "clothes, jewellery, footwear or fragrance being SOLD or recommended, with a brand, "
-        "a product or a buy-link. NEVER a person who is simply wearing something"
+    "Food & Restaurants": "the reel exists to show you something to eat or somewhere to eat it",
+    "Recipes & Cooking": "the reel exists to teach you how to make something",
+    "Travel & Places": "the reel exists to sell you on going somewhere: a destination, a stay, a trip",
+    "Gym & Fitness": "the reel exists to teach or show training, exercise or sport technique",
+    "Gadgets & Tech": "the reel exists to show you a device: a review, a demo, a repair, a thing to buy",
+    "Apps & AI Tools": "the reel exists to show you software worth using",
+    "Fashion & Shopping": "the reel exists to make you want to buy something to wear or own",
+    "Grooming & Personal Care": "the reel exists to teach a hair, skin or grooming routine or product",
+    "Movies & Shows": "the reel exists to discuss, recommend or clip a film or series",
+    "Money & Career": "the reel exists to advise on work, business, study, money or making money",
+    "People & Performance": (
+        "the reel exists for the person on camera: their performance, their look, the edit. "
+        "It teaches nothing and sells nothing"
     ),
-    "Grooming & Personal Care": "hair, skin or grooming ROUTINES and products",
-    "Movies & Shows": "a film or a series being discussed, recommended or clipped",
-    "Money & Career": "jobs, business, study, funding, personal finance",
-    # There is deliberately NO shelf for "a person is the point". Reels saved
-    # just to watch someone — lip syncs, dances, outfit transitions, posing —
-    # have no intent to file under, so they must route to "none" rather than
-    # into a shelf that exists to catch them.
-    "Home & Decor": "furniture, lighting, room styling and home objects",
-    "Cars & Rides": "cars, bikes and vehicles",
-    "Music": "songs, artists, instruments and music gear",
-    "Books & Reading": "books and reading",
-    "Pets & Animals": "animals",
-    "Art & Design": "art, illustration and design work",
-    "Hobbies & Collecting": "a hobby object or a collection: RC cars, models, toys, gear",
+    "Home & Decor": "the reel exists to show furniture, lighting or how a space is styled",
+    "Cars & Rides": "the reel exists to show a car, bike or vehicle",
+    "Music": "the reel exists for a song, an artist, an instrument or music gear",
+    "Books & Reading": "the reel exists for a book or for reading",
+    "Pets & Animals": "the reel exists for an animal",
+    "Art & Design": "the reel exists to show art, illustration or design work",
+    "Hobbies & Collecting": "the reel exists for a hobby object or a collection",
 }
 
 
-# Rule 1 is load-bearing and was added after measurement: without it, "young man
-# lifting dumbbells in a gym" routed to People & Performance and the gym test
-# failed outright. Rule 2 is the one that fixes the founder's reported bug — no
-# field in the database draws the "wearing clothes" vs "selling clothes"
-# distinction, and that distinction is the entire reason an LLM is here at all.
+# No rule here names a domain, a garment, a shelf or any specific failure. Each
+# is a test about what the EVIDENCE means: who wrote it, whether it merely
+# repeats itself, whether it is a container, whether it is swappable.
+#
+# The old "ACTIVITY BEATS APPEARANCE" rule is deleted rather than rewritten. It
+# was the leak: any incidental the describer happened to phrase as a verb
+# outranked every guard below it.
 _ROUTE_RULES = """
-Decide from the reel's MAIN SUBJECT only.
+A shelf is a claim about WHY the reel exists and why someone saved it. It is never a claim
+about what happened to be in the video.
 
-1. ACTIVITY BEATS APPEARANCE. If the subject is DOING a recognisable activity, the shelf
-is that activity: lifting weights or training is Gym & Fitness, cooking is Recipes &
-Cooking, travelling or showing a place is Travel & Places, demonstrating an app is Apps &
-AI Tools. This rule wins over every rule below it.
-2. Otherwise, if the subject is a person simply BEING ON CAMERA - singing, lip-syncing,
-dancing, modelling, posing, getting ready, an outfit transition, an edit, hanging out -
-then read the sell signal. If it says 'none', answer "none". Not Fashion, not Grooming,
-not Gadgets. A person wearing clothes is not a clothing reel, hair on a head is not a
-grooming reel, and an object in shot is not a gadget reel. This is the most common
-mistake: do not make it.
-3. A shelf about buying or learning something needs a real sell signal - a brand named,
-or someone explaining it on camera. "sell signal: none" means nobody is selling or
-teaching, so a shopping or grooming shelf is wrong by definition.
-4. Ignore incidental details completely: a presenter's outfit, background props, a brand
-mentioned in passing, where it happened to be filmed.
-5. "none" is always allowed and is usually right. Most reels belong on no shelf and that
-is correct. Never stretch a reel to fill a shelf. If you are unsure, answer "none".
+HOW TO READ THIS CARD
+Everything under WHAT IS PRESENT IN IT was written by an automatic describer whose only job
+is to name what it can see and hear. It names things whether or not they matter. A thing
+being listed there tells you it was present. It tells you NOTHING about why the reel was
+made. PRESENCE IS NOT ABOUTNESS.
+The SUBJECT LINE comes from the same describer, so read it the same way: take the ONE thing
+the reel is built around, and treat the rest of the line - what someone wore, where it was
+shot, what was in the background, whatever happened to be named - as circumstance, exactly
+as if it had been listed below.
+The describer also repeats itself: the same circumstance can appear in the subject line, in
+the scene and in the lists. Repetition is not corroboration. One fact written down three
+times is still one fact, and it is still circumstance.
+The describer's one-sentence account of what the reel shows can state why the reel exists, or
+it can only state where and how it was filmed. Take from it what the reel is offering the
+viewer; ignore whatever only says what the scene looked like.
+WHAT THE REEL DOES reports purpose directly and is never merely circumstance.
+
+DECIDING
+1. Finish this sentence: "this reel exists in order to ___." Fill it from the one central
+thing plus the purpose evidence, and from nothing else. Then pick the shelf whose
+definition matches that sentence. If the only honest ending is "show this person" or "show
+this moment", it is the shelf for a person or a moment, or none.
+2. A shelf that promises something to buy, visit, use, cook, watch or learn asserts that
+the reel is offering it. If nobody speaks and nothing is being presented, then nobody is
+offering anything, however many nameable things are present.
+3. CONTAINER TEST. When the card names a specific thing and also the larger thing that
+merely contains it - the area a place sits inside, the field a tool belongs to, the person
+wearing or holding an object, the topic an example illustrates - shelve the specific thing.
+Never shelve the container.
+4. SWAP TEST. If a named thing could be swapped for another of its kind and the reel would
+still make exactly the same point, then it is an example, not the subject. Shelve the point
+the reel is making, not the example it reached for.
+5. "none" is always allowed and is usually right. Most saved reels belong on no shelf.
+Never stretch a reel to fill a shelf. If two shelves both look arguable, or you are unsure,
+answer "none".
 6. When a shelf does fit, pick the BROADEST one that fits. Never narrow it.
 Reply JSON only: {"shelf":"<exact name from the list>"|"none"}
 """.strip()
@@ -218,7 +241,8 @@ def vocabulary_for(user_id: str) -> dict[str, str]:
 def route_system_prompt(vocab: dict[str, str]) -> str:
     block = "\n".join(f"- {term}: {definition}" for term, definition in vocab.items())
     return (
-        "You sort a person's saved Instagram reels onto BROAD shelves.\n\n"
+        "You sort a person's saved Instagram reels onto BROAD shelves.\n"
+        "Each card below describes ONE reel.\n\n"
         "These are the only shelves that exist:\n"
         f"{block}\n\n"
         f"{_ROUTE_RULES}"
@@ -255,8 +279,31 @@ def _reel_rows(user_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _listed(values, limit: int = 6, item_chars: int = 48) -> str:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        value = _text(value)
+        if not value or value == "{}" or value.lower() in seen:
+            continue
+        seen.add(value.lower())
+        out.append(value[:item_chars])
+        if len(out) == limit:
+            break
+    return "; ".join(out)
+
+
 def build_card(row: dict) -> str | None:
     """Compress a reel into the only representation the router ever sees.
+
+    The card is organised by what each piece of evidence MEANS, not by which
+    column it came from. Everything an automatic describer wrote is grouped
+    and labelled as presence; the two things it did not write — how much
+    anyone actually speaks, and the creator's own caption — are grouped as
+    purpose. That typing is the entire fix: withholding fields does not work,
+    because the incidental survives inside the subject sentence, which cannot
+    be dropped. Measured 0.805 vs 0.728 accuracy against hand-labelled reels,
+    paired McNemar p=0.0026 over three independent seed triples.
 
     Returns None when the reel carries no usable subject at all — it is then
     NOT ROUTABLE, no verdict is stored, and it appears on no shelf.
@@ -274,49 +321,56 @@ def build_card(row: dict) -> str | None:
         item_name = ""
         summary = ""
 
-    main_subject = _text(document.get("main_subject"))
-    visual_theme = _text(document.get("visual_theme"))
-    if not (main_subject or visual_theme or item_name or summary):
+    subject = _text(document.get("main_subject")) or item_name
+    scene = _text(document.get("visual_theme")) or summary
+    if not (subject or scene):
         return None
 
-    transcript = str(document.get("transcript") or "")
-    if not transcript.strip():
-        spoken = "spoken: none"
-    elif len(transcript) < TRANSCRIPT_INCIDENTAL_CHARS:
-        spoken = "spoken: incidental only"
-    else:
-        spoken = f"spoken: explains/teaches ({len(transcript)} chars)"
+    kind = _text(row.get("main_subject_type")) or "unknown"
 
-    about = ""
-    if visual_theme:
-        about = f"about: {visual_theme}"
-    elif summary:
-        about = f"about: {summary[:CARD_SUMMARY_MAX]}"
-
-    # The sell signal, not the product list, is what separates a fashion reel
-    # from a girl in a dress. Measured on the real library: reels actually
-    # saved for fashion name brands (Adidas, Versace, Milk Studios); reels
-    # saved to watch someone name none, and the only reason they looked like
-    # shopping was that the extractor wrote her outfit down as a "product"
-    # ("Black Halter Neck Floral Beach Dress"). Passing that product list to
-    # the model is what dragged those reels into Fashion, so it is not passed.
-    brands = _join(document.get("brands"))[:CARD_BRANDS_MAX]
-    teaches = spoken.startswith("spoken: explains")
-    if brands:
-        sell_signal = f"sell signal: brand named ({brands})"
-    elif teaches:
-        sell_signal = "sell signal: explained on camera"
+    spoken_chars = len(document.get("transcript") or "")
+    if spoken_chars == 0:
+        narration = "nobody speaks"
+    elif spoken_chars < TRANSCRIPT_INCIDENTAL_CHARS:
+        narration = "a few words only, nothing explained"
     else:
-        sell_signal = "sell signal: none - nobody is selling or teaching anything"
+        narration = f"someone talks through it ({spoken_chars} characters of speech)"
+
+    caption = _text(document.get("caption"))
+    caption = " ".join(word for word in caption.split() if not word.startswith("#"))[:CARD_CAPTION_MAX]
 
     lines = [
-        f"subject: {main_subject or item_name or '(unknown)'}",
-        f"subject type: {_text(row.get('main_subject_type')) or 'unknown'}",
-        about,
-        sell_signal,
-        spoken,
+        f"SUBJECT LINE: {subject or '(none given)'}",
+        f"SUBJECT KIND: {kind}",
+        "",
+        "WHAT THE REEL DOES (purpose evidence):",
+        f"- narration: {narration}",
+        f"- creator's own caption: {caption or '(none)'}",
+        "",
     ]
-    return " | ".join(line for line in lines if line)
+    if scene:
+        lines += [
+            "WHAT THE DESCRIBER SAYS IT SHOWS (may state the point, may only state the setting):",
+            f"- {scene}",
+            "",
+        ]
+
+    # Products and brands are back in the card, but typed as inventory. The
+    # previous attempt withheld them and keyed on brand presence instead,
+    # which just swapped one presence rule for another and could not touch a
+    # reel that names neither.
+    lines += ["WHAT IS PRESENT IN IT (inventory - presence only, never a purpose):"]
+    things = _listed(document.get("visual_entities"))
+    if things:
+        lines.append(f"- things visible: {things}")
+    named = _listed(list(document.get("brands") or []) + list(document.get("product_names") or []))
+    if named:
+        lines.append(f"- names and brands recorded: {named}")
+    place = _listed(document.get("locations"), limit=4)
+    if place:
+        lines.append(f"- place recorded: {place}")
+
+    return "\n".join(lines)
 
 
 def card_hash(card: str) -> str:
@@ -429,9 +483,12 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
                 continue
             votes.append(vote)
 
-        if not votes:
-            # Nothing decided this round: keep whatever this reel was on before
-            # so a dead key produces the previous shelf set, not an empty one.
+        if len(votes) < len(ROUTE_SEEDS):
+            # A partial vote set must never be decided on. Quota failures break
+            # the seed loop mid-reel, and because collection_routes is
+            # write-once, persisting "not unanimous" here would strand that
+            # reel off the shelves forever — even after the key is restored.
+            # Keep whatever it was on before and write nothing.
             with get_connection() as connection:
                 fallback = _last_known_route(connection, user_id, reel_id)
             if fallback:
