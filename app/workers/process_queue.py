@@ -132,12 +132,18 @@ def process_job(job: dict):
     # account does not satisfy — the shelves would silently never build. Here
     # it runs after every successful job, reading the documents just rebuilt
     # above. Wrapped so routing can never fail reel processing.
+    # Only for accounts that can actually SEE Collections. Routing costs three
+    # LLM calls per new reel, so running it for everyone while the feature is
+    # behind an allowlist bills for shelves nobody is allowed to look at — and
+    # that waste scales with the user base, not with the allowlist.
     try:
         from app.services.collections import rebuild_user_shelves
+        from app.services.library import collections_enabled
 
-        summary = rebuild_user_shelves(job["user_id"])
-        print(f"[collections] {job['user_id']}: {summary['shelved']} reels on "
-              f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
+        if collections_enabled(job["user_id"]):
+            summary = rebuild_user_shelves(job["user_id"])
+            print(f"[collections] {job['user_id']}: {summary['shelved']} reels on "
+                  f"{len(summary['published_shelves'])} shelves, {summary['llm_calls']} llm calls")
     except Exception as exc:
         print(f"[collections] shelf rebuild skipped for {job['user_id']}: {exc}")
 
