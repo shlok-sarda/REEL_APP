@@ -91,9 +91,15 @@ CORE_VOCAB: dict[str, str] = {
     "Grooming & Personal Care": "the reel exists to teach a hair, skin or grooming routine or product",
     "Movies & Shows": "the reel exists to discuss, recommend or clip a film or series",
     "Money & Career": "the reel exists to advise on work, business, study, money or making money",
+    "Motivation & Mindset": (
+        "the reel exists to land a message about discipline, mindset, confidence or "
+        "self-improvement; someone is making a point worth remembering"
+    ),
+    "Games & Gaming": "the reel exists for a video game: play, tips, locations, gear or news",
     "People & Performance": (
         "the reel exists for the person on camera: their performance, their look, the edit. "
-        "It teaches nothing and sells nothing"
+        "Nothing is sold, taught, argued or explained. If they are making a point, this is "
+        "the wrong shelf"
     ),
     "Home & Decor": "the reel exists to show furniture, lighting or how a space is styled",
     "Cars & Rides": "the reel exists to show a car, bike or vehicle",
