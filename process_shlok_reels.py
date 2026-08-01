@@ -643,6 +643,16 @@ def main(user_id="default", only_urls=None):
             rebuild_deep_search_documents(user_id)
         except Exception:
             pass
+        # Shelves are routed here, in the worker, never in a web request. The
+        # documents this reads were just rebuilt above, so ordering matters.
+        try:
+            from app.services.collections import rebuild_user_shelves
+
+            summary = rebuild_user_shelves(user_id)
+            print(f"[collections] shelves for {user_id}: {summary['published_shelves']} "
+                  f"({summary['llm_calls']} llm calls, {summary['unroutable']} unroutable)")
+        except Exception as exc:
+            print(f"[collections] shelf rebuild skipped for {user_id}: {exc}")
 
     refreshed_rows = load_raw_rows(paths)
     write_status(

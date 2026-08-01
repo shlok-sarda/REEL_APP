@@ -531,6 +531,10 @@ def build_deep_search_documents_from_db(user_id: str) -> list[dict[str, Any]]:
             # v2 extraction: "what is this video actually about, visually".
             # Empty for reels processed before it shipped — harmless.
             "main_subject": _metadata_text(diagnostics_metadata, "main_subject"),
+            # What KIND of thing the subject is (person / activity / product /
+            # food / place). The Collections router keys its "a person is just
+            # on camera" rule on this, so it has to survive into the document.
+            "main_subject_type": _metadata_text(diagnostics_metadata, "main_subject_type"),
             "visible_text": visible_text,
             "visual_entities": visual_entities,
             "visual_supporting_points": visual_supporting_points,

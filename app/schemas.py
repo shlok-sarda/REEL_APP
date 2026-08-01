@@ -117,6 +117,9 @@ class LibraryItem(BaseModel):
 class LibraryCollection(BaseModel):
     parent_title: str = ""
     list_title: str
+    # Stable identity for a router-built shelf. Undeclared keys are dropped
+    # before the browser sees them, so without this the shelf key never lands.
+    shelf_key: str = ""
     items: list[LibraryItem]
 
 

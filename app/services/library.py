@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from app.config import settings
 from app.db.database import get_connection
+from app.services.collections import load_shelf_collections
 from app.services.media import ensure_reel_media
 from app.services.object_storage import infer_object_key, presigned_get_url, r2_is_enabled
 from app.services.personalization_v2.engine import PersonalizationV2Engine
@@ -724,75 +725,31 @@ _GENERIC_SHELF_TITLES = frozenset({
 # goal — reels that belong to no strong theme stay in Recently saved and
 # search rather than padding the list with one-item shelves.
 _MIN_SHELF_ITEMS = 3
-_MAX_SHELVES = 8
+MAX_SHELVES_FALLBACK = 8
 
 
-_TITLE_STOPWORDS = frozenset({"in", "the", "and", "of", "a", "at", "for", "&"})
+def _curate_fallback_collections(collections: list[dict]) -> list[dict]:
+    """Plain category shelves, used only until the router has run once.
 
-# Two shelves this similar by title are one interest the engine split — almost
-# always on location granularity, e.g. "Bangkok Luxury Outlet Shopping" and
-# "Thailand Luxury Outlet Shopping", six items each, one shopping trip. Set
-# high enough that genuinely different cities stay apart: "Restaurants in Goa"
-# vs "Restaurants in Varanasi" scores 0.50 and is left alone.
-_TITLE_MERGE_SIMILARITY = 0.60
-
-
-def _title_tokens(title: str) -> set[str]:
-    return {token for token in re.findall(r"[a-z0-9']+", (title or "").lower()) if token not in _TITLE_STOPWORDS}
-
-
-def _merge_near_duplicate_shelves(collections: list[dict]) -> list[dict]:
-    merged: list[dict] = []
-    for collection in collections:
-        tokens = _title_tokens(collection.get("list_title", ""))
-        target = None
-        for candidate in merged:
-            shared = tokens & candidate["_tokens"]
-            union = tokens | candidate["_tokens"]
-            if union and len(shared) / len(union) >= _TITLE_MERGE_SIMILARITY:
-                target = candidate
-                break
-        if not target:
-            merged.append({**collection, "_tokens": tokens})
-            continue
-        # Keep only what both shelves agree on, so the location that split them
-        # drops out and the shared theme becomes the name.
-        shared = tokens & target["_tokens"]
-        words = [word for word in (target.get("list_title") or "").split() if _title_tokens(word) <= shared]
-        if words:
-            target["list_title"] = " ".join(words)
-        target["_tokens"] = shared or target["_tokens"]
-        seen = {(i.get("reel_id"), i.get("name"), i.get("url")) for i in target.get("items", [])}
-        for item in collection.get("items", []):
-            key = (item.get("reel_id"), item.get("name"), item.get("url"))
-            if key in seen:
-                continue
-            seen.add(key)
-            target.setdefault("items", []).append(item)
-    for collection in merged:
-        collection.pop("_tokens", None)
-    return merged
-
-
-def _curate_collections(collections: list[dict]) -> list[dict]:
+    Strips what the old engine used to render straight at the user: a shelf
+    literally called "Failed Reels", auto-numbered "· More 2" buckets, and
+    one-item shelves.
+    """
     kept = []
     for collection in collections:
-        title = (collection.get("list_title") or "").strip().lower()
-        if title in _GENERIC_SHELF_TITLES:
+        title = (collection.get("list_title") or "").strip()
+        lowered = title.lower()
+        if lowered in _GENERIC_SHELF_TITLES or lowered == "failed reels":
+            continue
+        if re.search(r"·\s*(More|Part)\s*\d+$", title):
             continue
         if len(collection.get("items", [])) < _MIN_SHELF_ITEMS:
             continue
-        # The UI hides a shelf whose category is a generic bucket, and it reads
-        # the parent first — so a good shelf the engine filed under
-        # "Miscellaneous" (Apps & Tools, 7 items) never rendered. Drop the
-        # useless parent and let the shelf stand on its own name.
         if (collection.get("parent_title") or "").strip().lower() in _GENERIC_SHELF_TITLES:
             collection = {**collection, "parent_title": ""}
         kept.append(collection)
     kept.sort(key=lambda row: (-len(row.get("items", [])), (row.get("list_title") or "").lower()))
-    kept = _merge_near_duplicate_shelves(kept)
-    kept.sort(key=lambda row: (-len(row.get("items", [])), (row.get("list_title") or "").lower()))
-    return kept[:_MAX_SHELVES]
+    return kept[:MAX_SHELVES_FALLBACK]
 
 
 def load_recent_reels(user_id: str, limit: int = 120) -> list[dict]:
@@ -945,53 +902,6 @@ def collections_enabled(user_id: str) -> bool:
 _FEATURE_REFRESH_LOCK = threading.Lock()
 _FEATURE_REFRESH_IN_FLIGHT: set[str] = set()
 
-# Last non-empty shelf set per user, so a rebuild in progress never blanks the
-# screen. In-memory only: a restart just costs one recompute.
-_LAST_GOOD_COLLECTIONS: dict[str, list[dict]] = {}
-
-
-def _features_are_stale(user_id: str) -> bool:
-    item_count, max_reel_item_id = _current_reel_item_state(user_id)
-    if not item_count:
-        return False
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT COUNT(*) AS count, COALESCE(MAX(reel_item_id), 0) AS max_reel_item_id
-            FROM reel_item_features
-            WHERE user_id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-    feature_count = int(row["count"] or 0) if row else 0
-    feature_max = int(row["max_reel_item_id"] or 0) if row else 0
-    return feature_count != item_count or feature_max != max_reel_item_id
-
-
-def _refresh_features_if_stale(user_id: str) -> None:
-    with _FEATURE_REFRESH_LOCK:
-        if user_id in _FEATURE_REFRESH_IN_FLIGHT:
-            return
-        try:
-            if not _features_are_stale(user_id):
-                return
-        except Exception as exc:
-            print(f"[library] feature staleness check failed for {user_id}: {exc}")
-            return
-        _FEATURE_REFRESH_IN_FLIGHT.add(user_id)
-
-    def run() -> None:
-        try:
-            PersonalizationV2Engine().backfill_user(user_id, use_llm=False, use_remote_embeddings=False)
-        except Exception as exc:
-            print(f"[library] feature refresh failed for {user_id}: {exc}")
-        finally:
-            with _FEATURE_REFRESH_LOCK:
-                _FEATURE_REFRESH_IN_FLIGHT.discard(user_id)
-
-    threading.Thread(target=run, name=f"collections-refresh-{user_id}", daemon=True).start()
-
-
 def collections_status(user_id: str) -> dict:
     """Why Collections are or aren't showing for this account.
 
@@ -1037,15 +947,28 @@ def collections_status(user_id: str) -> dict:
         "demo_curation_applied": is_demo,
     }
     try:
-        personalized = load_personalized_collections(user_id)
-        status["engine"] = (
-            "strong_personalization" if personalized and personalized[0].get("personalization_model")
-            else ("personalization_v2" if personalized else "none")
-        )
+        from app.services.collections import ensure_schema
+
+        ensure_schema()
+        with get_connection() as connection:
+            routes = connection.execute(
+                "SELECT COUNT(*) AS count FROM collection_routes WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            built = connection.execute(
+                "SELECT MAX(built_at) AS built_at FROM collection_shelves WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        shelves = load_shelf_collections(user_id)
+        status["engine"] = "shelf_router" if shelves else "fallback_categories"
+        status["routes_stored"] = int(routes["count"] or 0) if routes else 0
+        status["shelves_built_at"] = (built["built_at"] if built else "") or ""
         status["shelves"] = [
-            {"parent_title": c.get("parent_title", ""), "list_title": c.get("list_title", ""), "items": len(c.get("items", []))}
-            for c in personalized
+            {"list_title": c.get("list_title", ""), "items": len(c.get("items", []))} for c in shelves
         ]
+        if not shelves:
+            status["hint"] = (
+                "No shelves yet — the router has not run. It runs inside the rebuild_library "
+                "job; POST /library/rebuild to queue one."
+            )
     except Exception as exc:
         status["engine"] = "error"
         status["error"] = repr(exc)[:300]
@@ -1055,29 +978,18 @@ def collections_status(user_id: str) -> dict:
 def load_library_payload(user_id: str) -> dict:
     collections_on = collections_enabled(user_id)
     is_demo_showcase = collections_on and _is_demo_showcase_account(user_id)
-    if collections_on:
-        _refresh_features_if_stale(user_id)
 
     if collections_on and not is_demo_showcase:
-        # A rebuild wipes every feature and membership before writing them
-        # back, so a request landing mid-rebuild reads half-written state and
-        # gets a shelf set that is neither the old one nor the new one. The
-        # engine itself is deterministic — same library in, same shelves out,
-        # verified over repeated rebuilds — so every reshuffle the user sees
-        # comes from reading during that window. Hold the last good answer
-        # until the rebuild finishes, then switch once.
-        cached = _LAST_GOOD_COLLECTIONS.get(user_id)
-        with _FEATURE_REFRESH_LOCK:
-            rebuilding = user_id in _FEATURE_REFRESH_IN_FLIGHT
-        if rebuilding and cached:
-            personalized = cached
-        else:
-            # Few strong shelves over the whole library, from one fixed engine.
-            personalized = _curate_collections(load_personalized_collections(user_id, prefer_graph=True))
-            if personalized:
-                _LAST_GOOD_COLLECTIONS[user_id] = personalized
-            elif cached:
-                personalized = cached
+        # Shelves come from the router now: a pure read of rows the
+        # rebuild_library job already decided and persisted. No clustering, no
+        # feature rebuild, no LLM, nothing recomputed inside the request — that
+        # is what makes the set stable instead of reshuffling between refreshes.
+        personalized = load_shelf_collections(user_id)
+        if not personalized:
+            # No routes yet (first run, or the key was dead when the job ran).
+            # Show plain category shelves rather than an empty screen, minus
+            # the junk the old engine used to render.
+            personalized = _curate_fallback_collections(load_standard_collections(user_id))
         return {
             "user_id": user_id,
             "standard": [] if personalized else load_standard_collections(user_id),
