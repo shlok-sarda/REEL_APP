@@ -956,16 +956,24 @@ def collections_status(user_id: str) -> dict:
         "demo_curation_applied": is_demo,
     }
     try:
-        from app.services.collections import PROMPT_VERSION, ensure_schema, rebuild_status
+        from app.services.collections import (
+            ensure_schema,
+            rebuild_status,
+            vocab_version,
+            vocabulary_for,
+        )
 
         ensure_schema()
+        # Progress must be counted against the exact key routing will use,
+        # which includes this account's vocabulary — not the prompt alone.
+        current_version = vocab_version(vocabulary_for(user_id))
         with get_connection() as connection:
             # Progress has to be counted against the CURRENT prompt version.
             # Counting every row makes an in-flight rebuild look finished,
             # because the previous version's verdicts are still sitting there.
             done = connection.execute(
                 "SELECT COUNT(*) AS count FROM collection_routes WHERE user_id = ? AND prompt_version = ?",
-                (user_id, PROMPT_VERSION),
+                (user_id, current_version),
             ).fetchone()
             total = connection.execute(
                 "SELECT COUNT(*) AS count FROM collection_routes WHERE user_id = ?", (user_id,)
@@ -977,7 +985,7 @@ def collections_status(user_id: str) -> dict:
         shelves = load_shelf_collections(user_id)
         running = rebuild_status(user_id)
         status["engine"] = "shelf_router" if shelves else "fallback_categories"
-        status["prompt_version"] = PROMPT_VERSION
+        status["prompt_version"] = current_version
         status["rebuild_running"] = running
         status["reels_routed_this_version"] = routed_now
         status["reels_to_route"] = item_count
@@ -988,7 +996,7 @@ def collections_status(user_id: str) -> dict:
         ]
         status["progress"] = (
             f"rebuilding: {routed_now} reels routed so far" if running
-            else (f"done — {routed_now} reels routed on {PROMPT_VERSION}" if routed_now
+            else (f"done — {routed_now} reels routed on {current_version}" if routed_now
                   else "no rebuild has run for this prompt version yet")
         )
     except Exception as exc:

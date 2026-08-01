@@ -42,6 +42,9 @@ from app.db.database import get_connection
 
 
 PROMPT_VERSION = "shelves_v4"
+# Bumped when the DISCOVERY logic changes, so a stored vocabulary built by an
+# older version is rebuilt instead of reused forever.
+DISCOVERY_VERSION = "discover_v2"
 ROUTE_MODEL = "gpt-4.1-mini"
 ROUTE_SEEDS = (7, 8, 9)
 ROUTE_TEMPERATURE = 0
@@ -225,6 +228,7 @@ SCHEMA_STATEMENTS = [
         term TEXT NOT NULL,
         definition TEXT NOT NULL,
         support INTEGER NOT NULL DEFAULT 0,
+        version TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         UNIQUE(user_id, term)
     )
@@ -267,6 +271,12 @@ def ensure_schema() -> None:
     with get_connection() as connection:
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
+        # A table created before `version` existed keeps its old shape, so add
+        # the column rather than relying on CREATE TABLE IF NOT EXISTS.
+        try:
+            connection.execute("ALTER TABLE collection_vocabulary ADD COLUMN version TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
         for statement in _INDEX_STATEMENTS:
             connection.execute(statement)
     _schema_ready = True
@@ -466,10 +476,10 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
             connection.execute(
                 """
                 INSERT OR REPLACE INTO collection_vocabulary
-                    (user_id, term, definition, support, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                    (user_id, term, definition, support, version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, row["name"], row["definition"], row["support"], created),
+                (user_id, row["name"], row["definition"], row["support"], DISCOVERY_VERSION, created),
             )
     return {row["name"]: row["definition"] for row in kept}
 
@@ -545,8 +555,12 @@ def vocabulary_for(user_id: str, rows: list[dict] | None = None) -> dict[str, st
     ensure_schema()
     with get_connection() as connection:
         stored = connection.execute(
-            "SELECT term, definition FROM collection_vocabulary WHERE user_id = ? ORDER BY support DESC, term ASC",
-            (user_id,),
+            """
+            SELECT term, definition FROM collection_vocabulary
+            WHERE user_id = ? AND version = ?
+            ORDER BY support DESC, term ASC
+            """,
+            (user_id, DISCOVERY_VERSION),
         ).fetchall()
     if stored:
         return {row["term"]: row["definition"] for row in stored}
@@ -718,14 +732,30 @@ def _route_once(card: str, seed: int, system_prompt: str, vocab: dict[str, str])
     return shelf if shelf in vocab else ""
 
 
-def _cached_route(connection, user_id: str, reel_id: str, hashed: str) -> str | None:
+def vocab_version(vocab: dict[str, str]) -> str:
+    """Cache key for a routing decision.
+
+    The vocabulary IS part of the system prompt, so two runs with different
+    shelves are not the same question — but the cache used to key on
+    PROMPT_VERSION alone. That meant fixing a broken vocabulary changed
+    nothing: every reel came straight back from the cache still wearing the
+    old shelf. Folding the vocabulary into the key means changing the shelves
+    re-routes, and leaving them alone stays free.
+    """
+    digest = hashlib.sha256(
+        "|".join(f"{term}={definition}" for term, definition in sorted(vocab.items())).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"{PROMPT_VERSION}:{digest}"
+
+
+def _cached_route(connection, user_id: str, reel_id: str, hashed: str, version: str) -> str | None:
     row = connection.execute(
         """
         SELECT shelf_key FROM collection_routes
         WHERE user_id = ? AND reel_id = ? AND card_hash = ? AND prompt_version = ?
         LIMIT 1
         """,
-        (user_id, reel_id, hashed, PROMPT_VERSION),
+        (user_id, reel_id, hashed, version),
     ).fetchone()
     return row["shelf_key"] if row else None
 
@@ -756,6 +786,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
     # into them. Reusing rows so discovery and routing see the same snapshot.
     vocab = vocabulary_for(user_id, rows=rows)
     system_prompt = route_system_prompt(vocab)
+    route_version = vocab_version(vocab)
 
     labels: dict[str, str] = {}
     rows_by_reel: dict[str, dict] = {}
@@ -774,7 +805,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
         hashed = card_hash(card)
 
         with get_connection() as connection:
-            cached = _cached_route(connection, user_id, reel_id, hashed)
+            cached = _cached_route(connection, user_id, reel_id, hashed, route_version)
         if cached is not None:
             labels[reel_id] = cached
             continue
@@ -823,7 +854,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
                     (user_id, reel_id, card_hash, prompt_version, shelf_key, votes_json, model, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, reel_id, hashed, PROMPT_VERSION, shelf_key, json.dumps(votes), ROUTE_MODEL, _now()),
+                (user_id, reel_id, hashed, route_version, shelf_key, json.dumps(votes), ROUTE_MODEL, _now()),
             )
 
     counts = Counter(shelf for shelf in labels.values() if shelf)
@@ -909,6 +940,7 @@ def rebuild_estimate(user_id: str) -> dict:
     """
     ensure_schema()
     rows = _reel_rows(user_id)
+    version = vocab_version(vocabulary_for(user_id, rows=rows))
     routable = 0
     cached = 0
     with get_connection() as connection:
@@ -917,13 +949,13 @@ def rebuild_estimate(user_id: str) -> dict:
             if not card:
                 continue
             routable += 1
-            if _cached_route(connection, user_id, str(row["reel_id"]), card_hash(card)) is not None:
+            if _cached_route(connection, user_id, str(row["reel_id"]), card_hash(card), version) is not None:
                 cached += 1
     to_route = routable - cached
     calls = to_route * len(ROUTE_SEEDS)
     return {
         "user_id": user_id,
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": version,
         "reels_routable": routable,
         "already_cached": cached,
         "would_route": to_route,
