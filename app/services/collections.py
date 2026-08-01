@@ -14,9 +14,12 @@ Why it looks like this (all of it measured on the real library, not guessed):
 * No embeddings. Cosine similarity against fixed shelf definitions puts that
   same reel's argmax on "Fashion & Shopping" (0.384) — the geometry votes FOR
   the bug, so there is no threshold that rescues it.
-* The vocabulary is a fixed constant and the model may only select from it or
-  answer "none". "Chest Workout" is unrepresentable by construction, which is
-  how shelves stay broad without tuning.
+* The vocabulary is DERIVED FROM EACH USER'S OWN LIBRARY, not written here. A
+  hand-maintained list can only ever fit the libraries whose owner complained
+  loudest; someone who saves cricket needs a cricket shelf without anyone
+  editing code. Breadth is enforced by requiring a theme to be supported by
+  several reels — "Chest Workout" has two and dies, "Gym & Fitness" has twenty
+  and lives — rather than by curating the list by hand.
 * Three votes per reel, majority wins. temperature=0 is not a determinism
   guarantee: a single call flipped 3/25 reels across identical runs. Votes plus
   write-once persistence are what make the shelves stable.
@@ -80,7 +83,21 @@ SHELF_DISPLAY_NAMES = {
 # list of things that would appear in such a reel. A contents-phrased
 # definition invites matching against the inventory, which is the whole error
 # this engine exists to avoid.
-CORE_VOCAB: dict[str, str] = {
+# How many reels must support a theme before it can become a shelf. This is
+# what enforces BREADTH, and it is why the vocabulary no longer needs to be
+# hand-written to stay broad: "Chest Workout" is supported by two reels and
+# dies, "Gym & Fitness" is supported by twenty and lives. Data decides, not a
+# list someone maintains.
+MIN_THEME_SUPPORT = 4
+MAX_DISCOVERED_TERMS = 16
+DISCOVERY_BATCH = 40
+
+
+# Starting point only, for a library too small or too odd to derive anything
+# from. It is NOT the product's taxonomy — every real account gets its own,
+# derived from what that person actually saves. Hand-editing this list to fix
+# one user's misroute is exactly the mistake this design exists to prevent.
+FALLBACK_VOCAB: dict[str, str] = {
     "Food & Restaurants": "the reel exists to show you something to eat or somewhere to eat it",
     "Recipes & Cooking": "the reel exists to teach you how to make something",
     "Travel & Places": "the reel exists to sell you on going somewhere: a destination, a stay, a trip",
@@ -91,11 +108,6 @@ CORE_VOCAB: dict[str, str] = {
     "Grooming & Personal Care": "the reel exists to teach a hair, skin or grooming routine or product",
     "Movies & Shows": "the reel exists to discuss, recommend or clip a film or series",
     "Money & Career": "the reel exists to advise on work, business, study, money or making money",
-    "Motivation & Mindset": (
-        "the reel exists to land a message about discipline, mindset, confidence or "
-        "self-improvement; someone is making a point worth remembering"
-    ),
-    "Games & Gaming": "the reel exists for a video game: play, tips, locations, gear or news",
     "People & Performance": (
         "the reel exists for the person on camera: their performance, their look, the edit. "
         "Nothing is sold, taught, argued or explained. If they are making a point, this is "
@@ -194,6 +206,17 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS collection_vocabulary (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        term TEXT NOT NULL,
+        definition TEXT NOT NULL,
+        support INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE(user_id, term)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS collection_memberships (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -250,9 +273,131 @@ def _join(values) -> str:
     return ", ".join(_text(value) for value in values if _text(value))
 
 
-def vocabulary_for(user_id: str) -> dict[str, str]:
-    """The shelves that may exist. Fixed vocabulary, so shelves stay broad."""
-    return dict(CORE_VOCAB)
+DISCOVER_SYSTEM = """
+You are naming the shelves for one person's saved-reel library.
+
+You will be given short descriptions of reels they saved. Name the recurring themes that
+actually run through THIS collection.
+
+Rules:
+- A theme is a reason someone saves things, not a description of one reel.
+- BROAD umbrellas only. "Gym & Fitness", never "Chest Workout". "Recipes & Cooking", never
+  "Protein Pancakes". If a theme would describe fewer than a handful of these reels, it is
+  too narrow - widen it or leave it out.
+- Name only themes you can actually see repeating here. Do not propose a theme because it
+  is a common category in general; propose it because these reels show it.
+- Never name a brand, a person, a creator, a city or a specific product.
+- Most reels belong to no theme. Do not try to cover everything.
+- Give each theme a definition starting "the reel exists to ...", describing the PURPOSE a
+  reel must serve to belong.
+
+Reply JSON only:
+{"themes":[{"name":"...","definition":"the reel exists to ...","approx_reels":<int>}]}
+""".strip()
+
+
+def _discover_themes(subjects: list[str]) -> list[dict]:
+    """Ask what themes run through these reels. One call per batch."""
+    from api_config import get_openai_client
+
+    client = get_openai_client()
+    listing = "\n".join(f"- {subject[:160]}" for subject in subjects)
+    response = client.chat.completions.create(
+        model=ROUTE_MODEL,
+        temperature=0,
+        max_tokens=900,
+        seed=ROUTE_SEEDS[0],
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": DISCOVER_SYSTEM},
+            {"role": "user", "content": f"{len(subjects)} saved reels:\n{listing}"},
+        ],
+    )
+    payload = json.loads(response.choices[0].message.content or "{}")
+    themes = payload.get("themes")
+    return themes if isinstance(themes, list) else []
+
+
+def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[str, str]:
+    """Derive this user's shelf vocabulary from this user's own library.
+
+    The whole point: a hand-written list can only ever fit the libraries whose
+    owner complained loudest. Someone who saves cricket gets a cricket shelf
+    without anyone editing code, and someone who saves none of what this
+    founder saves gets none of his shelves.
+
+    Deterministic for a given library: batches are ordered by reel id,
+    temperature is 0, and the result is persisted, so it is derived once and
+    then read.
+    """
+    ensure_schema()
+    rows = rows if rows is not None else _reel_rows(user_id)
+    subjects = []
+    for row in rows:
+        card = build_card(row)
+        if not card:
+            continue
+        # The subject line plus what the describer says it shows — enough to
+        # recognise a theme, without the inventory that would invent one.
+        lines = [line for line in card.split("\n") if line.startswith("SUBJECT LINE:")]
+        scene = [line for line in card.split("\n") if line.startswith("- ") and "narration" not in line]
+        subjects.append((lines[0][14:] if lines else "") + (f" — {scene[0][2:]}" if scene else ""))
+
+    if len(subjects) < MIN_THEME_SUPPORT * 2:
+        return dict(FALLBACK_VOCAB)
+
+    proposals: dict[str, dict] = {}
+    for start in range(0, len(subjects), DISCOVERY_BATCH):
+        batch = subjects[start:start + DISCOVERY_BATCH]
+        try:
+            themes = _discover_themes(batch)
+        except Exception as exc:
+            print(f"[collections] theme discovery failed for {user_id}: {exc}")
+            continue
+        for theme in themes:
+            name = _text(theme.get("name"))
+            definition = _text(theme.get("definition"))
+            if not name or not definition:
+                continue
+            support = int(theme.get("approx_reels") or 0)
+            existing = proposals.get(name.lower())
+            if existing:
+                existing["support"] += support
+            else:
+                proposals[name.lower()] = {"name": name, "definition": definition, "support": support}
+
+    kept = [row for row in proposals.values() if row["support"] >= MIN_THEME_SUPPORT]
+    kept.sort(key=lambda row: (-row["support"], row["name"].lower()))
+    kept = kept[:MAX_DISCOVERED_TERMS]
+    if not kept:
+        return dict(FALLBACK_VOCAB)
+
+    created = _now()
+    with get_connection() as connection:
+        connection.execute("DELETE FROM collection_vocabulary WHERE user_id = ?", (user_id,))
+        for row in kept:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO collection_vocabulary
+                    (user_id, term, definition, support, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, row["name"], row["definition"], row["support"], created),
+            )
+    return {row["name"]: row["definition"] for row in kept}
+
+
+def vocabulary_for(user_id: str, rows: list[dict] | None = None) -> dict[str, str]:
+    """This user's shelves. Derived from their library, persisted, then reused."""
+    ensure_schema()
+    with get_connection() as connection:
+        stored = connection.execute(
+            "SELECT term, definition FROM collection_vocabulary WHERE user_id = ? ORDER BY support DESC, term ASC",
+            (user_id,),
+        ).fetchall()
+    if stored:
+        return {row["term"]: row["definition"] for row in stored}
+    return discover_vocabulary(user_id, rows=rows)
 
 
 def route_system_prompt(vocab: dict[str, str]) -> str:
@@ -453,9 +598,11 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
     from app.services.jobs import is_quota_failure
 
     ensure_schema()
-    vocab = vocabulary_for(user_id)
-    system_prompt = route_system_prompt(vocab)
     rows = _reel_rows(user_id)
+    # Derive this account's shelves from this account's library before routing
+    # into them. Reusing rows so discovery and routing see the same snapshot.
+    vocab = vocabulary_for(user_id, rows=rows)
+    system_prompt = route_system_prompt(vocab)
 
     labels: dict[str, str] = {}
     rows_by_reel: dict[str, dict] = {}

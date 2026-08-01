@@ -72,7 +72,13 @@ Sources: `deep_search_documents.document_json` (main_subject, visual_theme, tran
 
 ## 5. Deciding
 
-Vocabulary is a fixed 18 terms (`CORE_VOCAB`), each defined as a **purpose** — "the reel exists to teach you how to make something" — never as a list of contents. The model may only select a term or answer `none`, so narrow titles like "Chest Workout" are unrepresentable by construction.
+**The vocabulary is derived from each user's own library**, not written in code. A batched pass over the reels names the themes that actually recur in *that* collection; those become the shelves, and the model may only select one of them or answer `none`. Someone who saves cricket gets a cricket shelf without anyone editing code.
+
+Breadth is enforced by **support**, not by curation: a theme needs several reels behind it to survive discovery, and a shelf needs `MIN_SHELF_MEMBERS` reels actually routed into it to publish. "Chest Workout" has two and dies; "Gym & Fitness" has twenty and lives.
+
+`FALLBACK_VOCAB` exists only for libraries too small to derive anything from. **Hand-editing it to fix one user's misroute is the mistake this design exists to prevent** — the next user's library is different and there is nobody to file the bug.
+
+Every definition is phrased as a **purpose** — "the reel exists to teach you how to make something" — never as a list of contents, because a contents-phrased definition invites matching against the inventory.
 
 The prompt's rules are tests about evidence, never about a domain: the describer writes presence; repetition is not corroboration; **container test** (shelve the specific thing, never the thing that merely contains it); **swap test** (if a named thing could be swapped and the reel still makes the same point, it is an example, not the subject); when unsure, `none`.
 
