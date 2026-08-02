@@ -109,11 +109,17 @@ RENAME_MIN_MEMBERS = 8
 RENAME_MIN_COVERAGE = 0.8
 
 
-# Starting point only, for a library too small or too odd to derive anything
-# from. It is NOT the product's taxonomy — every real account gets its own,
-# derived from what that person actually saves. Hand-editing this list to fix
-# one user's misroute is exactly the mistake this design exists to prevent.
-FALLBACK_VOCAB: dict[str, str] = {
+# The BASE shelves every account starts from. Not a taxonomy I maintain by
+# hand per complaint — discovery ADDS to this list, so a cricket library still
+# grows a cricket shelf without anyone editing code.
+#
+# It exists because these definitions do real work that a model-written one
+# does not. Deriving the vocabulary from scratch replaced
+#   "the reel exists to make you want to BUY something to wear or own"
+# with an invented "Fashion & Style", whose definition carried no such clause,
+# and every watch-only reel walked straight back into a clothing shelf. The
+# wording here was measured; throwing it away cost precision immediately.
+BASE_VOCAB: dict[str, str] = {
     "Food & Restaurants": "the reel exists to show you something to eat or somewhere to eat it",
     "Recipes & Cooking": "the reel exists to teach you how to make something",
     "Travel & Places": "the reel exists to sell you on going somewhere: a destination, a stay, a trip",
@@ -322,12 +328,18 @@ Reply JSON only:
 """.strip()
 
 
-def _discover_themes(subjects: list[str]) -> list[dict]:
-    """Ask what themes run through these reels. One call per batch."""
+def _discover_themes(subjects: list[str], covered: list[str] | None = None) -> list[dict]:
+    """Ask what themes run through these reels that the base shelves miss."""
     from api_config import get_openai_client
 
     client = get_openai_client()
     listing = "\n".join(f"- {subject[:160]}" for subject in subjects)
+    if covered:
+        listing = (
+            "Shelves that already exist (do NOT propose these or anything that belongs inside them):\n"
+            + "\n".join(f"- {term}" for term in covered)
+            + f"\n\n{listing}"
+        )
     response = client.chat.completions.create(
         model=ROUTE_MODEL,
         temperature=0,
@@ -365,7 +377,7 @@ Reply JSON only:
 """.strip()
 
 
-def _consolidate_themes(candidates: list[dict]) -> list[dict]:
+def _consolidate_themes(candidates: list[dict], covered: list[str] | None = None) -> list[dict]:
     """Merge the per-batch drafts into one vocabulary. One call."""
     from api_config import get_openai_client
 
@@ -373,6 +385,17 @@ def _consolidate_themes(candidates: list[dict]) -> list[dict]:
     listing = "\n".join(
         f"- {row['name']} ({row['support']} reels): {row['definition'][:110]}" for row in candidates
     )
+    if covered:
+        # Consolidation is the only stage that sees every draft at once, so it
+        # is the only place a semantic duplicate can reliably be caught. A
+        # lexical check cannot: "Workout Routines" shares no word with
+        # "Gym & Fitness" and would survive one.
+        listing = (
+            "Shelves that ALREADY EXIST. Drop any draft entry that is one of these, means the\n"
+            "same thing as one of these, or belongs inside one of these:\n"
+            + "\n".join(f"- {term}" for term in covered)
+            + f"\n\nDraft list:\n{listing}"
+        )
     response = client.chat.completions.create(
         model=ROUTE_MODEL,
         temperature=0,
@@ -381,7 +404,7 @@ def _consolidate_themes(candidates: list[dict]) -> list[dict]:
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": CONSOLIDATE_SYSTEM},
-            {"role": "user", "content": f"Draft list:\n{listing}"},
+            {"role": "user", "content": listing},
         ],
     )
     payload = json.loads(response.choices[0].message.content or "{}")
@@ -415,13 +438,13 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
         subjects.append((lines[0][14:] if lines else "") + (f" — {scene[0][2:]}" if scene else ""))
 
     if len(subjects) < MIN_THEME_SUPPORT * 2:
-        return dict(FALLBACK_VOCAB)
+        return dict(BASE_VOCAB)
 
     proposals: dict[str, dict] = {}
     for start in range(0, len(subjects), DISCOVERY_BATCH):
         batch = subjects[start:start + DISCOVERY_BATCH]
         try:
-            themes = _discover_themes(batch)
+            themes = _discover_themes(batch, covered=list(BASE_VOCAB))
         except Exception as exc:
             print(f"[collections] theme discovery failed for {user_id}: {exc}")
             continue
@@ -444,7 +467,7 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     # person's gym reels across both. Consolidate the whole draft in one pass.
     draft = sorted(proposals.values(), key=lambda row: (-row["support"], row["name"].lower()))
     try:
-        merged = _consolidate_themes(draft)
+        merged = _consolidate_themes(draft, covered=list(BASE_VOCAB))
     except Exception as exc:
         print(f"[collections] theme consolidation failed for {user_id}: {exc}")
         merged = []
@@ -466,8 +489,15 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
         kept = sorted(final, key=lambda row: -row["support"])[:MAX_DISCOVERED_TERMS]
     kept.sort(key=lambda row: (-row["support"], row["name"].lower()))
     kept = kept[:MAX_DISCOVERED_TERMS]
-    if not kept:
-        return dict(FALLBACK_VOCAB)
+
+    # Anything the base already covers is dropped: the base definition is the
+    # measured one and must win over a model-written restatement of it.
+    base_words = {word for term in BASE_VOCAB for word in term.lower().replace("&", " ").split()}
+    kept = [
+        row for row in kept
+        if row["name"] not in BASE_VOCAB
+        and not (set(row["name"].lower().replace("&", " ").split()) & base_words)
+    ]
 
     created = _now()
     with get_connection() as connection:
@@ -562,9 +592,12 @@ def vocabulary_for(user_id: str, rows: list[dict] | None = None) -> dict[str, st
             """,
             (user_id, DISCOVERY_VERSION),
         ).fetchall()
+    vocab = dict(BASE_VOCAB)
     if stored:
-        return {row["term"]: row["definition"] for row in stored}
-    return discover_vocabulary(user_id, rows=rows)
+        vocab.update({row["term"]: row["definition"] for row in stored})
+        return vocab
+    vocab.update(discover_vocabulary(user_id, rows=rows))
+    return vocab
 
 
 def route_system_prompt(vocab: dict[str, str]) -> str:
