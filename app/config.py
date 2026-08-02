@@ -37,6 +37,11 @@ class Settings:
     collections_accounts: frozenset = frozenset(
         value.strip().lower() for value in os.getenv("COLLECTIONS_ACCOUNTS", "").split(",") if value.strip()
     )
+    # Set COLLECTIONS_FOR_EVERYONE=1 to give Collections to every account
+    # instead of the allowlist. This is a spending decision as much as a
+    # product one: each account routes its library once (3 calls per reel) and
+    # draws a logo per folder, so the bill scales with signups.
+    collections_for_everyone: bool = os.getenv("COLLECTIONS_FOR_EVERYONE", "").strip() in {"1", "true", "yes", "on"}
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

@@ -878,6 +878,8 @@ def collections_enabled(user_id: str) -> bool:
     """
     if not user_id:
         return False
+    if settings.collections_for_everyone:
+        return True
     if _is_demo_showcase_account(user_id):
         return True
     allowlist = settings.collections_accounts
