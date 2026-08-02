@@ -397,14 +397,34 @@ Reply JSON only:
 """.strip()
 
 
-def _consolidate_themes(candidates: list[dict], covered: list[str] | None = None) -> list[dict]:
-    """Merge the per-batch drafts into one vocabulary. One call."""
+def _consolidate_themes(
+    candidates: list[dict],
+    covered: list[str] | None = None,
+    existing: list[str] | None = None,
+) -> list[dict]:
+    """Merge the per-batch drafts into one vocabulary. One call.
+
+    `existing` are the shelves this person already has on screen. Anchoring to
+    them here is what stops a folder being renamed every time the vocabulary is
+    re-derived — measured over a growing library, one shelf went
+    "Fitness and Exercise" -> "Fitness & Workout Routines" -> "Fitness Workouts"
+    while holding the same reels throughout.
+    """
     from api_config import get_openai_client
 
     client = get_openai_client()
     listing = "\n".join(
         f"- {row['name']} ({row['support']} reels): {row['definition'][:110]}" for row in candidates
     )
+    if existing:
+        listing = (
+            "Shelves this person ALREADY HAS. They have learned to recognise these names.\n"
+            "If a draft entry below is the same interest as one of these, reply with the\n"
+            "EXISTING NAME EXACTLY as written here, unchanged. Only invent a new name for an\n"
+            "interest that is genuinely not in this list:\n"
+            + "\n".join(f"- {term}" for term in existing)
+            + f"\n\n{listing}"
+        )
     if covered:
         # Consolidation is the only stage that sees every draft at once, so it
         # is the only place a semantic duplicate can reliably be caught. A
@@ -430,6 +450,24 @@ def _consolidate_themes(candidates: list[dict], covered: list[str] | None = None
     payload = json.loads(response.choices[0].message.content or "{}")
     themes = payload.get("themes")
     return themes if isinstance(themes, list) else []
+
+
+def _existing_terms(user_id: str) -> list[str]:
+    """Shelf names this account already shows, whatever version produced them."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT term FROM collection_vocabulary WHERE user_id = ? ORDER BY support DESC, term ASC",
+            (user_id,),
+        ).fetchall()
+    return [row["term"] for row in rows]
+
+
+def _existing_definitions(user_id: str) -> dict[str, str]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT term, definition FROM collection_vocabulary WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return {row["term"].strip().lower(): (row["term"], row["definition"]) for row in rows}
 
 
 def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[str, str]:
@@ -490,7 +528,7 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     # person's gym reels across both. Consolidate the whole draft in one pass.
     draft = sorted(proposals.values(), key=lambda row: (-row["support"], row["name"].lower()))
     try:
-        merged = _consolidate_themes(draft)
+        merged = _consolidate_themes(draft, existing=_existing_terms(user_id))
     except Exception as exc:
         print(f"[collections] theme consolidation failed for {user_id}: {exc}")
         merged = []
@@ -508,6 +546,16 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     # — same mistake as trusting its self-reported name coverage. The real count
     # is measured after routing, and MIN_SHELF_MEMBERS already drops shelves
     # nobody landed on.
+    # Reuse the stored wording for any shelf that already exists. Keeping only
+    # the name would still shift the vocabulary hash on every re-derivation,
+    # which re-routes the whole library — an invisible change costing real
+    # money. Same shelf, same name, same definition, same cache.
+    previous = _existing_definitions(user_id)
+    for row in final:
+        match = previous.get(row["name"].strip().lower())
+        if match:
+            row["name"], row["definition"] = match
+
     kept = list(final)
     kept.sort(key=lambda row: (-row["support"], row["name"].lower()))
     kept = kept[:MAX_DISCOVERED_TERMS]
