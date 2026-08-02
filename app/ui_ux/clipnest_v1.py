@@ -1860,7 +1860,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <span class="lib-icon" style="background:${gradFor(list.parent_title || list.list_title)}">${iconMarkup(list)}</span>
         <span>
           <p class="lib-name">${escapeHtml(prettyTitle(list.list_title))}</p>
-          <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(prettyTitle(list.parent_title))}` : ''}</p>
+          <p class="lib-meta">${list.icon_url ? '' : emojiFor(list.parent_title || list.list_title) + ' '}${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(prettyTitle(list.parent_title))}` : ''}</p>
         </span>
         <span class="row-chev">${CHEV_SVG}</span>
       </button>`;
