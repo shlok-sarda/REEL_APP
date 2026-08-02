@@ -3,7 +3,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.schemas import LibraryResponse
 from app.services.auth import block_demo_link_writes, ensure_user_access
-from app.services.collections import reel_sheet, rebuild_estimate, start_shelf_rebuild
+from app.services.collections import reel_sheet, reel_sheet_csv, rebuild_estimate, start_shelf_rebuild
 from app.services.library import collections_status, load_library_payload
 
 
@@ -24,9 +24,19 @@ def get_library_status(request: Request, user_id: str = Query(default="")):
 
 
 @router.get("/sheet", response_class=PlainTextResponse)
-def get_reel_sheet(request: Request, user_id: str = Query(default="")):
-    """Every reel as a numbered list to hand-label. Open it in a browser tab."""
+def get_reel_sheet(request: Request, user_id: str = Query(default=""), format: str = Query(default="text")):
+    """Every reel as a list to hand-label.
+
+    format=csv downloads a file that opens in Excel with real columns; the
+    default renders readable in a browser tab.
+    """
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=False)
+    if format.lower() == "csv":
+        return PlainTextResponse(
+            reel_sheet_csv(resolved_user_id),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="clipnest_answer_sheet.csv"'},
+        )
     return reel_sheet(resolved_user_id)
 
 

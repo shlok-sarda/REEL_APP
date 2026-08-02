@@ -963,6 +963,59 @@ _USD_PER_CALL = (1318 * 0.40 + 10 * 1.60) / 1_000_000
 _INR_PER_USD = 88
 
 
+def reel_sheet_rows(user_id: str) -> list[dict]:
+    """The answer-sheet rows, before formatting."""
+    ensure_schema()
+    rows = _reel_rows(user_id)
+    with get_connection() as connection:
+        placed = {
+            row["reel_id"]: row["shelf_key"]
+            for row in connection.execute(
+                "SELECT reel_id, shelf_key FROM collection_memberships WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        }
+    out = []
+    number = 0
+    for row in rows:
+        card = build_card(row)
+        if not card:
+            continue
+        number += 1
+        first = card.split("\n", 1)[0]
+        subject = first[14:] if first.startswith("SUBJECT LINE:") else first
+        name = _text(row.get("item_name"))
+        label = name if name and "processing failed" not in name.lower() else subject
+        out.append(
+            {
+                "number": number,
+                "reel_id": str(row["reel_id"]),
+                "reel": label,
+                "subject": subject,
+                "now": placed.get(str(row["reel_id"])) or "",
+            }
+        )
+    return out
+
+
+def reel_sheet_csv(user_id: str) -> str:
+    """The answer sheet as CSV, so it opens in Excel with real columns.
+
+    reel_id travels with each row: whatever the founder renames or reorders in
+    a spreadsheet, that column is what lets the returned file be scored
+    against the engine's output.
+    """
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["#", "reel_id", "What the reel is", "Fuller description", "Where it is now", "YOUR FOLDER"])
+    for row in reel_sheet_rows(user_id):
+        writer.writerow([row["number"], row["reel_id"], row["reel"], row["subject"], row["now"], ""])
+    return buffer.getvalue()
+
+
 def reel_sheet(user_id: str) -> str:
     """Every routable reel as a numbered list, for hand-labelling.
 
