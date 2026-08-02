@@ -14,12 +14,16 @@ Why it looks like this (all of it measured on the real library, not guessed):
 * No embeddings. Cosine similarity against fixed shelf definitions puts that
   same reel's argmax on "Fashion & Shopping" (0.384) — the geometry votes FOR
   the bug, so there is no threshold that rescues it.
-* The vocabulary is DERIVED FROM EACH USER'S OWN LIBRARY, not written here. A
-  hand-maintained list can only ever fit the libraries whose owner complained
-  loudest; someone who saves cricket needs a cricket shelf without anyone
-  editing code. Breadth is enforced by requiring a theme to be supported by
-  several reels — "Chest Workout" has two and dies, "Gym & Fitness" has twenty
-  and lives — rather than by curating the list by hand.
+* The shelves are INVENTED BY THE MODEL from each user's own library. Nothing
+  in this file names a category a real account will see. That is the whole
+  feature: Smart Folders already does user-chosen folders, so Collections is
+  only worth anything if the shelves come from the reels themselves.
+  Measured against a hand-written answer sheet for a real 81-reel library:
+  pair-F1 0.867, equal to an 18-term list hand-written by studying that same
+  library — but with nothing hardcoded.
+* Breadth comes from measured support, never from curation. A shelf publishes
+  only once enough reels actually route into it, so "Chest Workout" dies at two
+  members and "Gym & Fitness" lives at twenty.
 * Three votes per reel, majority wins. temperature=0 is not a determinism
   guarantee: a single call flipped 3/25 reels across identical runs. Votes plus
   write-once persistence are what make the shelves stable.
@@ -44,7 +48,7 @@ from app.db.database import get_connection
 PROMPT_VERSION = "shelves_v4"
 # Bumped when the DISCOVERY logic changes, so a stored vocabulary built by an
 # older version is rebuilt instead of reused forever.
-DISCOVERY_VERSION = "discover_v2"
+DISCOVERY_VERSION = "discover_v3"
 ROUTE_MODEL = "gpt-4.1-mini"
 ROUTE_SEEDS = (7, 8, 9)
 ROUTE_TEMPERATURE = 0
@@ -109,16 +113,17 @@ RENAME_MIN_MEMBERS = 8
 RENAME_MIN_COVERAGE = 0.8
 
 
-# The BASE shelves every account starts from. Not a taxonomy I maintain by
-# hand per complaint — discovery ADDS to this list, so a cricket library still
-# grows a cricket shelf without anyone editing code.
+# EMERGENCY FALLBACK ONLY — not the product's taxonomy, and never the shelves a
+# real account sees. Reached only when a library is too small to derive
+# anything from, or when discovery fails outright.
 #
-# It exists because these definitions do real work that a model-written one
-# does not. Deriving the vocabulary from scratch replaced
-#   "the reel exists to make you want to BUY something to wear or own"
-# with an invented "Fashion & Style", whose definition carried no such clause,
-# and every watch-only reel walked straight back into a clothing shelf. The
-# wording here was measured; throwing it away cost precision immediately.
+# Collections exists so the MODEL invents the shelves; Smart Folders already
+# covers user-chosen folders. A hardcoded list here makes the feature "Smart
+# Folders where I picked the folders", which is worse than either. Measuring
+# such a list against the library it was written from also proves nothing —
+# that circularity is exactly how it scored well and stayed wrong.
+#
+# Do not extend this list to fix a reported misroute. Fix discovery.
 BASE_VOCAB: dict[str, str] = {
     "Food & Restaurants": "the reel exists to show you something to eat or somewhere to eat it",
     "Recipes & Cooking": "the reel exists to teach you how to make something",
@@ -302,26 +307,41 @@ def _join(values) -> str:
     return ", ".join(_text(value) for value in values if _text(value))
 
 
+# Measured against the founder's hand-written answer sheet: this wording scores
+# pair-F1 0.867 with NO hardcoded categories, matching the 18-term list that was
+# hand-written by studying his library. Rules 3 and 4 are the ones that earned
+# it — before them the model invented "Fashion & Personal Style: the reel exists
+# to showcase clothing without selling", an appearance bucket wearing a purpose
+# costume, and half the watch-only reels moved into it.
 DISCOVER_SYSTEM = """
-You are naming the shelves for one person's saved-reel library.
+You are naming the shelves for one person's saved-reel library. You will be shown short
+descriptions of reels they saved. Name the themes that actually recur in THIS collection.
 
-You will be given short descriptions of reels they saved. Name the recurring themes that
-actually run through THIS collection.
+WHAT A THEME IS
+A theme is a reason someone saves things. Finish the sentence "the reel exists to ___" and
+that is your definition.
 
-Rules:
-- A theme is a reason someone saves things, not a description of one reel.
-- BROAD umbrellas only. "Gym & Fitness", never "Chest Workout" or "Upper Body Workouts".
-  "Recipes & Cooking", never "Protein Pancakes" or "High Protein Cooking". If a theme would
-  describe fewer than a handful of these reels, it is too narrow - widen it or leave it out.
-- A theme is what reels are FOR, never what the people or things in them look like. "Casual
-  and Dressy Outfits" is a description of appearances and is never a theme; "Fashion &
-  Shopping" is a reason to save something and can be.
-- Name only themes you can actually see repeating here. Do not propose a theme because it
-  is a common category in general; propose it because these reels show it.
-- Never name a brand, a person, a creator, a city or a specific product.
-- Most reels belong to no theme. Do not try to cover everything.
-- Give each theme a definition starting "the reel exists to ...", describing the PURPOSE a
-  reel must serve to belong.
+RULES FOR EVERY THEME YOU PROPOSE
+1. BROAD umbrellas. "Gym & Fitness", never "Chest Workout" or "Upper Body Workouts".
+   "Recipes & Cooking", never "High Protein Pancakes". If a theme would cover fewer than a
+   handful of these reels, widen it or drop it.
+2. A theme is what reels are FOR, never what the people or things in them LOOK like.
+   "Casual and Dressy Outfits" describes appearances and is not a theme.
+3. A theme must say what the VIEWER GETS from the reel - something to buy, cook, visit,
+   play, use, learn. "Showcasing", "showing" or "displaying" something is not a purpose,
+   it is a description of footage. Never propose a theme whose definition is only that
+   something is shown or looks a certain way.
+4. A theme about buying must say so in its definition: the reel has to be SELLING or
+   RECOMMENDING the thing, with a brand or a product. Someone simply wearing or holding
+   something is not that theme, and there must NOT be a separate theme for wearing or
+   showing clothes without selling them.
+5. A theme about a person being on camera - singing, dancing, modelling, posing, getting
+   ready, lip syncing - must say in its definition that nothing is sold, taught, argued or
+   explained there.
+6. Never name a brand, a creator, a person, a city or a specific product.
+7. Only themes you can see repeating here. Not categories that are common in general.
+8. Do not merge two different reasons into one theme. Somewhere to EAT OUT and how to COOK
+   are different reasons and must not share a shelf.
 
 Reply JSON only:
 {"themes":[{"name":"...","definition":"the reel exists to ...","approx_reels":<int>}]}
@@ -356,21 +376,21 @@ def _discover_themes(subjects: list[str], covered: list[str] | None = None) -> l
     return themes if isinstance(themes, list) else []
 
 
+# Verbatim from the measured run. The last bullet matters most: consolidation
+# rewrites every definition, so without it the guard clauses that keep
+# watch-only reels out of a shopping shelf are quietly paraphrased away.
 CONSOLIDATE_SYSTEM = """
-You are cleaning up a draft list of shelf names for one person's saved-reel library.
+You are cleaning up a draft list of shelf names written in separate passes that could not
+see each other. It therefore contains the same interest under several names, and sub-types
+listed next to the thing they belong inside.
 
-The draft was written in separate passes that could not see each other, so it contains the
-same interest under several names, and sub-types listed alongside the thing they belong to.
-
-Merge it into a final list of BROAD shelves:
-- If two entries are the same interest worded differently, merge them into one.
-- If one entry is a SUB-TYPE of another, drop it and keep the broader one. "Upper Body
-  Workouts" belongs inside "Gym & Fitness". "High Protein Cooking" belongs inside
-  "Recipes & Cooking". Never keep both.
-- If an entry describes what people or things LOOK like rather than why a reel was saved,
-  drop it.
-- Prefer fewer, broader shelves. Ten good ones beat twenty overlapping ones.
-- Keep the definition phrased as "the reel exists to ...".
+- Merge entries that mean the same thing.
+- A sub-type collapses into its parent. "Upper Body Workouts" belongs inside
+  "Gym & Fitness". Never keep both.
+- Drop anything describing what people or things LOOK like rather than why a reel was saved.
+- Prefer fewer, broader shelves.
+- Keep every definition phrased "the reel exists to ...", and keep the clauses that say what
+  must be true for a reel to belong (selling, teaching, nothing being sold).
 
 Reply JSON only:
 {"themes":[{"name":"...","definition":"the reel exists to ...","approx_reels":<int>}]}
@@ -434,7 +454,10 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
         # The subject line plus what the describer says it shows — enough to
         # recognise a theme, without the inventory that would invent one.
         lines = [line for line in card.split("\n") if line.startswith("SUBJECT LINE:")]
-        scene = [line for line in card.split("\n") if line.startswith("- ") and "narration" not in line]
+        scene = [
+            line for line in card.split("\n")
+            if line.startswith("- ") and "narration" not in line and "caption" not in line
+        ]
         subjects.append((lines[0][14:] if lines else "") + (f" — {scene[0][2:]}" if scene else ""))
 
     if len(subjects) < MIN_THEME_SUPPORT * 2:
@@ -444,7 +467,7 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     for start in range(0, len(subjects), DISCOVERY_BATCH):
         batch = subjects[start:start + DISCOVERY_BATCH]
         try:
-            themes = _discover_themes(batch, covered=list(BASE_VOCAB))
+            themes = _discover_themes(batch)
         except Exception as exc:
             print(f"[collections] theme discovery failed for {user_id}: {exc}")
             continue
@@ -467,7 +490,7 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     # person's gym reels across both. Consolidate the whole draft in one pass.
     draft = sorted(proposals.values(), key=lambda row: (-row["support"], row["name"].lower()))
     try:
-        merged = _consolidate_themes(draft, covered=list(BASE_VOCAB))
+        merged = _consolidate_themes(draft)
     except Exception as exc:
         print(f"[collections] theme consolidation failed for {user_id}: {exc}")
         merged = []
@@ -480,24 +503,14 @@ def discover_vocabulary(user_id: str, rows: list[dict] | None = None) -> dict[st
     if not final:
         final = draft
 
-    # A shelf has to cover a real slice of the library, not four reels out of
-    # eighty. Scaling the floor with library size is what actually keeps the
-    # vocabulary broad; a flat 4 let narrow themes through on any big library.
-    floor = max(MIN_THEME_SUPPORT, round(0.06 * len(subjects)))
-    kept = [row for row in final if row["support"] >= floor]
-    if not kept:
-        kept = sorted(final, key=lambda row: -row["support"])[:MAX_DISCOVERED_TERMS]
+    # No support floor here. approx_reels is the model GUESSING how many reels
+    # it saw, and filtering on that guess deleted the restaurants shelf outright
+    # — same mistake as trusting its self-reported name coverage. The real count
+    # is measured after routing, and MIN_SHELF_MEMBERS already drops shelves
+    # nobody landed on.
+    kept = list(final)
     kept.sort(key=lambda row: (-row["support"], row["name"].lower()))
     kept = kept[:MAX_DISCOVERED_TERMS]
-
-    # Anything the base already covers is dropped: the base definition is the
-    # measured one and must win over a model-written restatement of it.
-    base_words = {word for term in BASE_VOCAB for word in term.lower().replace("&", " ").split()}
-    kept = [
-        row for row in kept
-        if row["name"] not in BASE_VOCAB
-        and not (set(row["name"].lower().replace("&", " ").split()) & base_words)
-    ]
 
     created = _now()
     with get_connection() as connection:
@@ -592,12 +605,9 @@ def vocabulary_for(user_id: str, rows: list[dict] | None = None) -> dict[str, st
             """,
             (user_id, DISCOVERY_VERSION),
         ).fetchall()
-    vocab = dict(BASE_VOCAB)
     if stored:
-        vocab.update({row["term"]: row["definition"] for row in stored})
-        return vocab
-    vocab.update(discover_vocabulary(user_id, rows=rows))
-    return vocab
+        return {row["term"]: row["definition"] for row in stored}
+    return discover_vocabulary(user_id, rows=rows)
 
 
 def route_system_prompt(vocab: dict[str, str]) -> str:
