@@ -998,6 +998,24 @@ def reel_sheet_rows(user_id: str) -> list[dict]:
     return out
 
 
+def reel_cards_export(user_id: str) -> str:
+    """Every reel's full routing card, as JSON.
+
+    The answer sheet says what the shelves SHOULD be; this is the exact input
+    the router sees. With both, variants can be scored offline against real
+    data instead of being guessed at, and the only spend is the routing calls
+    themselves.
+    """
+    ensure_schema()
+    out = []
+    for row in _reel_rows(user_id):
+        card = build_card(row)
+        if not card:
+            continue
+        out.append({"reel_id": str(row["reel_id"]), "card": card})
+    return json.dumps({"user_id": user_id, "count": len(out), "cards": out}, indent=1)
+
+
 def reel_sheet_csv(user_id: str) -> str:
     """The answer sheet as CSV, so it opens in Excel with real columns.
 

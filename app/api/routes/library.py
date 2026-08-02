@@ -3,7 +3,13 @@ from fastapi.responses import PlainTextResponse
 
 from app.schemas import LibraryResponse
 from app.services.auth import block_demo_link_writes, ensure_user_access
-from app.services.collections import reel_sheet, reel_sheet_csv, rebuild_estimate, start_shelf_rebuild
+from app.services.collections import (
+    reel_cards_export,
+    reel_sheet,
+    reel_sheet_csv,
+    rebuild_estimate,
+    start_shelf_rebuild,
+)
 from app.services.library import collections_status, load_library_payload
 
 
@@ -31,6 +37,12 @@ def get_reel_sheet(request: Request, user_id: str = Query(default=""), format: s
     default renders readable in a browser tab.
     """
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=False)
+    if format.lower() == "cards":
+        return PlainTextResponse(
+            reel_cards_export(resolved_user_id),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="clipnest_cards.json"'},
+        )
     if format.lower() == "csv":
         return PlainTextResponse(
             reel_sheet_csv(resolved_user_id),
