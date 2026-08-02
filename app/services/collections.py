@@ -509,6 +509,22 @@ def _generate_icon(name: str) -> str:
     return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+_LAST_ICON_ERROR: dict[str, str] = {}
+
+
+def icon_report(user_id: str) -> dict:
+    """Why folders do or do not have logos. Reads only."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT term, length(icon) AS n FROM collection_vocabulary WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    return {
+        "folders_with_logo": sum(1 for row in rows if (row["n"] or 0) > 0),
+        "folders_without_logo": sum(1 for row in rows if not (row["n"] or 0)),
+        "last_logo_error": _LAST_ICON_ERROR.get(user_id, ""),
+    }
+
+
 def ensure_icons(user_id: str, terms: list[str]) -> int:
     """Give every published folder a logo. Only ever generates missing ones."""
     if not ICON_ENABLED or not terms:
@@ -527,6 +543,11 @@ def ensure_icons(user_id: str, terms: list[str]) -> int:
         try:
             icon = _generate_icon(term)
         except Exception as exc:
+            # Kept verbatim rather than swallowed: the failure modes here are
+            # a missing Pillow, an image model the org cannot call, or an SDK
+            # too old for the transparent-background parameters — and none of
+            # them are guessable from an empty shelf list.
+            _LAST_ICON_ERROR[user_id] = f"{type(exc).__name__}: {exc}"[:300]
             print(f"[collections] icon failed for {term}: {exc}")
             continue
         if not icon:

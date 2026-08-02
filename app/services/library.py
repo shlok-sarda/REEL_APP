@@ -958,6 +958,7 @@ def collections_status(user_id: str) -> dict:
     try:
         from app.services.collections import (
             ensure_schema,
+            icon_report,
             rebuild_status,
             vocab_version,
             vocabulary_for,
@@ -992,8 +993,11 @@ def collections_status(user_id: str) -> dict:
         status["routes_stored_all_versions"] = int(total["count"] or 0) if total else 0
         status["shelves_built_at"] = (built["built_at"] if built else "") or ""
         status["shelves"] = [
-            {"list_title": c.get("list_title", ""), "items": len(c.get("items", []))} for c in shelves
+            {"list_title": c.get("list_title", ""), "items": len(c.get("items", [])),
+             "logo": bool(c.get("icon_url"))}
+            for c in shelves
         ]
+        status.update(icon_report(user_id))
         status["progress"] = (
             f"rebuilding: {routed_now} reels routed so far" if running
             else (f"done — {routed_now} reels routed on {current_version}" if routed_now
