@@ -318,6 +318,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
       border-bottom:1px solid var(--line);
     }
     .lib-row:last-child { border-bottom:0; }
+    .lib-logo { width: 76%; height: 76%; object-fit: contain; display: block; }
     .lib-icon {
       width:56px;
       height:56px;
@@ -1465,22 +1466,30 @@ def build_clipnest_v1_html(user_id: str) -> str:
     }
     const EMOJI_RULES = [
       [/miscellaneous|generic|uncertain|unsorted/i, '🗂️'],
-      [/product|shop|buy|gadget|tech/i, '🛍️'],
+      [/groom|beauty|skin|makeup|hair|personal care/i, '✨'],
+      [/software|code|app|ai |artificial|computer|tech/i, '💻'],
+      [/product|shop|buy|gadget/i, '🛍️'],
       [/recipe|food|cook|craving|snack|street/i, '🍲'],
       [/place|travel|trip|city|location/i, '🗺️'],
       [/fitness|workout|gym|sport|swim|exercise/i, '💪'],
       [/meme|funny|laugh|humor|comedy/i, '😂'],
       [/fashion|outfit|style|wear/i, '👕'],
-      [/software|code|app|ai|computer/i, '💻'],
       [/film|movie|tv|show|series/i, '🎬'],
       [/music|song|album/i, '🎵'],
       [/book|read|learn|tutorial|study/i, '📘'],
-      [/car|bike|drive|auto/i, '🏎️'],
+      [/(^|[^a-z])(car|cars|bike|bikes|auto|driving)([^a-z]|$)/i, '🏎️'],
       [/game|gaming|play/i, '🎮'],
-      [/beauty|skin|makeup/i, '✨'],
       [/finance|money|invest|business/i, '💸'],
       [/hobby|diy|craft|build/i, '🧩'],
     ];
+    // A generated logo wins over the keyword guess. The guess only ever ran on
+    // hand-written folder names; with names the model invents it misfires —
+    // "Grooming & Personal Care" matched /car/ and drew a racing car.
+    function iconMarkup(list) {
+      const url = list && list.icon_url;
+      if (url) return '<img class="lib-logo" src="' + url + '" alt="" />';
+      return emojiFor(list && (list.parent_title || list.list_title));
+    }
     function emojiFor(name) {
       const value = String(name || '');
       for (const [pattern, emoji] of EMOJI_RULES) {
@@ -1848,7 +1857,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
     function renderLibRow(list) {
       // Folders are represented by a clean logo (emoji), never a random reel frame.
       return `<button class="lib-row" type="button" data-open-list="${escapeHtml(list.list_id)}" aria-label="Open ${escapeHtml(list.list_title)}">
-        <span class="lib-icon" style="background:${gradFor(list.parent_title || list.list_title)}">${emojiFor(list.parent_title || list.list_title)}</span>
+        <span class="lib-icon" style="background:${gradFor(list.parent_title || list.list_title)}">${iconMarkup(list)}</span>
         <span>
           <p class="lib-name">${escapeHtml(prettyTitle(list.list_title))}</p>
           <p class="lib-meta">${emojiFor(list.parent_title || list.list_title)} ${list.real_count} ${list.real_count === 1 ? 'item' : 'items'}${list.parent_title ? `<span class="dot-sep">·</span>${escapeHtml(prettyTitle(list.parent_title))}` : ''}</p>

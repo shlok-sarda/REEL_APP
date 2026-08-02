@@ -120,6 +120,9 @@ class LibraryCollection(BaseModel):
     # Stable identity for a router-built shelf. Undeclared keys are dropped
     # before the browser sees them, so without this the shelf key never lands.
     shelf_key: str = ""
+    # Generated folder logo, inline as a data URI (~7KB) so it needs no
+    # object storage and arrives with the payload.
+    icon_url: str = ""
     items: list[LibraryItem]
 
 

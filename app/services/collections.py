@@ -108,6 +108,31 @@ DISCOVERY_BATCH = 40
 #
 # Re-enable only behind a coverage check MEASURED against the members rather
 # than reported by the model.
+# Folder logos. gpt-image-1-mini at low quality is $0.005 an image (verified
+# against OpenAI's pricing docs) — about 44 paise, once per folder, and folder
+# names are sticky so a logo is never regenerated for a rename. Generated at
+# 1024 because that is the minimum, then stored downscaled: a 1.3MB original
+# is pointless for something rendered at 40 pixels, and 96px lands under 8KB,
+# small enough to travel inline with the library payload and skip object
+# storage entirely.
+ICON_ENABLED = True
+ICON_MODEL = "gpt-image-1-mini"
+ICON_PX = 96
+MAX_NEW_ICONS = 12
+
+# "Folder" is deliberately absent from this prompt. An earlier version said
+# "an icon for a folder called X" and six of seven came back as drawings of
+# folders — a container inside the app's own rounded tile.
+ICON_PROMPT = (
+    "A minimal flat vector icon symbolising: {name}. "
+    "Draw ONE single centred everyday object that stands for that idea. "
+    "Chunky simple shapes, thick clean dark-brown outlines, friendly cartoon style, "
+    "warm amber and cream colours, fully transparent background. "
+    "Do NOT draw a folder, a file, a frame, a card, a box or any container. "
+    "No text, no letters, no numbers. No scenery, no shadow. "
+    "Sticker style, centred, with empty margin around the object."
+)
+
 RENAME_ENABLED = False
 RENAME_MIN_MEMBERS = 8
 RENAME_MIN_COVERAGE = 0.8
@@ -240,6 +265,7 @@ SCHEMA_STATEMENTS = [
         definition TEXT NOT NULL,
         support INTEGER NOT NULL DEFAULT 0,
         version TEXT NOT NULL DEFAULT '',
+        icon TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         UNIQUE(user_id, term)
     )
@@ -286,6 +312,10 @@ def ensure_schema() -> None:
         # the column rather than relying on CREATE TABLE IF NOT EXISTS.
         try:
             connection.execute("ALTER TABLE collection_vocabulary ADD COLUMN version TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass
+        try:
+            connection.execute("ALTER TABLE collection_vocabulary ADD COLUMN icon TEXT NOT NULL DEFAULT ''")
         except Exception:
             pass
         for statement in _INDEX_STATEMENTS:
@@ -450,6 +480,72 @@ def _consolidate_themes(
     payload = json.loads(response.choices[0].message.content or "{}")
     themes = payload.get("themes")
     return themes if isinstance(themes, list) else []
+
+
+def _generate_icon(name: str) -> str:
+    """One folder logo, returned as a data URI. Empty string on any failure."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    from api_config import get_openai_client
+
+    client = get_openai_client()
+    response = client.images.generate(
+        model=ICON_MODEL,
+        prompt=ICON_PROMPT.format(name=name),
+        size="1024x1024",
+        quality="low",
+        background="transparent",
+        output_format="png",
+        n=1,
+    )
+    raw = base64.b64decode(response.data[0].b64_json)
+    image = Image.open(io.BytesIO(raw)).convert("RGBA")
+    image.thumbnail((ICON_PX, ICON_PX), Image.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def ensure_icons(user_id: str, terms: list[str]) -> int:
+    """Give every published folder a logo. Only ever generates missing ones."""
+    if not ICON_ENABLED or not terms:
+        return 0
+    with get_connection() as connection:
+        have = {
+            row["term"]
+            for row in connection.execute(
+                "SELECT term FROM collection_vocabulary WHERE user_id = ? AND icon != ''", (user_id,)
+            ).fetchall()
+        }
+    made = 0
+    for term in terms:
+        if term in have or made >= MAX_NEW_ICONS:
+            continue
+        try:
+            icon = _generate_icon(term)
+        except Exception as exc:
+            print(f"[collections] icon failed for {term}: {exc}")
+            continue
+        if not icon:
+            continue
+        with get_connection() as connection:
+            connection.execute(
+                "UPDATE collection_vocabulary SET icon = ? WHERE user_id = ? AND term = ?",
+                (icon, user_id, term),
+            )
+        made += 1
+    return made
+
+
+def _icons_for(user_id: str) -> dict[str, str]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT term, icon FROM collection_vocabulary WHERE user_id = ? AND icon != ''", (user_id,)
+        ).fetchall()
+    return {row["term"]: row["icon"] for row in rows}
 
 
 def _existing_terms(user_id: str) -> list[str]:
@@ -993,8 +1089,11 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
                     (user_id, shelf_key, reel_id, built_at),
                 )
 
+    icons_made = ensure_icons(user_id, [term for term, _ in published])
+
     return {
         "user_id": user_id,
+        "icons_made": icons_made,
         "reels_considered": len(rows),
         "unroutable": skipped_unroutable,
         "routed_new": routed_new,
@@ -1251,6 +1350,7 @@ def load_shelf_collections(user_id: str) -> list[dict]:
             (user_id,),
         ).fetchall()
 
+    icons = _icons_for(user_id)
     items_by_shelf: dict[str, list[dict]] = {}
     for row in members:
         row = dict(row)
@@ -1289,6 +1389,7 @@ def load_shelf_collections(user_id: str) -> list[dict]:
                 "parent_title": "",
                 "list_title": shelf["list_title"] or shelf["shelf_key"],
                 "shelf_key": shelf["shelf_key"],
+                "icon_url": icons.get(shelf["shelf_key"], ""),
                 "items": items,
             }
         )
