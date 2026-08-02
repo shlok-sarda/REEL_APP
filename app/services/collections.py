@@ -963,6 +963,51 @@ _USD_PER_CALL = (1318 * 0.40 + 10 * 1.60) / 1_000_000
 _INR_PER_USD = 88
 
 
+def reel_sheet(user_id: str) -> str:
+    """Every routable reel as a numbered list, for hand-labelling.
+
+    The founder writes the folder he wants after each line and pastes it back;
+    that becomes the answer sheet a model variant is scored against. Plain
+    text on purpose — it has to be readable in a browser tab and pasteable
+    into notes without any tooling.
+    """
+    ensure_schema()
+    rows = _reel_rows(user_id)
+    with get_connection() as connection:
+        placed = {
+            row["reel_id"]: row["shelf_key"]
+            for row in connection.execute(
+                "SELECT reel_id, shelf_key FROM collection_memberships WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        }
+
+    lines = [
+        "CLIPNEST — COLLECTIONS ANSWER SHEET",
+        "",
+        "Write the folder you want after the final |  .",
+        "Leave it blank if the reel should be in NO folder — those matter as much as the rest.",
+        "",
+        f"{'#':>3}  {'WHAT THE REEL IS':<62}  {'WHERE IT IS NOW':<24}  YOUR FOLDER",
+        "-" * 120,
+    ]
+    number = 0
+    for row in rows:
+        card = build_card(row)
+        if not card:
+            continue
+        number += 1
+        first = card.split("\n", 1)[0]
+        subject = first[14:] if first.startswith("SUBJECT LINE:") else first
+        name = _text(row.get("item_name"))
+        label = name if name and "processing failed" not in name.lower() else subject
+        lines.append(
+            f"{number:>3}  {label[:62]:<62}  {(placed.get(str(row['reel_id'])) or '-')[:24]:<24}  |"
+        )
+    lines += ["", f"{number} reels. Paste this back with your folders filled in."]
+    return "\n".join(lines)
+
+
 def rebuild_estimate(user_id: str) -> dict:
     """What a rebuild would cost, without calling anything.
 
