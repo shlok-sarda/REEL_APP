@@ -868,6 +868,20 @@ def _is_demo_showcase_account(user_id: str) -> bool:
     return bool(row) and row["id"] == user_id
 
 
+def _excluded_from_collections(user_id: str) -> bool:
+    """Explicitly kept out, whatever else is switched on."""
+    excluded = settings.collections_exclude
+    if not excluded:
+        return False
+    if user_id.strip().lower() in excluded:
+        return True
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    return bool(row) and (row["email"] or "") in excluded
+
+
 def collections_enabled(user_id: str) -> bool:
     """Who currently sees Collections shelves.
 
@@ -877,6 +891,8 @@ def collections_enabled(user_id: str) -> bool:
     still being worked out — no deploy needed to add or drop an account.
     """
     if not user_id:
+        return False
+    if _excluded_from_collections(user_id):
         return False
     if settings.collections_for_everyone:
         return True
@@ -1011,11 +1027,33 @@ def collections_status(user_id: str) -> dict:
     return status
 
 
+def _autostart_first_rebuild(user_id: str, item_count: int) -> None:
+    """Route a brand-new account once, off the request thread."""
+    if item_count < 3:
+        # Fewer reels than a shelf needs members. Nothing to find yet, and the
+        # worker will route them once they save enough.
+        return
+    try:
+        from app.services.collections import has_never_routed, start_shelf_rebuild
+
+        if has_never_routed(user_id):
+            start_shelf_rebuild(user_id)
+    except Exception as exc:
+        print(f"[collections] autostart skipped for {user_id}: {exc}")
+
+
 def load_library_payload(user_id: str) -> dict:
     collections_on = collections_enabled(user_id)
     is_demo_showcase = collections_on and _is_demo_showcase_account(user_id)
 
     if collections_on and not is_demo_showcase:
+        # Nobody should have to ask for their folders. On a rollout the shelves
+        # have to appear by themselves, so the first library load for an
+        # account that has never been routed starts one in the background. The
+        # check is "no verdicts at all", not "no shelves" — a small library
+        # that legitimately produces no folders has verdicts, so it is routed
+        # once and never again rather than on every visit.
+        _autostart_first_rebuild(user_id, item_count=_current_reel_item_count(user_id))
         # Shelves come from the router now: a pure read of rows the
         # rebuild_library job already decided and persisted. No clustering, no
         # feature rebuild, no LLM, nothing recomputed inside the request — that

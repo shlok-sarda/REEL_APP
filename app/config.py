@@ -42,6 +42,12 @@ class Settings:
     # product one: each account routes its library once (3 calls per reel) and
     # draws a logo per folder, so the bill scales with signups.
     collections_for_everyone: bool = os.getenv("COLLECTIONS_FOR_EVERYONE", "").strip() in {"1", "true", "yes", "on"}
+    # Accounts kept OUT of Collections even during a global rollout, by email
+    # or user id. Cheaper and more reversible than deleting an account when the
+    # only goal is to stop routing it.
+    collections_exclude: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("COLLECTIONS_EXCLUDE", "").split(",") if value.strip()
+    )
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

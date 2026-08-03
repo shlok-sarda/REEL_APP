@@ -1292,6 +1292,16 @@ def rebuild_estimate(user_id: str) -> dict:
     }
 
 
+def has_never_routed(user_id: str) -> bool:
+    """True when this account has no routing verdicts at all, of any version."""
+    ensure_schema()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM collection_routes WHERE user_id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    return row is None
+
+
 def start_shelf_rebuild(user_id: str) -> dict:
     """Kick routing off on a background thread and return immediately.
 
