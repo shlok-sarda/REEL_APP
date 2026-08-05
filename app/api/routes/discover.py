@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from app.services.auth import ensure_user_access
-from app.services.discover import build_map_pins, extract_reel_recipe, reel_recipe_status
+from app.services.auth import block_demo_link_writes, ensure_user_access, is_demo_link_session
+from app.services.discover import (
+    build_map_pins,
+    build_recipes,
+    extract_reel_recipe,
+    recipes_enabled,
+    reel_recipe_status,
+)
 from app.services.library import is_demo_user
 
 router = APIRouter(tags=["discover"])
@@ -42,5 +48,19 @@ def reel_recipe_extract(request: Request, payload: dict = Body(...)):
     user_id = str(payload.get("user_id", ""))
     if user_id and is_demo_user(user_id):
         return {"status": "none"}
+    # extraction spends OpenAI credit — shared demo-link sessions can't trigger it
+    block_demo_link_writes(request, "extract recipes")
     resolved = ensure_user_access(request, user_id)
     return extract_reel_recipe(resolved, reel_id)
+
+
+@router.get("/api/recipes")
+def recipes(request: Request, user_id: str = Query(default="")):
+    """All extracted recipe cards + per-ingredient shopping data + city matrix,
+    for the Recipes overlay inside the app."""
+    if user_id and is_demo_user(user_id):
+        return {"recipes": []}
+    resolved = ensure_user_access(request, user_id)
+    if not recipes_enabled(resolved):
+        raise HTTPException(status_code=404, detail="Recipes is not enabled for this account")
+    return build_recipes(resolved, allow_extraction=not is_demo_link_session(request))

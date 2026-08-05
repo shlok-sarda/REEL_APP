@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -3182,7 +3184,10 @@ def dev_login(request: Request, user_id: str = "default"):
     from app.services.auth import SESSION_USER_KEY, get_user_by_id
 
     client_host = request.client.host if request.client else ""
-    if settings.session_https_only or client_host not in {"127.0.0.1", "::1"}:
+    # DEV_LOGIN_OPEN=1 (never set in prod) admits LAN clients too, so the
+    # local build can be tried from a phone on the same Wi-Fi.
+    lan_ok = os.getenv("DEV_LOGIN_OPEN") == "1"
+    if settings.session_https_only or (not lan_ok and client_host not in {"127.0.0.1", "::1"}):
         return RedirectResponse(url="/", status_code=303)
     if not get_user_by_id(user_id):
         return RedirectResponse(url="/", status_code=303)

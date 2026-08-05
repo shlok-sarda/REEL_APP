@@ -6,9 +6,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
     # Collections shelves are visible to the demo showcase account plus any
     # account listed in COLLECTIONS_ACCOUNTS, so the engine can be polished
     # against a real library. Return "1" unconditionally to roll out to all.
+    from app.services.discover import recipes_enabled
     from app.services.library import collections_enabled
 
     show_collections = "1" if collections_enabled(user_id) else "0"
+    # Recipes hub + ingredient buy links: admin/RECIPES_ACCOUNTS only while
+    # the founder bakes the feature in his own library.
+    show_recipes = "1" if recipes_enabled(user_id) else "0"
     # Render exposes the deployed commit; locally this shows "dev". Surfaced in
     # Profile so a stale cached build can be spotted from the phone instantly.
     build_sha = (os.getenv("RENDER_GIT_COMMIT") or "dev")[:7]
@@ -1375,6 +1379,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
   <script>
     const USER_ID = '__USER_ID__';
     const SHOW_COLLECTIONS = '__SHOW_COLLECTIONS__' === '1';
+    const SHOW_RECIPES = '__SHOW_RECIPES__' === '1';
     const state = {
       data: [],
       recents: [],
@@ -1735,10 +1740,7 @@ def build_clipnest_v1_html(user_id: str) -> str:
         <div class="home-head">
           <div class="greeting-row"><span class="brand-mark" aria-hidden="true"></span><h1 class="greeting">${escapeHtml(greeting())}</h1></div>
           <div class="icon-row">
-            ${''/* Recipes hub button hidden until its /api/recipes backend ships —
-                  the hub UI landed ahead of its server route (parallel work).
-                  Restore this line when the endpoint is live:
-                  <button class="icon-button" type="button" aria-label="Your recipes" id="recipesButton">RECIPES_SVG</button> */}
+            ${SHOW_RECIPES ? `<button class="icon-button" type="button" aria-label="Your recipes" id="recipesButton">${RECIPES_SVG}</button>` : ''}
             <button class="icon-button" type="button" aria-label="Your reel map" id="mapButton">${MAP_PIN_SVG}</button>
             <button class="icon-button" type="button" aria-label="Activity" id="notifButton">${BELL_SVG}${status.tone !== 'idle' ? `<span class="notif-dot ${status.tone}"></span>` : ''}</button>
             <button class="icon-button" type="button" aria-label="Refresh" id="refreshButton">${REFRESH_SVG}</button>
@@ -3391,4 +3393,4 @@ def build_clipnest_v1_html(user_id: str) -> str:
   </script>
 </body>
 </html>"""
-    return html.replace("__USER_ID__", safe_user_id).replace("__BUILD_SHA__", build_sha).replace("__SHOW_COLLECTIONS__", show_collections)
+    return html.replace("__USER_ID__", safe_user_id).replace("__BUILD_SHA__", build_sha).replace("__SHOW_COLLECTIONS__", show_collections).replace("__SHOW_RECIPES__", show_recipes)

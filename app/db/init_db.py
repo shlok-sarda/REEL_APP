@@ -372,6 +372,12 @@ FOLDER_MEMBERSHIP_EXTRA_COLUMNS = {
     "reject_reason": "TEXT NOT NULL DEFAULT ''",
 }
 
+# reel_recipes shipped with cards only; shopping_json adds per-ingredient
+# quick-commerce data ([{display, query, brand, pantry, links, exact}]).
+REEL_RECIPES_EXTRA_COLUMNS = {
+    "shopping_json": "TEXT NOT NULL DEFAULT '[]'",
+}
+
 USER_EXTRA_COLUMNS = {
     "google_sub": "TEXT",
     "email": "TEXT NOT NULL DEFAULT ''",
@@ -471,6 +477,13 @@ def create_tables():
         for column_name, column_type in FOLDER_MEMBERSHIP_EXTRA_COLUMNS.items():
             if column_name not in existing_membership_columns:
                 connection.execute(f"ALTER TABLE folder_memberships ADD COLUMN {column_name} {column_type}")
+        existing_recipe_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(reel_recipes)").fetchall()
+        }
+        for column_name, column_type in REEL_RECIPES_EXTRA_COLUMNS.items():
+            if column_name not in existing_recipe_columns:
+                connection.execute(f"ALTER TABLE reel_recipes ADD COLUMN {column_name} {column_type}")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL AND google_sub != ''")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_instagram_user_id ON users(instagram_user_id) WHERE instagram_user_id IS NOT NULL AND instagram_user_id != ''")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_reel_item_features_user_id ON reel_item_features(user_id)")

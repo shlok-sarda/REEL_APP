@@ -279,15 +279,20 @@ def reel_recipe_status(user_id: str, reel_id: str) -> dict:
     extract on demand) | 'none' (not recipe material / confirmed not-a-recipe)."""
     with get_connection() as conn:
         cached = conn.execute(
-            "SELECT is_recipe, recipe_json FROM reel_recipes WHERE user_id=? AND reel_id=?",
+            "SELECT is_recipe, recipe_json, shopping_json FROM reel_recipes WHERE user_id=? AND reel_id=?",
             (user_id, reel_id),
         ).fetchone()
         if cached:
             if cached["is_recipe"]:
                 try:
-                    return {"status": "recipe", "card": json.loads(cached["recipe_json"])}
+                    card = json.loads(cached["recipe_json"])
                 except Exception:
                     return {"status": "none"}
+                try:
+                    card["shopping"] = json.loads(cached["shopping_json"] or "[]")
+                except Exception:
+                    card["shopping"] = []
+                return {"status": "recipe", "card": card, **QCOMMERCE_GEO}
             return {"status": "none"}
         row = _recipe_row(conn, user_id, reel_id)
     if not row:
@@ -312,25 +317,35 @@ def extract_reel_recipe(user_id: str, reel_id: str) -> dict:
             card = _extract_recipe_card(row, _transcript_of(row))
         except Exception:
             return {"status": "candidate", "error": "extraction_failed"}
+        # Shopping data is allowlist-only while it bakes; everyone else keeps
+        # today's card (and today's per-reel cost) exactly as it was.
+        shopping = (
+            _extract_shopping_rows(card, _shopping_text(row))
+            if card and recipes_enabled(user_id)
+            else []
+        )
         conn.execute(
             "INSERT OR REPLACE INTO reel_recipes "
-            "(user_id, reel_id, is_recipe, recipe_json, created_at) VALUES (?,?,?,?,?)",
+            "(user_id, reel_id, is_recipe, recipe_json, shopping_json, created_at) VALUES (?,?,?,?,?,?)",
             (user_id, reel_id, 1 if card else 0,
-             json.dumps(card, ensure_ascii=False) if card else "", _now()),
+             json.dumps(card, ensure_ascii=False) if card else "",
+             json.dumps(shopping, ensure_ascii=False), _now()),
         )
     if card:
-        return {"status": "recipe", "card": card}
+        return {"status": "recipe", "card": {**card, "shopping": shopping}, **QCOMMERCE_GEO}
     return {"status": "none"}
 
 
-def build_recipes(user_id: str) -> dict:
+def build_recipes(user_id: str, allow_extraction: bool = True) -> dict:
     """Extract recipe cards for food reels with transcripts; fully cached, both
-    positive and negative outcomes, so nothing is ever paid for twice."""
+    positive and negative outcomes, so nothing is ever paid for twice.
+    allow_extraction=False serves cached rows only (shared demo-link sessions
+    must not spend OpenAI credit)."""
     with get_connection() as conn:
         cached = {r["reel_id"]: r for r in conn.execute(
             "SELECT reel_id, is_recipe, recipe_json FROM reel_recipes WHERE user_id=?",
             (user_id,))}
-        new_calls = 0
+        new_calls = 0 if allow_extraction else MAX_NEW_RECIPES_PER_CALL
         for row in _discover_rows(conn, user_id):
             if row["reel_id"] in cached or new_calls >= MAX_NEW_RECIPES_PER_CALL:
                 continue
@@ -352,7 +367,7 @@ def build_recipes(user_id: str) -> dict:
         recipes = []
         for r in conn.execute(
             """
-            SELECT rr.reel_id, rr.recipe_json, re.url,
+            SELECT rr.reel_id, rr.recipe_json, rr.shopping_json, re.url,
                    COALESCE(ri.primary_category,'') category
             FROM reel_recipes rr
             JOIN reels re ON re.id = rr.reel_id
@@ -367,6 +382,216 @@ def build_recipes(user_id: str) -> dict:
                 card = json.loads(r["recipe_json"])
             except Exception:
                 continue
+            try:
+                shopping = json.loads(r["shopping_json"] or "[]")
+            except Exception:
+                shopping = []
             recipes.append({**card, "reel_id": r["reel_id"], "url": r["url"],
-                            "category": r["category"]})
-    return {"recipes": recipes}
+                            "category": r["category"], "shopping": shopping})
+        # backfill shopping for cached cards that predate the feature
+        new_shopping = 0 if allow_extraction else MAX_NEW_SHOPPING_PER_CALL
+        for rec in recipes:
+            if rec["shopping"] or new_shopping >= MAX_NEW_SHOPPING_PER_CALL:
+                continue
+            row = _recipe_row(conn, user_id, rec["reel_id"])
+            text = _shopping_text(row) if row else ""
+            shopping = _extract_shopping_rows(rec, text)
+            if shopping:
+                rec["shopping"] = shopping
+                conn.execute(
+                    "UPDATE reel_recipes SET shopping_json=? WHERE user_id=? AND reel_id=?",
+                    (json.dumps(shopping, ensure_ascii=False), user_id, rec["reel_id"]),
+                )
+                new_shopping += 1
+    # recipes with exact product links surface first
+    recipes.sort(key=lambda r: -sum(1 for s in r["shopping"] if s.get("exact")))
+    return {"recipes": recipes, **QCOMMERCE_GEO}
+
+
+# ---------------------------------------------------------------------------
+# Ingredient shopping: per-ingredient quick-commerce buy links.
+#
+# Search URL formats verified live in a browser 2026-07-25 (Blinkit renders
+# results behind a dismissible location modal; Instamart works logged-out;
+# Zepto web search wants login but app links hand off to the installed app;
+# Flipkart Minutes = marketplace=HYPERLOCAL, mobile-web/app only). Exact
+# product links (blinkit /prn/.../prid/, zepto /pn/.../pvid/, bigbasket /pd/)
+# are resolved OFFLINE by the lab pipeline (deep_search_lab/ingredient_links.py
+# resolve stage) and land here via shopping_json — the app itself never
+# scrapes or calls out to the platforms.
+# ---------------------------------------------------------------------------
+
+MAX_NEW_SHOPPING_PER_CALL = 12
+
+
+def recipes_enabled(user_id: str) -> bool:
+    """Who sees the Recipes hub + ingredient buy links.
+
+    Admin accounts (the founder is always one, see settings.admin_emails)
+    plus anything in the RECIPES_ACCOUNTS env var, by email or user id —
+    the same solo-bake rollout dial Collections used.
+    """
+    from app.config import settings
+
+    if not user_id:
+        return False
+    allowlist = settings.recipes_accounts
+    if user_id.strip().lower() in allowlist:
+        return True
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    email = (row["email"] or "") if row else ""
+    return bool(email) and (email in settings.admin_emails or email in allowlist)
+
+QCOMMERCE_GEO = {
+    "apps": {
+        "blinkit": {"label": "Blinkit", "color": "#f8cb46"},
+        "zepto": {"label": "Zepto", "color": "#950ed1"},
+        "instamart": {"label": "Instamart", "color": "#fc8019"},
+        "flipkart": {"label": "Fk Minutes", "color": "#2874f0"},
+        "bigbasket": {"label": "bbNow", "color": "#84c225"},
+        "jiomart": {"label": "JioMart", "color": "#008ecc"},
+        "amazon": {"label": "Amazon", "color": "#febd69"},
+    },
+    "default_apps": ["blinkit", "instamart", "flipkart", "jiomart", "amazon"],
+    # City coverage as of mid-2026 (researched): Blinkit ~330 cities,
+    # Instamart 129, Fk Minutes 130+, Zepto metro-dense, bbNow ~35.
+    "cities": {
+        "Mumbai": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Delhi NCR": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Bengaluru": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Hyderabad": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Chennai": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Kolkata": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Pune": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Ahmedabad": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Jaipur": ["blinkit", "zepto", "instamart", "flipkart", "jiomart"],
+        "Lucknow": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Chandigarh": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Indore": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Varanasi": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Patna": ["blinkit", "instamart", "flipkart", "bigbasket", "jiomart"],
+        "Kochi": ["blinkit", "zepto", "instamart", "flipkart", "bigbasket", "jiomart", "amazon"],
+        "Goa": ["blinkit", "instamart", "jiomart"],
+        "Other / smaller city": ["blinkit", "instamart", "flipkart", "jiomart", "amazon"],
+    },
+}
+
+SHOPPING_PROMPT_RULES = (
+    "For EVERY ingredient in the list, return JSON: "
+    '{"ingredients": [{"display": "<ingredient exactly as given>", '
+    '"query": "<short generic grocery-app search query, no quantities and NO '
+    'brand names>", "brand": "<brand ONLY if the reel text clearly names one '
+    'for THIS ingredient, else empty>", "branded_query": "<brand + product if '
+    'brand set, else empty>", "pantry": <true for basic staples like salt, '
+    "water, sugar, plain cooking oil>}]}\n"
+    "Rules: one output per input ingredient, same order, none skipped. "
+    "query must be something you can buy on Blinkit/Zepto. Do NOT invent "
+    "brands; fix obvious speech-to-text mangling of brand names when "
+    "confident. Return ONLY the JSON object."
+)
+
+
+def _shopping_links_for(query: str) -> dict:
+    q = urllib.parse.quote_plus(query.strip())
+    qs = urllib.parse.quote(query.strip())
+    return {
+        "blinkit": "https://blinkit.com/s/?q=" + q,
+        "zepto": "https://www.zeptonow.com/search?query=" + q,
+        "instamart": "https://www.swiggy.com/instamart/search?custom_back=true&query=" + qs,
+        "flipkart": "https://www.flipkart.com/search?marketplace=HYPERLOCAL&q=" + q,
+        "bigbasket": "https://www.bigbasket.com/ps/?q=" + q,
+        "jiomart": "https://www.jiomart.com/search?q=" + q,
+        "amazon": "https://www.amazon.in/s?k=" + q,
+    }
+
+
+def _shopping_text(row: dict) -> str:
+    """Transcript + caption — captions often carry the cleanest recipe copy."""
+    try:
+        doc = json.loads(row.get("document_json") or "{}")
+    except Exception:
+        return ""
+    transcript = _norm(doc.get("transcript"))
+    caption = _norm(doc.get("caption"))
+    if caption:
+        return (transcript + "\n\nCAPTION:\n" + caption).strip()
+    return transcript
+
+
+def _extract_shopping_rows(card: dict, text: str) -> list[dict]:
+    """One gpt-4.1-mini call: ingredient strings -> shoppable queries + brands
+    -> per-app links. Returns [] on any failure so callers can retry later."""
+    from api_config import get_openai_client
+
+    ingredients = card.get("ingredients") or []
+    if not ingredients:
+        return []
+    prompt = (
+        f"Recipe: {card.get('title', '')}\n"
+        "Ingredient list:\n" + "\n".join(f"- {i}" for i in ingredients) + "\n\n"
+        "Reel text (may be garbled Hindi/Hinglish speech-to-text):\n"
+        + (text or "(no text)")[:4000] + "\n\n" + SHOPPING_PROMPT_RULES
+    )
+    try:
+        client = get_openai_client()
+        resp = client.chat.completions.create(
+            model=RECIPE_MODEL,
+            messages=[
+                {"role": "system", "content": "You turn recipe ingredients into clean grocery-app search queries."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content)
+    except Exception:
+        return []
+    rows = []
+    for ing in data.get("ingredients") or []:
+        display = _norm(ing.get("display"))
+        query = _norm(ing.get("query")) or display
+        brand = _norm(ing.get("brand"))
+        branded_query = _norm(ing.get("branded_query"))
+        rows.append({
+            "display": display,
+            "query": query,
+            "brand": brand,
+            "branded_query": branded_query,
+            "pantry": bool(ing.get("pantry")),
+            "links": _shopping_links_for(branded_query or query),
+            "exact": {},
+        })
+    return rows
+
+
+def recipe_shopping(user_id: str, reel_id: str) -> list[dict]:
+    """Cached shopping rows for one recipe, extracting on first request."""
+    with get_connection() as conn:
+        cached = conn.execute(
+            "SELECT recipe_json, shopping_json FROM reel_recipes "
+            "WHERE user_id=? AND reel_id=? AND is_recipe=1",
+            (user_id, reel_id),
+        ).fetchone()
+        if not cached:
+            return []
+        try:
+            shopping = json.loads(cached["shopping_json"] or "[]")
+        except Exception:
+            shopping = []
+        if shopping:
+            return shopping
+        try:
+            card = json.loads(cached["recipe_json"])
+        except Exception:
+            return []
+        row = _recipe_row(conn, user_id, reel_id)
+        shopping = _extract_shopping_rows(card, _shopping_text(row) if row else "")
+        if shopping:
+            conn.execute(
+                "UPDATE reel_recipes SET shopping_json=? WHERE user_id=? AND reel_id=?",
+                (json.dumps(shopping, ensure_ascii=False), user_id, reel_id),
+            )
+    return shopping

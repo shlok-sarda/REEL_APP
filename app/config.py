@@ -48,6 +48,12 @@ class Settings:
     collections_exclude: frozenset = frozenset(
         value.strip().lower() for value in os.getenv("COLLECTIONS_EXCLUDE", "").split(",") if value.strip()
     )
+    # Accounts that see the Recipes hub + ingredient buy links while the
+    # feature bakes (same rollout pattern as COLLECTIONS_ACCOUNTS). Admin
+    # accounts always qualify, so the founder needs no env var at all.
+    recipes_accounts: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("RECIPES_ACCOUNTS", "").split(",") if value.strip()
+    )
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

@@ -585,6 +585,11 @@ def ensure_background_progress(user_id: str | None = None) -> None:
     # Janitor duties: recover orphans, backfill missing jobs, start the worker.
     # Each step is isolated — this runs inside /jobs and /dashboard requests,
     # so a broken janitor must degrade to a log line, never a 500.
+    # QUEUE_JANITOR=off must silence THIS path too, not just the janitor
+    # thread — otherwise the SPA's /jobs polling re-enqueues and spawns a
+    # worker in local sandboxes, exactly what the flag promises not to do.
+    if os.getenv("QUEUE_JANITOR", "on").strip().lower() == "off":
+        return
     try:
         recover_orphaned_jobs()
     except Exception as exc:
