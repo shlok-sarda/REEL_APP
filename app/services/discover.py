@@ -213,24 +213,110 @@ def build_map_pins(user_id: str) -> dict:
     return {"pins": pins, "pending_places": pending}
 
 
+# v2: caption-aware gate + extraction. Bumping the version makes cached
+# NEGATIVE verdicts from older extractors eligible for one re-extraction
+# (positives are never re-paid): v1 judged on transcript alone, so every
+# music-only reel with the recipe in its caption was a permanent miss.
+RECIPE_EXTRACTOR_VERSION = "v2"
+
+# Recall-first candidacy signals. The gate's only job is to not MISS recipes
+# — precision is the extractor's job, and a gate false-positive costs one
+# cached gpt-4.1-mini call ever. Categories alone are unreliable (protein
+# recipes land under Fitness), so any cooking-shaped text also qualifies.
+_RECIPE_CATEGORY_RE = re.compile(
+    r"recipe|food|cook|snack|meal|drink|beverage|kitchen|baking|dessert|"
+    r"breakfast|lunch|dinner|protein|nutrition|diet"
+)
+# \b'd English/quantity signals. Deliberately no bare Hindi "banana/banate"
+# (the generic make-verb matches money-advice and creator vlogs, not cooking)
+# and no bare roast/steam/blend (comedy roasts, gaming, "blend of tradition").
+_RECIPE_TEXT_RE = re.compile(
+    r"\b\d+\s?(?:g|gm|gms|gram|grams|kg|ml|litre|liter|tsp|tbsp|cup|cups|scoop|scoops)\b"
+    r"|\b(?:recipe|ingredients?|marinate|marinade|saute|sauté|simmer|knead|whisk|"
+    r"batter|dough|garnish|drizzle|air.?fry|deep.?fry|pan.?fry|stir.?fry|"
+    r"pre.?heat|bake|roast(?:ed)? (?:in|until|for)|steam(?:ed)? (?:in|until|for)|"
+    r"boil(?:ed|ing)?|chopped|blend(?:ed)? (?:until|till|into)|mix well|"
+    r"cook(?:ing)? (?:on|for|until)|masala|chutney|gravy|curry|tadka|paneer)\b",
+    re.IGNORECASE,
+)
+# Devanagari terms carry no \b: matras/anusvara are non-word chars in
+# Python's re, so a trailing \b after them can never match (verified) —
+# whitespace/edge guards do the same job correctly.
+_RECIPE_HINDI_RE = re.compile(
+    r"(?:^|\s)(?:रेसिपी|सामग्री|विधि|बनाये|बनाएं|बनाते|बनाना)(?=\s|$|[:,.!?])"
+)
+
+
+def _recipe_texts(row: dict) -> dict:
+    """Transcript AND caption from the deep-search document, plus the item
+    fields that exist for every processed reel — the v1 gate read only the
+    transcript, which is empty for music-only reels and for reels whose
+    deep_search_documents row was never built."""
+    try:
+        doc = json.loads(row.get("document_json") or "{}")
+    except Exception:
+        doc = {}
+    return {
+        "transcript": _norm(doc.get("transcript")),
+        "caption": _norm(doc.get("caption")),
+        "title": _norm(row.get("item_name")),
+    }
+
+
+def _recipe_candidate_v2(row: dict) -> bool:
+    texts = _recipe_texts(row)
+    pool = " ".join(texts.values())
+    if len(pool) < 60:
+        return False
+    cat = ((row.get("primary_category") or "") + " " + (row.get("specific_category") or "")).lower()
+    if _RECIPE_CATEGORY_RE.search(cat):
+        return True
+    # No category vouching for it: demand TWO distinct lexical signals, so a
+    # stray "100 g" in a fitness macro reel or one cooking word in a vlog
+    # doesn't buy an extraction call by itself.
+    hits = {m.group(0).lower() for m in _RECIPE_TEXT_RE.finditer(pool)}
+    if _RECIPE_HINDI_RE.search(pool):
+        hits.add("hindi-recipe-term")
+    return len(hits) >= 2
+
+
+def _recipe_candidate_v1(row: dict) -> bool:
+    cat = ((row.get("primary_category") or "") + " " + (row.get("specific_category") or "")).lower()
+    return ("recipe" in cat or "food" in cat) and len(_transcript_of(row)) >= 120
+
+
+def _recipe_candidate(row: dict, wide: bool) -> bool:
+    # The wide gate ships to allowlisted accounts first; everyone else keeps
+    # v1 behavior (and v1 spend) until the founder promotes it. `wide` is
+    # recipes_enabled(user_id), resolved ONCE per request by callers — it
+    # hits the users table, so per-row lookups would be an N+1.
+    return _recipe_candidate_v2(row) if wide else _recipe_candidate_v1(row)
+
+
 def _extract_recipe_card(row: dict, transcript: str) -> dict | None:
     """One gpt-4.1-mini call; returns the card dict or None for not-a-recipe."""
     from api_config import get_openai_client
 
+    texts = _recipe_texts(row)
+    caption = texts["caption"]
     prompt = (
-        "You are given the transcript (and title) of a saved Instagram food reel.\n\n"
-        "Decide if this is an actual COOK-ALONG RECIPE (someone making a dish you "
-        "could follow). Restaurant recommendations, food reviews, 'best spot in "
-        "<city>' reels, and vlogs are NOT recipes.\n\n"
-        'If it is NOT a cook-along recipe, return exactly: {"is_recipe": false}\n\n'
+        "You are given the transcript and caption of a saved Instagram food reel.\n\n"
+        "Decide if this is an actual RECIPE someone could follow — a cook-along "
+        "voiceover, OR a recipe written in the caption / on-screen text (many "
+        "recipe reels are music-only with the full recipe in the caption). "
+        "Restaurant recommendations, food reviews, 'best spot in <city>' reels, "
+        "and vlogs are NOT recipes.\n\n"
+        'If it is NOT a recipe, return exactly: {"is_recipe": false}\n\n'
         "If it IS a recipe, return JSON:\n"
         '{"is_recipe": true, "title": "<short dish name>", "servings": "<or empty>", '
         '"total_time": "<or empty>", "ingredients": ["<with qty if stated>"], '
         '"steps": ["<imperative step>"]}\n\n'
-        "Rules: steps in cooking order, concise, derived only from the transcript. "
-        "Do not invent ingredients or quantities. 3-10 steps typical. "
-        "Return ONLY the JSON object.\n\n"
-        f"TITLE: {row['item_name']}\nTRANSCRIPT:\n{transcript[:4000]}"
+        "Rules: steps in cooking order, concise, derived only from the given "
+        "text (transcript may be garbled Hindi/Hinglish speech-to-text; the "
+        "caption is often cleaner — use both). Do not invent ingredients or "
+        "quantities. 3-10 steps typical. Return ONLY the JSON object.\n\n"
+        f"TITLE: {row['item_name']}\nTRANSCRIPT:\n{transcript[:3000]}\n\n"
+        f"CAPTION:\n{caption[:2500]}"
     )
     client = get_openai_client()
     resp = client.chat.completions.create(
@@ -279,26 +365,39 @@ def reel_recipe_status(user_id: str, reel_id: str) -> dict:
     extract on demand) | 'none' (not recipe material / confirmed not-a-recipe)."""
     with get_connection() as conn:
         cached = conn.execute(
-            "SELECT is_recipe, recipe_json, shopping_json FROM reel_recipes WHERE user_id=? AND reel_id=?",
+            "SELECT is_recipe, recipe_json, shopping_json, extractor_version "
+            "FROM reel_recipes WHERE user_id=? AND reel_id=?",
             (user_id, reel_id),
         ).fetchone()
-        if cached:
-            if cached["is_recipe"]:
-                try:
-                    card = json.loads(cached["recipe_json"])
-                except Exception:
-                    return {"status": "none"}
-                try:
-                    card["shopping"] = json.loads(cached["shopping_json"] or "[]")
-                except Exception:
-                    card["shopping"] = []
-                return {"status": "recipe", "card": card, **QCOMMERCE_GEO}
-            return {"status": "none"}
-        row = _recipe_row(conn, user_id, reel_id)
+        row = None
+        if cached is None or not cached["is_recipe"]:
+            row = _recipe_row(conn, user_id, reel_id)
+    if cached:
+        if cached["is_recipe"]:
+            try:
+                card = json.loads(cached["recipe_json"])
+            except Exception:
+                return {"status": "none"}
+            try:
+                card["shopping"] = json.loads(cached["shopping_json"] or "[]")
+            except Exception:
+                card["shopping"] = []
+            return {"status": "recipe", "card": card, **QCOMMERCE_GEO}
+        # A negative from an older extractor was judged on less text
+        # (v1 never saw the caption). One retry under the current version,
+        # allowlisted accounts only — never a repeat charge on the same
+        # version's verdict.
+        if (
+            row is not None
+            and (cached["extractor_version"] or "") != RECIPE_EXTRACTOR_VERSION
+            and recipes_enabled(user_id)
+            and _recipe_candidate_v2(row)
+        ):
+            return {"status": "candidate"}
+        return {"status": "none"}
     if not row:
         return {"status": "none"}
-    cat = (row["primary_category"] + " " + row["specific_category"]).lower()
-    if ("recipe" in cat or "food" in cat) and len(_transcript_of(row)) >= 120:
+    if _recipe_candidate(row, wide=recipes_enabled(user_id)):
         return {"status": "candidate"}
     return {"status": "none"}
 
@@ -326,10 +425,11 @@ def extract_reel_recipe(user_id: str, reel_id: str) -> dict:
         )
         conn.execute(
             "INSERT OR REPLACE INTO reel_recipes "
-            "(user_id, reel_id, is_recipe, recipe_json, shopping_json, created_at) VALUES (?,?,?,?,?,?)",
+            "(user_id, reel_id, is_recipe, recipe_json, shopping_json, extractor_version, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
             (user_id, reel_id, 1 if card else 0,
              json.dumps(card, ensure_ascii=False) if card else "",
-             json.dumps(shopping, ensure_ascii=False), _now()),
+             json.dumps(shopping, ensure_ascii=False), RECIPE_EXTRACTOR_VERSION, _now()),
         )
     if card:
         return {"status": "recipe", "card": {**card, "shopping": shopping}, **QCOMMERCE_GEO}
@@ -343,26 +443,48 @@ def build_recipes(user_id: str, allow_extraction: bool = True) -> dict:
     must not spend OpenAI credit)."""
     with get_connection() as conn:
         cached = {r["reel_id"]: r for r in conn.execute(
-            "SELECT reel_id, is_recipe, recipe_json FROM reel_recipes WHERE user_id=?",
+            "SELECT reel_id, is_recipe, recipe_json, extractor_version "
+            "FROM reel_recipes WHERE user_id=?",
             (user_id,))}
         new_calls = 0 if allow_extraction else MAX_NEW_RECIPES_PER_CALL
+        wide = recipes_enabled(user_id)  # once per request, not per row
+        failures = 0
         for row in _discover_rows(conn, user_id):
-            if row["reel_id"] in cached or new_calls >= MAX_NEW_RECIPES_PER_CALL:
-                continue
-            cat = (row["primary_category"] + " " + row["specific_category"]).lower()
-            transcript = _transcript_of(row)
-            if not (("recipe" in cat or "food" in cat) and len(transcript) >= 120):
+            if new_calls >= MAX_NEW_RECIPES_PER_CALL:
+                break
+            prior = cached.get(row["reel_id"])
+            if prior is not None:
+                # Positives are settled. Negatives get ONE retry per extractor
+                # version bump (v1 judged without the caption), allowlist only.
+                stale_negative = (
+                    not prior["is_recipe"]
+                    and (prior["extractor_version"] or "") != RECIPE_EXTRACTOR_VERSION
+                    and wide
+                    and _recipe_candidate_v2(row)
+                )
+                if not stale_negative:
+                    continue
+            elif not _recipe_candidate(row, wide):
                 continue
             try:
-                card = _extract_recipe_card(row, transcript)
+                card = _extract_recipe_card(row, _transcript_of(row))
             except Exception:
-                continue  # key/quota hiccup: retry on a later call
+                # Key/quota hiccup: retry on a later call — but during an
+                # outage every candidate would time out in sequence inside one
+                # request, so three consecutive failures end this pass.
+                failures += 1
+                if failures >= 3:
+                    break
+                continue
+            failures = 0
             new_calls += 1
             conn.execute(
                 "INSERT OR REPLACE INTO reel_recipes "
-                "(user_id, reel_id, is_recipe, recipe_json, created_at) VALUES (?,?,?,?,?)",
+                "(user_id, reel_id, is_recipe, recipe_json, extractor_version, created_at) "
+                "VALUES (?,?,?,?,?,?)",
                 (user_id, row["reel_id"], 1 if card else 0,
-                 json.dumps(card, ensure_ascii=False) if card else "", _now()),
+                 json.dumps(card, ensure_ascii=False) if card else "",
+                 RECIPE_EXTRACTOR_VERSION, _now()),
             )
         recipes = []
         for r in conn.execute(

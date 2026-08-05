@@ -374,8 +374,11 @@ FOLDER_MEMBERSHIP_EXTRA_COLUMNS = {
 
 # reel_recipes shipped with cards only; shopping_json adds per-ingredient
 # quick-commerce data ([{display, query, brand, pantry, links, exact}]).
+# extractor_version lets a version bump re-try old NEGATIVE verdicts once
+# (v1 judged on transcript alone and permanently missed caption-only recipes).
 REEL_RECIPES_EXTRA_COLUMNS = {
     "shopping_json": "TEXT NOT NULL DEFAULT '[]'",
+    "extractor_version": "TEXT NOT NULL DEFAULT ''",
 }
 
 USER_EXTRA_COLUMNS = {
