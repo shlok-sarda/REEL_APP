@@ -1005,6 +1005,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         else ""
     )
     auth_section = ""
+    top_auth = ""
     if user:
         instagram_connected = bool(user.get("instagram_user_id"))
         instagram_label = "Instagram connected" if instagram_connected else "Connect Instagram"
@@ -1060,6 +1061,12 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         """
     else:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
+        top_auth = """
+      <div class="auth-card top-auth">
+        <div id="googleButtonTop" class="google-button-shell"></div>
+        <p class="tiny auth-note">Free beta &middot; takes 2 minutes</p>
+      </div>
+        """
         auth_section = f"""
       <div class="auth-card">
         <div id="googleButton" class="google-button-shell"></div>
@@ -1163,6 +1170,14 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .brand-name { font-family:var(--serif); font-size:20px; }
     .sub { color:var(--muted); }
     .auth-note { margin:10px 0 0; text-align:center; }
+    .top-auth {
+      margin:18px 0 4px;
+      border-top:none;
+      padding-top:0;
+      gap:6px;
+      justify-items:center;
+    }
+    .top-auth .auth-note { margin:2px 0 0; }
     .setup-link { margin-top:10px; width:100%; }
     .setup-video { width:100%; border-radius:14px; background:#000; margin-top:10px; }
     .kicker {
@@ -1367,6 +1382,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       </div>
       <h1>Everything you saved. Finally findable.</h1>
       <p class="sub">Share reels to ClipNest and it sorts them into lists that fill themselves, and finds any reel the moment you search.</p>
+      __TOP_AUTH__
       <div class="demo-wrap">
         <video class="demo-video" autoplay muted loop playsinline controls preload="metadata" poster="/static/demo_poster.jpg">
           <source src="/static/demo.mp4" type="video/mp4" />
@@ -1426,15 +1442,29 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       return data;
     }
 
+    let googleInitDone = false;
     function mountGoogleButton() {
-      const target = document.getElementById('googleButton');
-      if (!target || !window.google || !window.google.accounts || !window.google.accounts.id) {
+      const targets = ['googleButtonTop', 'googleButton']
+        .map((id) => document.getElementById(id))
+        .filter((el) => el !== null);
+      if (!targets.length || !window.google || !window.google.accounts || !window.google.accounts.id) {
         return false;
       }
-      if (target.dataset.mounted === '1') {
+      const pending = targets.filter((el) => el.dataset.mounted !== '1');
+      if (!pending.length) {
         return true;
       }
-      target.dataset.mounted = '1';
+      if (googleInitDone) {
+        pending.forEach((el) => {
+          el.dataset.mounted = '1';
+          window.google.accounts.id.renderButton(
+            el,
+            { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
+          );
+        });
+        return true;
+      }
+      googleInitDone = true;
       window.google.accounts.id.initialize({
         client_id: __GOOGLE_CLIENT_ID__,
         callback: async (response) => {
@@ -1449,10 +1479,13 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           }
         }
       });
-      window.google.accounts.id.renderButton(
-        target,
-        { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
-      );
+      pending.forEach((el) => {
+        el.dataset.mounted = '1';
+        window.google.accounts.id.renderButton(
+          el,
+          { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
+        );
+      });
       return true;
     }
 
@@ -1597,7 +1630,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }
   </script>
 </body>
-</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id)).replace("__INSTAGRAM_DM_HREF__", repr(instagram_dm_href if user else "#"))
+</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__TOP_AUTH__", top_auth).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id)).replace("__INSTAGRAM_DM_HREF__", repr(instagram_dm_href if user else "#"))
 
 
 def build_web_app_html(user_id: str) -> str:
