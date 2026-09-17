@@ -1165,18 +1165,31 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 
     /* ---------- HERO ---------- */
     .hero { position:relative; overflow:hidden; padding:calc(34px + var(--safe-top)) 0 56px; isolation:isolate; }
-    .hero-media { position:absolute; inset:0; z-index:-2; }
-    .hero-video {
-      width:100%; height:100%; object-fit:cover;
-      opacity:0.22; filter:saturate(1.15);
-      transform:scale(1.14); transform-origin:50% 30%;
+    .hero-media { position:absolute; inset:0; z-index:-2; overflow:hidden; }
+    /* Two slow lights instead of footage. The screen recording behind the
+       headline was dimmed so far to keep text readable that it stopped reading
+       as a product and started reading as blotchy noise. This costs no bytes,
+       never blocks paint, and still moves. */
+    .glow { position:absolute; border-radius:50%; filter:blur(64px); will-change:transform; }
+    .glow-a {
+      width:86vw; height:86vw; left:-24vw; top:-38vw;
+      background:radial-gradient(circle, rgba(242,168,102,0.30) 0%, rgba(242,168,102,0) 70%);
+      animation:drift-a 19s ease-in-out infinite alternate;
     }
+    .glow-b {
+      width:66vw; height:66vw; right:-24vw; top:14vh;
+      background:radial-gradient(circle, rgba(238,127,47,0.20) 0%, rgba(238,127,47,0) 70%);
+      animation:drift-b 25s ease-in-out infinite alternate;
+    }
+    @keyframes drift-a { from { transform:translate3d(0,0,0) scale(1) } to { transform:translate3d(7vw,4vh,0) scale(1.12) } }
+    @keyframes drift-b { from { transform:translate3d(0,0,0) scale(1.08) } to { transform:translate3d(-6vw,6vh,0) scale(1) } }
     .hero-scrim {
       position:absolute; inset:0;
-      background:
-        radial-gradient(120% 70% at 50% 0%, rgba(242,168,102,0.12) 0%, rgba(10,10,11,0) 60%),
-        linear-gradient(180deg, rgba(10,10,11,0.72) 0%, rgba(10,10,11,0.86) 42%, var(--bg) 92%);
+      background:linear-gradient(180deg, rgba(10,10,11,0.30) 0%, rgba(10,10,11,0.55) 46%, var(--bg) 94%);
     }
+    .scroll-cue { margin-top:30px; display:flex; justify-content:center; }
+    .scroll-cue span { width:1px; height:44px; background:linear-gradient(180deg, rgba(242,168,102,0.8), rgba(242,168,102,0)); animation:cue 2.4s ease-in-out infinite; transform-origin:top; }
+    @keyframes cue { 0%,100% { transform:scaleY(0.35); opacity:0.35 } 50% { transform:scaleY(1); opacity:1 } }
     .hero-body { position:relative; }
     .brand { display:flex; align-items:center; gap:11px; margin-bottom:38px; }
     .brand-mark { width:38px; height:38px; border-radius:11px; }
@@ -1340,7 +1353,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior:auto; }
       .js .reveal, .js .reveal.in, .hero-body > * { opacity:1 !important; transform:none !important; animation:none !important; transition:none !important; }
-      .sm-caret { animation:none; }
+      .sm-caret, .glow, .scroll-cue span { animation:none; }
       .sm-hit { opacity:1; transform:none; }
     }
 
@@ -1348,7 +1361,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     @media (min-width:860px) {
       :root { --gut:48px; }
       .hero { padding:44px 0 92px; }
-      .hero-body { display:grid; grid-template-columns:1.05fr 0.95fr; grid-template-areas:"brand phone" "head phone" "lede phone" "cta phone"; align-items:center; column-gap:52px; }
+      .hero-body { display:grid; grid-template-columns:1.05fr 0.95fr; grid-template-areas:"brand phone" "head phone" "lede phone" "cta phone" "cue cue"; align-items:center; column-gap:52px; }
+      .scroll-cue { grid-area:cue; margin-top:44px; }
       .brand { grid-area:brand; margin-bottom:20px; }
       .display { grid-area:head; }
       .lede { grid-area:lede; font-size:1.13rem; }
@@ -1371,9 +1385,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 
     <section class="hero">
       <div class="hero-media" aria-hidden="true">
-        <video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="/static/hero_bg_poster.jpg">
-          <source src="/static/hero_bg.mp4" type="video/mp4" />
-        </video>
+        <div class="glow glow-a"></div>
+        <div class="glow glow-b"></div>
         <div class="hero-scrim"></div>
       </div>
       <div class="wrap hero-body">
@@ -1392,6 +1405,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           </div>
           <p class="phone-cap">A real search, in a real library.</p>
         </div>
+        <div class="scroll-cue" aria-hidden="true"><span></span></div>
       </div>
     </section>
 
@@ -1548,21 +1562,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         for (var j = 0; j < items.length; j++) { seen.observe(items[j]); }
       }
 
-      // Hero background drifts a little slower than the page.
-      var bg = document.querySelector('.hero-video');
-      if (bg && !calm) {
-        var ticking = false;
-        window.addEventListener('scroll', function () {
-          if (ticking) { return; }
-          ticking = true;
-          window.requestAnimationFrame(function () {
-            var y = Math.min(window.scrollY, 700);
-            bg.style.transform = 'scale(1.14) translateY(' + (y * 0.16) + 'px)';
-            ticking = false;
-          });
-        }, { passive: true });
-      }
-
       // Step 3: type a query, then land the results under it.
       var qEl = document.getElementById('smQuery');
       var hitsEl = document.getElementById('smHits');
@@ -1601,7 +1600,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       }
 
       // Autoplay gets refused often enough on mobile that it needs nudging.
-      var vids = document.querySelectorAll('.hero-video, .phone-video');
+      var vids = document.querySelectorAll('.phone-video');
       var kick = function () {
         for (var v = 0; v < vids.length; v++) {
           if (vids[v].paused) { vids[v].play().catch(function () {}); }
