@@ -324,6 +324,15 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS instagram_profile_cache (
+        igsid TEXT PRIMARY KEY,
+        username TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL DEFAULT '',
+        looked_up_at TEXT NOT NULL,
+        outcome TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS reel_recipes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,

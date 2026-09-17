@@ -11,6 +11,7 @@ from app.config import settings
 from app.db.database import get_connection
 from app.services.auth import complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
+from app.services.instagram_profile import resolve_instagram_username
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
@@ -72,7 +73,13 @@ def _iter_message_events(payload: Any):
             if isinstance(current.get("sender"), dict) and (
                 isinstance(current.get("message"), dict) or isinstance(current.get("postback"), dict)
             ):
-                yield current
+                # Skip echoes. When the app account sends a DM, Instagram
+                # delivers a copy back with the business account as `sender`,
+                # which previously logged as a stranger "not linked to any
+                # account" and made ordinary replies look like failed signups.
+                message = current.get("message")
+                if not (isinstance(message, dict) and message.get("is_echo")):
+                    yield current
             for value in current.values():
                 if isinstance(value, (dict, list)):
                     stack.append(value)
@@ -112,9 +119,22 @@ def _extract_link_code(message_event: dict) -> str:
 
 
 def _extract_sender(message_event: dict) -> tuple[str, str]:
+    """Sender id plus handle. Instagram sends only the id.
+
+    `sender.username` is read first because it costs nothing, but Instagram
+    does not populate it on messaging webhooks — so in practice the handle
+    always comes from the cached Graph lookup below. Without that, every
+    stored sender_username is an empty string and no row in the admin list
+    can be matched to a real person.
+    """
     sender = message_event.get("sender") or {}
     sender_id = str(sender.get("id") or "").strip()
     username = str(sender.get("username") or "").strip().lstrip("@")
+    if sender_id and not username:
+        try:
+            username = resolve_instagram_username(sender_id)
+        except Exception:
+            username = ""
     return sender_id, username
 
 

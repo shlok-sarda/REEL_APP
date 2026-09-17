@@ -27,6 +27,13 @@ class Settings:
     instagram_app_username: str = os.getenv("INSTAGRAM_APP_USERNAME", "").strip().lstrip("@")
     instagram_webhook_verify_token: str = os.getenv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "").strip()
     instagram_app_secret: str = os.getenv("INSTAGRAM_APP_SECRET", "").strip()
+    # Instagram user access token for the app account that receives the DMs.
+    # Needed to turn a webhook's Instagram-scoped sender id (IGSID) into a
+    # real @username — the webhook payload never carries one, so without this
+    # every linked user shows up nameless. Requires instagram_business_basic
+    # and instagram_business_manage_messages on the token.
+    instagram_access_token: str = os.getenv("INSTAGRAM_ACCESS_TOKEN", "").strip()
+    instagram_graph_version: str = os.getenv("INSTAGRAM_GRAPH_VERSION", "v25.0").strip()
     # Shareable demo login link (/demo-login/<token>). Off unless BOTH are set:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()
