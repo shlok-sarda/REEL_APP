@@ -1016,7 +1016,9 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
             if instagram_connected
             else "<p class=\"tiny\">Link Instagram once so every reel DM goes into the right library automatically.</p>"
         )
-        auth_section = f"""
+        # Signed in: the marketing argument is already won, so the hero carries
+        # the account card and the closing pitch collapses to nothing.
+        top_auth = f"""
       <div class="user-card">
         <div class="user-row">
           <div>
@@ -1043,13 +1045,13 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
             <button id="instagramModalClose" type="button" class="ghost-button small-ghost">Close</button>
           </div>
           <p class="tiny" style="margin-top:0;">DM this one-time code to @{instagram_app_username or 'yourapp'} on Instagram. After that, reels you share in that DM will go to this Google account.</p>
-          <div class="code-box" id="instagramCodeBox">Loading code…</div>
+          <div class="code-box" id="instagramCodeBox">Loading code&hellip;</div>
           <div class="action-grid" style="margin-top:8px;">
             <button id="openInstagramDmButton" type="button">Copy code + Open Instagram DM</button>
             <button id="copyInstagramCodeButton" type="button">Copy code</button>
           </div>
           <p class="tiny" id="instagramExpiryText"></p>
-          <p class="tiny" id="instagramStatusText">Waiting for your Instagram DM…</p>
+          <p class="tiny" id="instagramStatusText">Waiting for your Instagram DM&hellip;</p>
           <ol>
             <li>Tap <strong>Copy code + Open Instagram DM</strong>.</li>
             <li>Send the exact code once in the chat with <strong>@{instagram_app_username or 'yourapp'}</strong>.</li>
@@ -1061,27 +1063,29 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         """
     else:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
-        # Signing in means handing an unknown app a Google account and then
-        # DMing a code to a bot before anything useful happens. Give people a
-        # way to see the thing first, or the only measurable outcome stays zero.
+        # Looking costs nothing; signing in costs a Google account and a DM to a
+        # bot. So the demo leads and Google follows, in both CTA blocks. The
+        # gate is public_demo_ready() rather than a hardcoded link, because a
+        # dead CTA on traffic you paid for is worse than no CTA at all.
         demo_cta = (
-            '<a class="demo-cta" data-demo-cta href="/try">See it working &middot; no signup</a>'
+            '<a class="cta cta-primary" data-demo-cta href="/try">'
+            '<span>See it working</span><span class="cta-note">no signup</span></a>'
             if public_demo_ready()
             else ""
         )
         top_auth = f"""
-      <div class="auth-card top-auth">
-        <div id="googleButtonTop" class="google-button-shell"></div>
+      <div class="cta-stack">
         {demo_cta}
-        <p class="tiny auth-note">Free beta &middot; takes 2 minutes</p>
+        <div id="googleButtonTop" class="google-shell"></div>
+        <p class="cta-foot">Free beta &middot; setup takes 2 minutes</p>
       </div>
         """
         auth_section = f"""
-      <div class="auth-card">
-        <div id="googleButton" class="google-button-shell"></div>
-        <p class="tiny auth-note">Free beta &middot; 2 minute setup</p>
+      <div class="cta-stack cta-stack--end">
         {demo_cta}
-        <button id="setupVideoButton" type="button" class="ghost-button setup-link">&#9656; Watch the 40 second setup</button>
+        <div id="googleButton" class="google-shell"></div>
+        <p class="cta-foot">Free beta &middot; setup takes 2 minutes</p>
+        <button id="setupVideoButton" type="button" class="linkish">Watch the 40 second setup</button>
         {disabled_note}
       </div>
       <div id="setupModal" class="connect-modal hidden" aria-hidden="true">
@@ -1103,358 +1107,541 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>ClipNest</title>
+  <meta name="description" content="Share a reel to ClipNest and it files itself. Search what you remember, find it in a second." />
+  <meta name="theme-color" content="#0a0a0b" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <link rel="manifest" href="/static/manifest.json" />
   __GOOGLE_SCRIPT__
   <style>
-    /* Matches the in-app theme (app/ui_ux/clipnest_v1.py): near-black flat
-       background, #161619 cards, serif display headings, tan action color. */
+    /* Same identity as the app (app/ui_ux/clipnest_v1.py): near-black ground,
+       tan action colour, serif display. Everything below is that palette taken
+       up a level - a real type scale, a spacing rhythm, grain, and motion that
+       only ever moves on one axis. */
     :root {
       color-scheme: dark;
       --bg:#0a0a0b;
+      --bg-lift:#101012;
       --card:#161619;
       --soft:#1c1c20;
       --line:#232327;
+      --line-soft:rgba(255,255,255,0.07);
       --text:#f4f4f5;
-      --muted:#8e8e96;
+      --muted:#9a9aa2;
       --faint:#5c5c64;
       --tan:#f2a866;
-      --brand-grad:linear-gradient(135deg, #f9a660 0%, #ee7f2f 100%);
-      --serif:ui-serif, "New York", Georgia, "Times New Roman", serif;
-      --safe-top: env(safe-area-inset-top, 0px);
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --tan-deep:#ee7f2f;
+      --brand-grad:linear-gradient(135deg,#f9a660 0%,#ee7f2f 100%);
+      --serif:ui-serif,"New York",Georgia,"Times New Roman",serif;
+      --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+      --gut:22px;
+      --safe-top:env(safe-area-inset-top,0px);
+      --safe-bottom:env(safe-area-inset-bottom,0px);
+      --ease:cubic-bezier(0.16,1,0.3,1);
     }
-    * { box-sizing: border-box; }
-    html, body {
+    * { box-sizing:border-box; }
+    html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+    body {
       margin:0;
-      min-height:100%;
       background:var(--bg);
       color:var(--text);
-      font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      font-family:var(--sans);
+      font-size:16px;
+      line-height:1.5;
+      overflow-x:hidden;
+      -webkit-font-smoothing:antialiased;
     }
-    .shell {
-      width:min(680px, 100%);
-      min-height:100vh;
-      margin:0 auto;
-      padding: calc(28px + var(--safe-top)) 20px calc(36px + var(--safe-bottom));
-      display:grid;
-      gap:16px;
-      align-content:center;
+    img,video { max-width:100%; display:block; }
+    h1,h2,h3 { margin:0; font-family:var(--serif); font-weight:600; letter-spacing:-0.02em; line-height:1.02; }
+    p { margin:0; }
+
+    /* Film grain. Cheap, fixed, never intercepts a tap. */
+    .grain {
+      position:fixed; inset:0; z-index:60; pointer-events:none; opacity:0.045;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     }
-    .hero, .card {
-      border:1px solid var(--line);
-      border-radius:20px;
-      background:var(--card);
-      padding:22px 20px;
+
+    .wrap { width:min(1120px,100%); margin:0 auto; padding-left:var(--gut); padding-right:var(--gut); }
+
+    /* ---------- HERO ---------- */
+    .hero { position:relative; overflow:hidden; padding:calc(34px + var(--safe-top)) 0 56px; isolation:isolate; }
+    .hero-media { position:absolute; inset:0; z-index:-2; }
+    .hero-video {
+      width:100%; height:100%; object-fit:cover;
+      opacity:0.22; filter:saturate(1.15);
+      transform:scale(1.14); transform-origin:50% 30%;
     }
-    .hero-logo {
-      width:72px;
-      height:72px;
-      border-radius:18px;
-      display:block;
-      margin:0 0 16px;
+    .hero-scrim {
+      position:absolute; inset:0;
+      background:
+        radial-gradient(120% 70% at 50% 0%, rgba(242,168,102,0.12) 0%, rgba(10,10,11,0) 60%),
+        linear-gradient(180deg, rgba(10,10,11,0.72) 0%, rgba(10,10,11,0.86) 42%, var(--bg) 92%);
     }
-    .demo-wrap {
-      display:grid;
-      justify-items:center;
-      gap:8px;
-      margin:18px 0 6px;
+    .hero-body { position:relative; }
+    .brand { display:flex; align-items:center; gap:11px; margin-bottom:38px; }
+    .brand-mark { width:38px; height:38px; border-radius:11px; }
+    .brand-word { font-family:var(--serif); font-size:1.32rem; letter-spacing:-0.01em; }
+
+    .display { font-size:clamp(2.7rem,12.4vw,4.6rem); }
+    .display .accent {
+      background:var(--brand-grad); -webkit-background-clip:text; background-clip:text;
+      -webkit-text-fill-color:transparent; color:var(--tan);
     }
-    .demo-video {
-      width:min(300px, 82%);
-      aspect-ratio:9/16;
-      border-radius:18px;
-      border:1px solid var(--line);
-      background:#000;
-      object-fit:cover;
-      display:block;
+    .lede { margin-top:20px; max-width:34ch; color:var(--muted); font-size:1.06rem; line-height:1.58; }
+
+    /* ---------- CTAs ---------- */
+    .cta-stack { margin-top:30px; display:grid; gap:12px; max-width:420px; }
+    .cta {
+      display:flex; align-items:center; justify-content:center; gap:10px;
+      min-height:56px; padding:0 22px; border-radius:15px;
+      font-size:1.02rem; font-weight:600; text-decoration:none; border:1px solid transparent;
+      transition:transform .22s var(--ease), box-shadow .22s var(--ease), filter .22s var(--ease);
     }
-    .demo-caption {
-      margin:0;
-      font-size:12.5px;
-      color:var(--muted);
+    .cta-primary { background:var(--brand-grad); color:#1b1206; box-shadow:0 12px 34px -14px rgba(242,168,102,0.85); }
+    .cta-primary:active { transform:translateY(1px) scale(0.995); }
+    .cta-note { font-weight:500; opacity:0.62; font-size:0.88rem; }
+    .cta-note::before { content:"·"; margin-right:8px; }
+    .google-shell { min-height:44px; display:flex; justify-content:center; }
+    .google-shell > div { width:100% !important; }
+    .cta-foot { margin-top:2px; text-align:center; color:var(--faint); font-size:0.84rem; }
+    .linkish {
+      margin-top:4px; background:none; border:0; color:var(--muted);
+      font-family:var(--sans); font-size:0.9rem; text-decoration:underline;
+      text-underline-offset:3px; cursor:pointer; padding:8px;
     }
-    .brand-row { display:flex; align-items:center; gap:10px; margin:0 0 18px; }
-    .brand-row .hero-logo { width:44px; height:44px; margin:0; border-radius:12px; }
-    .brand-name { font-family:var(--serif); font-size:20px; }
-    .sub { color:var(--muted); }
-    .auth-note { margin:10px 0 0; text-align:center; }
-    .top-auth {
-      margin:18px 0 4px;
-      border-top:none;
-      padding-top:0;
-      gap:6px;
-      justify-items:center;
+    .linkish:hover { color:var(--text); }
+
+    /* ---------- PHONE ---------- */
+    .phone-wrap { margin-top:44px; display:grid; justify-items:center; gap:14px; }
+    .phone {
+      width:min(272px,66vw); aspect-ratio:720/1394;
+      border-radius:34px; padding:5px; background:#0e0e10;
+      border:1px solid rgba(255,255,255,0.11);
+      box-shadow:0 44px 90px -34px rgba(0,0,0,0.95), 0 0 0 1px rgba(0,0,0,0.6) inset;
+      overflow:hidden;
     }
-    .top-auth .auth-note { margin:2px 0 0; }
-    .setup-link { margin-top:10px; width:100%; }
-    .setup-video { width:100%; border-radius:14px; background:#000; margin-top:10px; }
-    .kicker {
-      margin:0 0 10px;
-      color:var(--tan);
-      font-size:.7rem;
-      font-weight:700;
-      letter-spacing:.12em;
-      text-transform:uppercase;
+    .phone-video { width:100%; height:100%; object-fit:cover; border-radius:29px; background:#000; }
+    .phone-cap { color:var(--faint); font-size:0.82rem; letter-spacing:0.02em; }
+
+    /* ---------- SHARED SECTION FURNITURE ---------- */
+    section { position:relative; }
+    .band { padding:66px 0; border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft); background:var(--bg-lift); }
+    .band-line { font-family:var(--serif); font-size:clamp(1.55rem,6.4vw,2.5rem); line-height:1.16; max-width:20ch; }
+    .band-line em { font-style:normal; color:var(--tan); }
+    .eyebrow { text-transform:uppercase; letter-spacing:0.16em; font-size:0.72rem; color:var(--faint); font-weight:600; }
+    .sec-h { font-size:clamp(1.95rem,8vw,3.05rem); margin-top:14px; max-width:16ch; }
+    .sec { padding:76px 0; }
+
+    /* ---------- STEPS ---------- */
+    .step-list { list-style:none; margin:46px 0 0; padding:0; display:grid; gap:56px; }
+    .step { display:grid; gap:14px; }
+    .step-n { font-family:var(--serif); font-size:0.95rem; color:var(--tan); letter-spacing:0.08em; }
+    .step h3 { font-size:1.62rem; }
+    .step p { color:var(--muted); max-width:38ch; line-height:1.6; }
+    .step-art { margin-top:8px; border-radius:18px; overflow:hidden; border:1px solid var(--line); background:var(--card); }
+    .step-art img { width:100%; }
+
+    /* share-sheet mock: built here rather than screenshotted, because the real
+       screen recording is full of other people's faces and handles. */
+    .ss { padding:18px 16px 20px; background:#141416; }
+    .ss-grab { width:38px; height:4px; border-radius:99px; background:#3a3a40; margin:0 auto 16px; }
+    .ss-search { height:40px; border-radius:11px; background:#202024; color:var(--faint); display:flex; align-items:center; padding:0 14px; font-size:0.9rem; }
+    .ss-grid { margin-top:18px; display:grid; grid-template-columns:repeat(3,1fr); gap:20px 10px; }
+    .ss-tile { display:grid; justify-items:center; gap:8px; }
+    .ss-av { width:62px; height:62px; border-radius:50%; background:#26262b; position:relative; overflow:hidden; }
+    .ss-av img { width:100%; height:100%; object-fit:cover; }
+    .ss-tile--on .ss-av { outline:2px solid var(--tan); outline-offset:2px; }
+    .ss-check {
+      position:absolute; right:-2px; bottom:-2px; width:20px; height:20px; border-radius:50%;
+      background:var(--tan); color:#1b1206; font-size:12px; font-weight:700;
+      display:flex; align-items:center; justify-content:center; border:2px solid #141416;
     }
-    h1 {
-      margin:0;
-      font-family:var(--serif);
-      font-weight:600;
-      font-size: clamp(1.9rem, 8vw, 2.7rem);
-      line-height:1.08;
-      letter-spacing:-.01em;
+    .ss-name { font-size:0.74rem; color:var(--muted); }
+    .ss-tile--ghost .ss-name { width:44px; height:7px; border-radius:99px; background:#26262b; }
+
+    /* live search mock */
+    .sm { padding:22px 16px 24px; background:#0f0f11; }
+    .sm-bar { height:46px; border-radius:13px; background:#1b1b1f; display:flex; align-items:center; gap:10px; padding:0 15px; border:1px solid var(--line); }
+    .sm-q { font-size:0.97rem; color:var(--text); }
+    .sm-caret { width:2px; height:18px; background:var(--tan); animation:blink 1s steps(2) infinite; }
+    @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+    .sm-hits { margin-top:16px; display:grid; gap:9px; }
+    .sm-hit {
+      display:flex; align-items:center; gap:11px; padding:11px 13px; border-radius:12px;
+      background:#161619; border:1px solid var(--line);
+      opacity:0; transform:translateY(9px); transition:opacity .5s var(--ease), transform .5s var(--ease);
     }
-    p {
-      color:var(--muted);
-      line-height:1.55;
-      margin:10px 0 0;
-      font-size:.95rem;
+    .sm-hit.on { opacity:1; transform:none; }
+    .sm-dot { width:30px; height:30px; border-radius:9px; background:var(--brand-grad); flex:none; }
+    .sm-t { font-size:0.9rem; font-weight:600; }
+    .sm-s { font-size:0.76rem; color:var(--faint); }
+
+    /* ---------- FACTS ---------- */
+    .facts { margin-top:40px; display:grid; gap:2px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
+    .fact { background:var(--card); padding:24px 20px; }
+    .fact h3 { font-size:1.16rem; margin-bottom:7px; font-family:var(--sans); letter-spacing:-0.01em; }
+    .fact p { color:var(--muted); font-size:0.95rem; line-height:1.58; }
+
+    /* ---------- TRUST ---------- */
+    .qa { margin:38px 0 0; display:grid; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:18px; overflow:hidden; }
+    .qa-row { background:var(--card); padding:22px 20px; }
+    .qa-q { font-weight:650; font-size:1.02rem; margin-bottom:7px; }
+    .qa-a { color:var(--muted); font-size:0.95rem; line-height:1.6; }
+
+    /* ---------- CLOSE ---------- */
+    .close { padding:80px 0 92px; text-align:center; }
+    .close .sec-h { margin:0 auto; max-width:14ch; }
+    .close .cta-stack { margin:32px auto 0; }
+    .close .lede { margin:16px auto 0; text-align:center; }
+    footer { padding:0 0 calc(40px + var(--safe-bottom)); text-align:center; color:var(--faint); font-size:0.8rem; }
+
+    /* ---------- SIGNED-IN CARD ---------- */
+    .user-card { margin-top:30px; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:22px 20px; display:grid; gap:14px; max-width:460px; }
+    .user-row { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .user-card h2 { font-size:1.4rem; }
+    .avatar { width:48px; height:48px; border-radius:50%; flex:none; }
+    .tiny { color:var(--muted); font-size:0.85rem; line-height:1.5; }
+    .tiny-label { text-transform:uppercase; letter-spacing:0.14em; font-size:0.68rem; color:var(--faint); }
+    .action-grid { display:grid; gap:10px; }
+    .primary-link, .secondary-link, .action-grid button {
+      display:flex; align-items:center; justify-content:center; min-height:50px; padding:0 18px;
+      border-radius:13px; font-size:0.98rem; font-weight:600; text-decoration:none; cursor:pointer;
+      font-family:var(--sans); border:1px solid var(--line);
     }
-    .form {
-      display:grid;
-      gap:12px;
-      margin-top:18px;
+    .primary-link { background:var(--brand-grad); color:#1b1206; border-color:transparent; }
+    .secondary-link, .action-grid button { background:var(--soft); color:var(--text); }
+    .ghost-button { background:none; border:0; color:var(--muted); font-family:var(--sans); font-size:0.88rem; cursor:pointer; text-decoration:underline; text-underline-offset:3px; padding:8px; }
+    .small-ghost { text-decoration:none; }
+
+    /* ---------- MODALS ---------- */
+    .connect-modal { position:fixed; inset:0; z-index:80; background:rgba(4,4,5,0.82); backdrop-filter:blur(7px); display:flex; align-items:flex-end; justify-content:center; padding:16px; }
+    .connect-modal.hidden { display:none; }
+    .connect-card { width:min(520px,100%); max-height:88vh; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:22px; padding:22px 20px calc(22px + var(--safe-bottom)); display:grid; gap:12px; }
+    .connect-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .kicker { text-transform:uppercase; letter-spacing:0.14em; font-size:0.68rem; color:var(--tan); }
+    .code-box { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1.3rem; letter-spacing:0.09em; background:var(--soft); border:1px solid var(--line); border-radius:13px; padding:15px; text-align:center; }
+    .connect-card ol { margin:0; padding-left:19px; color:var(--muted); font-size:0.88rem; line-height:1.65; }
+    .setup-video { width:100%; border-radius:14px; background:#000; }
+
+    /* ---------- MOTION ---------- */
+    /* Hidden only once the js class is on <html>. If the motion script never
+       runs - parse error, blocked script, ancient browser - every section
+       stays visible instead of the page ending at the hero. */
+    .js .reveal { opacity:0; transform:translateY(26px); }
+    .js .reveal.in { opacity:1; transform:none; transition:opacity .85s var(--ease), transform .85s var(--ease); }
+    .hero-body > * { animation:rise .95s var(--ease) both; }
+    .hero-body > *:nth-child(1) { animation-delay:.02s }
+    .hero-body > *:nth-child(2) { animation-delay:.10s }
+    .hero-body > *:nth-child(3) { animation-delay:.18s }
+    .hero-body > *:nth-child(4) { animation-delay:.26s }
+    .hero-body > *:nth-child(5) { animation-delay:.36s }
+    @keyframes rise { from { opacity:0; transform:translateY(30px) } to { opacity:1; transform:none } }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior:auto; }
+      .js .reveal, .js .reveal.in, .hero-body > * { opacity:1 !important; transform:none !important; animation:none !important; transition:none !important; }
+      .sm-caret { animation:none; }
+      .sm-hit { opacity:1; transform:none; }
     }
-    .auth-card, .user-card {
-      display:grid;
-      gap:14px;
-      margin-top:20px;
-      border-top:1px solid var(--line);
-      padding-top:18px;
-    }
-    .auth-card h2, .user-row h2 {
-      margin:0;
-      font-family:var(--serif);
-      font-weight:600;
-      font-size:1.35rem;
-    }
-    .user-row {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:14px;
-    }
-    .tiny-label {
-      margin:0 0 4px;
-      color:var(--tan);
-      font-size:.7rem;
-      font-weight:700;
-      letter-spacing:.1em;
-      text-transform:uppercase;
-    }
-    .avatar {
-      width:56px;
-      height:56px;
-      border-radius:50%;
-      border:1px solid var(--line);
-      object-fit:cover;
-    }
-    .action-grid {
-      display:grid;
-      gap:10px;
-    }
-    .google-button-shell {
-      min-height:46px;
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-    }
-    .google-fallback {
-      min-height:46px;
-      display:flex;
-      align-items:center;
-      padding:0 14px;
-      border-radius:16px;
-      border:1px dashed var(--line);
-      color:var(--muted);
-      font-size:.88rem;
-      line-height:1.35;
-    }
-    .primary-link,
-    .secondary-link {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      width:100%;
-      min-height:52px;
-      border-radius:26px;
-      border:1px solid var(--line);
-      background:var(--soft);
-      color:var(--text);
-      text-decoration:none;
-      font-size:.95rem;
-      font-weight:700;
-    }
-    .primary-link {
-      background:var(--brand-grad);
-      border:0;
-      color:#fff;
-    }
-    .ghost-button {
-      min-height:44px;
-      border-radius:22px;
-      border:1px solid var(--line);
-      background:transparent;
-      color:var(--muted);
-      font-size:.9rem;
-      font-weight:650;
-      cursor:pointer;
-    }
-    /* Deliberately outlined rather than filled: it should read as a real
-       second option next to Google sign-in without outranking it. */
-    .demo-cta {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      width:100%;
-      min-height:48px;
-      margin-top:2px;
-      border-radius:24px;
-      border:1px solid var(--tan);
-      background:transparent;
-      color:var(--tan);
-      text-decoration:none;
-      font-size:.93rem;
-      font-weight:700;
-    }
-    .demo-cta:active { filter:brightness(1.15); }
-    .small-ghost {
-      width:auto;
-      min-height:38px;
-      padding:0 14px;
-      font-size:.84rem;
-    }
-    input, button {
-      width:100%;
-      min-height:52px;
-      border-radius:26px;
-      border:1px solid var(--line);
-      background:var(--soft);
-      color:var(--text);
-      padding:0 16px;
-      font-size:.95rem;
-    }
-    button {
-      background:var(--brand-grad);
-      border:0;
-      color:#fff;
-      font-weight:700;
-      cursor:pointer;
-    }
-    button:active { filter:brightness(1.1); }
-    ol {
-      margin:14px 0 0;
-      padding-left:18px;
-      color:var(--muted);
-      line-height:1.7;
-      font-size:.92rem;
-    }
-    .tiny {
-      font-size:.82rem;
-      color:var(--faint);
-    }
-    .connect-modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(10, 10, 11, 0.78);
-      backdrop-filter: blur(10px);
-      display: grid;
-      place-items: center;
-      padding: 20px;
-      z-index: 50;
-    }
-    .connect-modal.hidden {
-      display: none;
-    }
-    .connect-card {
-      width: min(520px, 100%);
-      border: 1px solid var(--line);
-      border-radius: 20px;
-      background: var(--card);
-      padding: 18px;
-    }
-    .connect-head {
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      align-items:flex-start;
-      margin-bottom:12px;
-    }
-    .connect-head h3 { font-family:var(--serif); font-weight:600; font-size:1.15rem; }
-    .code-box {
-      width:100%;
-      min-height:60px;
-      border-radius:16px;
-      border:1px dashed rgba(242,140,56,.55);
-      background: rgba(242,140,56,.12);
-      display:grid;
-      place-items:center;
-      font-size:1.25rem;
-      font-weight:800;
-      letter-spacing:.1em;
-      color: var(--tan);
-      margin: 14px 0 8px;
-      padding: 10px 14px;
-      text-align:center;
+
+    /* ---------- DESKTOP ---------- */
+    @media (min-width:860px) {
+      :root { --gut:48px; }
+      .hero { padding:44px 0 92px; }
+      .hero-body { display:grid; grid-template-columns:1.05fr 0.95fr; grid-template-areas:"brand phone" "head phone" "lede phone" "cta phone"; align-items:center; column-gap:52px; }
+      .brand { grid-area:brand; margin-bottom:20px; }
+      .display { grid-area:head; }
+      .lede { grid-area:lede; font-size:1.13rem; }
+      .cta-stack { grid-area:cta; }
+      .user-card { grid-area:cta; }
+      .phone-wrap { grid-area:phone; margin-top:0; }
+      .phone { width:min(310px,100%); }
+      .step-list { grid-template-columns:repeat(3,1fr); gap:34px; }
+      .facts { grid-template-columns:repeat(2,1fr); }
+      .sec { padding:104px 0; }
+      .band { padding:88px 0; }
+      .band-line { max-width:24ch; }
     }
   </style>
 </head>
 <body>
-  <main class="shell">
-    <section class="hero">
-      <div class="brand-row">
-        <img class="hero-logo" src="/static/icon-192.png" alt="ClipNest" />
-        <span class="brand-name">ClipNest</span>
-      </div>
-      <h1>Everything you saved. Finally findable.</h1>
-      <p class="sub">Share reels to ClipNest and it sorts them into lists that fill themselves, and finds any reel the moment you search.</p>
-      __TOP_AUTH__
-      <div class="demo-wrap">
-        <video class="demo-video" autoplay muted loop playsinline controls preload="metadata" poster="/static/demo_poster.jpg">
-          <source src="/static/demo.mp4" type="video/mp4" />
-        </video>
-        <p class="demo-caption">40 seconds. This is the whole app.</p>
-      </div>
-      <script>
-        (function () {
-          var demoVideo = document.querySelector('.demo-video');
-          if (!demoVideo) { return; }
-          var kick = function () {
-            if (demoVideo.paused) { demoVideo.play().catch(function () {}); }
-          };
-          document.addEventListener('visibilitychange', kick);
-          window.addEventListener('touchstart', kick, { once: true });
-          window.addEventListener('click', kick, { once: true });
-          setTimeout(kick, 800);
-          setInterval(kick, 4000);
+  <script>document.documentElement.className += " js";</script>
+  <div class="grain" aria-hidden="true"></div>
+  <main>
 
-          document.addEventListener('DOMContentLoaded', function () {
-            var setupBtn = document.getElementById('setupVideoButton');
-            var setupModal = document.getElementById('setupModal');
-            var setupClose = document.getElementById('setupModalClose');
-            var setupVideo = document.getElementById('setupVideo');
-            if (setupBtn && setupModal) {
-              setupBtn.addEventListener('click', function () {
-                setupModal.classList.remove('hidden');
-                setupModal.setAttribute('aria-hidden', 'false');
-                if (setupVideo) { setupVideo.play().catch(function () {}); }
-              });
-            }
-            if (setupClose && setupModal) {
-              setupClose.addEventListener('click', function () {
-                setupModal.classList.add('hidden');
-                setupModal.setAttribute('aria-hidden', 'true');
-                if (setupVideo) { setupVideo.pause(); }
-              });
-            }
-          });
-        })();
-      </script>
-      __AUTH_SECTION__
+    <section class="hero">
+      <div class="hero-media" aria-hidden="true">
+        <video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="/static/hero_bg_poster.jpg">
+          <source src="/static/hero_bg.mp4" type="video/mp4" />
+        </video>
+        <div class="hero-scrim"></div>
+      </div>
+      <div class="wrap hero-body">
+        <div class="brand">
+          <img class="brand-mark" src="/static/icon-192.png" alt="" />
+          <span class="brand-word">ClipNest</span>
+        </div>
+        <h1 class="display">Everything you saved.<br /><span class="accent">Finally findable.</span></h1>
+        <p class="lede">Send a reel to ClipNest in a DM. It watches the video, files it into a collection that builds itself, and hands it back the second you ask.</p>
+        __TOP_AUTH__
+        <div class="phone-wrap">
+          <div class="phone">
+            <video class="phone-video" autoplay muted loop playsinline preload="metadata" poster="/static/hero_phone_poster.jpg">
+              <source src="/static/hero_phone.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <p class="phone-cap">A real search, in a real library.</p>
+        </div>
+      </div>
     </section>
+
+    <section class="band">
+      <div class="wrap">
+        <p class="band-line reveal">Your saved tab kept <em>every single one</em>. It just cannot tell you <em>which</em>.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <p class="eyebrow reveal">How it works</p>
+        <h2 class="sec-h reveal">Three things, then you stop thinking about it.</h2>
+        <ol class="step-list">
+
+          <li class="step reveal">
+            <span class="step-n">01</span>
+            <h3>Share it</h3>
+            <p>Hit share on any reel and send it to ClipNest, the same way you send one to a friend. That is the entire habit.</p>
+            <div class="step-art">
+              <div class="ss">
+                <div class="ss-grab"></div>
+                <div class="ss-search">Search</div>
+                <div class="ss-grid">
+                  <div class="ss-tile ss-tile--on">
+                    <div class="ss-av"><img src="/static/icon-192.png" alt="" /><span class="ss-check">&check;</span></div>
+                    <span class="ss-name">clipnest.in</span>
+                  </div>
+                  <div class="ss-tile ss-tile--ghost"><div class="ss-av"></div><span class="ss-name"></span></div>
+                  <div class="ss-tile ss-tile--ghost"><div class="ss-av"></div><span class="ss-name"></span></div>
+                  <div class="ss-tile ss-tile--ghost"><div class="ss-av"></div><span class="ss-name"></span></div>
+                  <div class="ss-tile ss-tile--ghost"><div class="ss-av"></div><span class="ss-name"></span></div>
+                  <div class="ss-tile ss-tile--ghost"><div class="ss-av"></div><span class="ss-name"></span></div>
+                </div>
+              </div>
+            </div>
+          </li>
+
+          <li class="step reveal">
+            <span class="step-n">02</span>
+            <h3>It files itself</h3>
+            <p>ClipNest watches the video and reads what is on screen, then drops it into a collection. You never name a folder or drag anything.</p>
+            <div class="step-art">
+              <img src="/static/step_sorted.jpg" alt="Collections in ClipNest, each one built automatically" loading="lazy" />
+            </div>
+          </li>
+
+          <li class="step reveal">
+            <span class="step-n">03</span>
+            <h3>Ask for it later</h3>
+            <p>Search the way you actually remember things. Not the caption, not the account name, just the thing that was in it.</p>
+            <div class="step-art">
+              <div class="sm">
+                <div class="sm-bar">
+                  <span class="sm-q" id="smQuery"></span><span class="sm-caret"></span>
+                </div>
+                <div class="sm-hits" id="smHits">
+                  <div class="sm-hit"><span class="sm-dot"></span><span><span class="sm-t">Green Mama Cafe</span><br /><span class="sm-s">Food &amp; Dining &middot; Cafes in Varanasi</span></span></div>
+                  <div class="sm-hit"><span class="sm-dot"></span><span><span class="sm-t">The Hanging Cafe</span><br /><span class="sm-s">Restaurants in Bali &middot; Food &amp; Local Eats</span></span></div>
+                  <div class="sm-hit"><span class="sm-dot"></span><span><span class="sm-t">Baaree Goa</span><br /><span class="sm-s">Restaurants in Goa &middot; Food &amp; Local Eats</span></span></div>
+                </div>
+              </div>
+            </div>
+          </li>
+
+        </ol>
+      </div>
+    </section>
+
+    <section class="sec" style="background:var(--bg-lift); border-top:1px solid var(--line-soft); border-bottom:1px solid var(--line-soft);">
+      <div class="wrap">
+        <p class="eyebrow reveal">Under it</p>
+        <h2 class="sec-h reveal">It reads the reel, not the caption.</h2>
+        <div class="facts">
+          <div class="fact reveal">
+            <h3>Watches the whole thing</h3>
+            <p>Speech, on-screen text and what is actually in frame. A reel with no caption is still findable.</p>
+          </div>
+          <div class="fact reveal">
+            <h3>Collections that build themselves</h3>
+            <p>Groups appear as your library grows. Nothing to set up, no rules to write, no tagging.</p>
+          </div>
+          <div class="fact reveal">
+            <h3>Search by memory</h3>
+            <p>Half-remembered is enough. Describe the place, the dish or the idea and the reel comes back.</p>
+          </div>
+          <div class="fact reveal">
+            <h3>Keeps the useful parts</h3>
+            <p>Where it was, what was in it, and the recipe or product when the reel had one.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <p class="eyebrow reveal">Straight answers</p>
+        <h2 class="sec-h reveal">Before you hand over a Google account.</h2>
+        <dl class="qa">
+          <div class="qa-row reveal">
+            <div class="qa-q">Who is behind this?</div>
+            <div class="qa-a">One person. I am Shlok, I am 18, and I build ClipNest on my own from India. If something breaks, you are talking to me, not a support queue.</div>
+          </div>
+          <div class="qa-row reveal">
+            <div class="qa-q">What happens to the reels I send?</div>
+            <div class="qa-a">They are processed so they can be searched, which means reading the captions and what appears on screen. They sit in your account, every request checks that the account is yours, and you can delete any of them whenever you want.</div>
+          </div>
+          <div class="qa-row reveal">
+            <div class="qa-q">Why does it need Instagram?</div>
+            <div class="qa-a">Sharing to a DM is the only way to get a reel out of Instagram without you copying links by hand. You link once with a one-time code, then it is just the share button.</div>
+          </div>
+          <div class="qa-row reveal">
+            <div class="qa-q">What does it cost?</div>
+            <div class="qa-a">Nothing right now. It is a free beta while it is still being built, and you will not be charged without being asked first.</div>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="close">
+      <div class="wrap">
+        <h2 class="sec-h reveal">Start with one reel.</h2>
+        <p class="lede reveal">Look around the demo first if you would rather not sign in yet.</p>
+        __AUTH_SECTION__
+      </div>
+    </section>
+
+    <footer><div class="wrap">ClipNest &middot; made in India</div></footer>
+
   </main>
+  <script>
+    // Motion. All of it is transform/opacity only, all of it is skipped when
+    // the visitor has asked for reduced motion, and none of it gates content:
+    // if this script never runs, every section is already readable.
+    (function () {
+      var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // Reveal on scroll.
+      var items = document.querySelectorAll('.reveal');
+      if (calm || !('IntersectionObserver' in window)) {
+        for (var i = 0; i < items.length; i++) { items[i].classList.add('in'); }
+      } else {
+        var seen = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) { return; }
+            var el = entry.target;
+            var sibs = el.parentNode ? el.parentNode.querySelectorAll(':scope > .reveal') : [];
+            var idx = Array.prototype.indexOf.call(sibs, el);
+            el.style.transitionDelay = (idx > 0 ? Math.min(idx, 4) * 90 : 0) + 'ms';
+            el.classList.add('in');
+            seen.unobserve(el);
+          });
+        }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+        for (var j = 0; j < items.length; j++) { seen.observe(items[j]); }
+      }
+
+      // Hero background drifts a little slower than the page.
+      var bg = document.querySelector('.hero-video');
+      if (bg && !calm) {
+        var ticking = false;
+        window.addEventListener('scroll', function () {
+          if (ticking) { return; }
+          ticking = true;
+          window.requestAnimationFrame(function () {
+            var y = Math.min(window.scrollY, 700);
+            bg.style.transform = 'scale(1.14) translateY(' + (y * 0.16) + 'px)';
+            ticking = false;
+          });
+        }, { passive: true });
+      }
+
+      // Step 3: type a query, then land the results under it.
+      var qEl = document.getElementById('smQuery');
+      var hitsEl = document.getElementById('smHits');
+      if (qEl && hitsEl) {
+        var hits = hitsEl.querySelectorAll('.sm-hit');
+        var phrase = 'that cafe in goa';
+        if (calm) {
+          qEl.textContent = phrase;
+          for (var h = 0; h < hits.length; h++) { hits[h].classList.add('on'); }
+        } else {
+          var started = false;
+          var run = function () {
+            if (started) { return; }
+            started = true;
+            var n = 0;
+            var tick = setInterval(function () {
+              qEl.textContent = phrase.slice(0, n);
+              n = n + 1;
+              if (n > phrase.length) {
+                clearInterval(tick);
+                for (var k = 0; k < hits.length; k++) {
+                  (function (el, delay) {
+                    setTimeout(function () { el.classList.add('on'); }, delay);
+                  })(hits[k], 160 + k * 140);
+                }
+              }
+            }, 62);
+          };
+          if ('IntersectionObserver' in window) {
+            var typeWatch = new IntersectionObserver(function (entries) {
+              entries.forEach(function (entry) { if (entry.isIntersecting) { run(); typeWatch.disconnect(); } });
+            }, { threshold: 0.4 });
+            typeWatch.observe(hitsEl);
+          } else { run(); }
+        }
+      }
+
+      // Autoplay gets refused often enough on mobile that it needs nudging.
+      var vids = document.querySelectorAll('.hero-video, .phone-video');
+      var kick = function () {
+        for (var v = 0; v < vids.length; v++) {
+          if (vids[v].paused) { vids[v].play().catch(function () {}); }
+        }
+      };
+      document.addEventListener('visibilitychange', kick);
+      window.addEventListener('touchstart', kick, { once: true, passive: true });
+      window.addEventListener('click', kick, { once: true });
+      setTimeout(kick, 700);
+      setInterval(kick, 5000);
+
+      // Setup video modal.
+      var setupBtn = document.getElementById('setupVideoButton');
+      var setupModal = document.getElementById('setupModal');
+      var setupClose = document.getElementById('setupModalClose');
+      var setupVideo = document.getElementById('setupVideo');
+      if (setupBtn && setupModal) {
+        setupBtn.addEventListener('click', function () {
+          setupModal.classList.remove('hidden');
+          setupModal.setAttribute('aria-hidden', 'false');
+          if (setupVideo) { setupVideo.play().catch(function () {}); }
+        });
+      }
+      if (setupClose && setupModal) {
+        setupClose.addEventListener('click', function () {
+          setupModal.classList.add('hidden');
+          setupModal.setAttribute('aria-hidden', 'true');
+          if (setupVideo) { setupVideo.pause(); }
+        });
+      }
+      if (setupModal) {
+        setupModal.addEventListener('click', function (ev) {
+          if (ev.target !== setupModal) { return; }
+          setupModal.classList.add('hidden');
+          setupModal.setAttribute('aria-hidden', 'true');
+          if (setupVideo) { setupVideo.pause(); }
+        });
+      }
+    })();
+  </script>
   <script>
     // Funnel counters. Three numbers, first-party, no third-party script:
     // how many arrived, how many opened the demo, how many signed up. Without

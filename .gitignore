@@ -30,3 +30,4 @@ technology_reels_*
 # Local models / experiments not needed for deployment
 *.pkl
 
+.claude/launch.json
