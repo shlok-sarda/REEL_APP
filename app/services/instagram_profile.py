@@ -248,3 +248,117 @@ def backfill_webhook_event_usernames(limit: int = 200) -> dict:
         except Exception:
             continue
     return {"ok": True, "senders": mapping, "rows_updated": updated}
+
+
+def whois(query: str) -> dict:
+    """Everything the database knows about one linked account.
+
+    Answers "who actually DM'd me?" for a user whose webhook rows aged out of
+    the 200-row log long ago. The IGSID is stored permanently on the users row
+    and in the link token they redeemed, so identity survives even when the
+    event log does not — which is the whole reason this function exists rather
+    than another query against instagram_webhook_events.
+    """
+    needle = (query or "").strip().lower()
+    if not needle:
+        return {"ok": False, "reason": "empty query"}
+
+    like = f"%{needle}%"
+    try:
+        with get_connection() as connection:
+            user = connection.execute(
+                """
+                SELECT id, display_name, preferred_name, email, created_at, last_login_at,
+                       instagram_user_id, instagram_username
+                  FROM users
+                 WHERE LOWER(email) = ?
+                    OR LOWER(email) LIKE ?
+                    OR LOWER(display_name) LIKE ?
+                    OR LOWER(preferred_name) LIKE ?
+                    OR instagram_user_id = ?
+                 ORDER BY (LOWER(email) = ?) DESC, created_at DESC
+                 LIMIT 1
+                """,
+                (needle, like, like, like, needle, needle),
+            ).fetchone()
+            if not user:
+                return {"ok": False, "reason": f"no user matched {query!r}"}
+            user = dict(user)
+
+            tokens = [
+                dict(r)
+                for r in connection.execute(
+                    """
+                    SELECT code, created_at, expires_at, used_at, instagram_user_id
+                      FROM instagram_link_tokens
+                     WHERE user_id = ?
+                     ORDER BY created_at DESC
+                    """,
+                    (user["id"],),
+                ).fetchall()
+            ]
+            reels = [
+                dict(r)
+                for r in connection.execute(
+                    """
+                    SELECT id, url, shortcode, received_at, status, source
+                      FROM reels
+                     WHERE user_id = ?
+                     ORDER BY received_at ASC
+                    """,
+                    (user["id"],),
+                ).fetchall()
+            ]
+            events = [
+                dict(r)
+                for r in connection.execute(
+                    """
+                    SELECT received_at, kind, outcome, detail
+                      FROM instagram_webhook_events
+                     WHERE sender_id = ?
+                     ORDER BY received_at DESC
+                     LIMIT 25
+                    """,
+                    (user["instagram_user_id"] or "\x00",),
+                ).fetchall()
+            ]
+    except Exception as exc:
+        return {"ok": False, "reason": f"query failed: {exc}"}
+
+    igsid = (user["instagram_user_id"] or "").strip()
+    username = (user["instagram_username"] or "").strip()
+    lookup_note = ""
+    if igsid and not username:
+        if profile_lookup_enabled():
+            username = resolve_instagram_username(igsid)
+            if not username:
+                cached = _read_cache(igsid) or {}
+                lookup_note = cached.get("outcome", "") or "lookup returned no username"
+        else:
+            lookup_note = "INSTAGRAM_ACCESS_TOKEN is not set, so the handle cannot be resolved yet"
+
+    # The code they DM'd is searchable text inside the Instagram thread, which
+    # is a way to find the conversation without any API access at all.
+    used_codes = [t["code"] for t in tokens if (t.get("used_at") or "").strip()]
+
+    return {
+        "ok": True,
+        "user": {
+            "id": user["id"],
+            "name": user["preferred_name"] or user["display_name"],
+            "email": user["email"],
+            "signed_up": user["created_at"],
+            "last_google_login": user["last_login_at"],
+        },
+        "instagram": {
+            "igsid": igsid,
+            "username": username,
+            "profile_url": f"https://www.instagram.com/{username}/" if username else "",
+            "lookup_note": lookup_note,
+        },
+        "link_codes_redeemed": used_codes,
+        "search_your_dms_for": used_codes[0] if used_codes else "",
+        "reel_count": len(reels),
+        "reels": reels,
+        "retained_webhook_rows": events,
+    }

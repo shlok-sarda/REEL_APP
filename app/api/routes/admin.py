@@ -6,6 +6,7 @@ from app.services.instagram_profile import (
     backfill_webhook_event_usernames,
     profile_lookup_enabled,
     resolve_instagram_username,
+    whois,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -62,3 +63,17 @@ def admin_instagram_lookup(request: Request, igsid: str, force: bool = Query(def
         "resolved": bool(username),
         "profile_url": f"https://www.instagram.com/{username}/" if username else "",
     }
+
+
+@router.get("/instagram/whois")
+def admin_instagram_whois(request: Request, q: str = Query(..., min_length=2)):
+    """Everything known about one account, found by email, name, or IGSID.
+
+    Works for users whose webhook rows expired long ago: the IGSID lives on
+    the users row and on the link token they redeemed, so identity outlives
+    the 200-row event log. If a token is configured the handle is resolved on
+    the spot; if not, the redeemed link code is returned, which is plain text
+    inside the Instagram thread and can be searched for by hand.
+    """
+    require_admin(request)
+    return whois(q)
