@@ -72,8 +72,9 @@ def admin_instagram_whois(request: Request, q: str = Query(..., min_length=2)):
     Works for users whose webhook rows expired long ago: the IGSID lives on
     the users row and on the link token they redeemed, so identity outlives
     the 200-row event log. If a token is configured the handle is resolved on
-    the spot; if not, the redeemed link code is returned, which is plain text
-    inside the Instagram thread and can be searched for by hand.
+    the spot; if not, the redeemed link code and its exact redemption time are
+    returned, which locate the thread by date in an inbox that cannot be
+    searched by message text.
     """
     require_admin(request)
     return whois(q)

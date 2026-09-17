@@ -337,8 +337,10 @@ def whois(query: str) -> dict:
         else:
             lookup_note = "INSTAGRAM_ACCESS_TOKEN is not set, so the handle cannot be resolved yet"
 
-    # The code they DM'd is searchable text inside the Instagram thread, which
-    # is a way to find the conversation without any API access at all.
+    # The code they DM'd pins the conversation to an exact minute. Instagram's
+    # inbox search matches names only, never message text, so this is not a
+    # search term -- it is a timestamp to scroll to, or a string to grep in a
+    # "Download your information" export.
     used_codes = [t["code"] for t in tokens if (t.get("used_at") or "").strip()]
 
     return {
