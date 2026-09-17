@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.schemas import GoogleLoginRequest, InstagramLinkStartResponse, ProfileNameRequest, SessionResponse, TelegramLinkCompleteRequest, UserProfile
+from app.services.events import record_landing_event
 from app.services.auth import (
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
@@ -12,7 +13,9 @@ from app.services.auth import (
     complete_telegram_link,
     create_login_csrf,
     current_user,
+    get_user_by_google_sub,
     login_or_create_google_user,
+    normalize,
     set_preferred_name,
     user_is_admin,
     verify_google_credential,
@@ -59,7 +62,13 @@ def google_login(payload: GoogleLoginRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid login session. Please refresh and try again.")
 
     token_payload = verify_google_credential(payload.credential)
+    # Checked before the call, because login_or_create_google_user upserts and
+    # cannot tell us afterwards whether this was a new account or a return
+    # visit. Only the first one is a signup.
+    is_new_user = get_user_by_google_sub(normalize(token_payload.get("sub"))) is None
     user = login_or_create_google_user(token_payload)
+    if is_new_user:
+        record_landing_event("signup", visitor=payload.visitor)
     request.session[SESSION_USER_KEY] = user["id"]
     request.session[SESSION_CSRF_KEY] = create_login_csrf(request)
     return _session_payload(request)

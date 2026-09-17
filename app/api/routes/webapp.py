@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.config import settings
-from app.services.auth import create_login_csrf, current_user
+from app.services.auth import create_login_csrf, current_user, public_demo_ready
 from app.services.library import is_demo_user
 from app.ui_ux.clipnest_v1 import build_clipnest_v1_html
 from app.ui_ux.folders_page import build_folders_html
@@ -1061,9 +1061,18 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         """
     else:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
-        top_auth = """
+        # Signing in means handing an unknown app a Google account and then
+        # DMing a code to a bot before anything useful happens. Give people a
+        # way to see the thing first, or the only measurable outcome stays zero.
+        demo_cta = (
+            '<a class="demo-cta" data-demo-cta href="/try">See it working &middot; no signup</a>'
+            if public_demo_ready()
+            else ""
+        )
+        top_auth = f"""
       <div class="auth-card top-auth">
         <div id="googleButtonTop" class="google-button-shell"></div>
+        {demo_cta}
         <p class="tiny auth-note">Free beta &middot; takes 2 minutes</p>
       </div>
         """
@@ -1071,6 +1080,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       <div class="auth-card">
         <div id="googleButton" class="google-button-shell"></div>
         <p class="tiny auth-note">Free beta &middot; 2 minute setup</p>
+        {demo_cta}
         <button id="setupVideoButton" type="button" class="ghost-button setup-link">&#9656; Watch the 40 second setup</button>
         {disabled_note}
       </div>
@@ -1292,6 +1302,24 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       font-weight:650;
       cursor:pointer;
     }
+    /* Deliberately outlined rather than filled: it should read as a real
+       second option next to Google sign-in without outranking it. */
+    .demo-cta {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      min-height:48px;
+      margin-top:2px;
+      border-radius:24px;
+      border:1px solid var(--tan);
+      background:transparent;
+      color:var(--tan);
+      text-decoration:none;
+      font-size:.93rem;
+      font-weight:700;
+    }
+    .demo-cta:active { filter:brightness(1.15); }
     .small-ghost {
       width:auto;
       min-height:38px;
@@ -1428,6 +1456,65 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     </section>
   </main>
   <script>
+    // Funnel counters. Three numbers, first-party, no third-party script:
+    // how many arrived, how many opened the demo, how many signed up. Without
+    // the middle one a traffic test can only ever report another flat zero.
+    (function () {
+      // Only logged-out visitors are part of the acquisition funnel. This
+      // element exists solely in the signed-out render, so it gates the rest.
+      if (!document.getElementById('googleButtonTop')) { return; }
+
+      var KEY = 'cn_visitor';
+      var visitor = '';
+      try {
+        visitor = localStorage.getItem(KEY) || '';
+        if (!visitor) {
+          visitor = (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+          localStorage.setItem(KEY, visitor);
+        }
+      } catch (err) {
+        // Private mode, or storage blocked. Counting still works, it just
+        // cannot dedupe repeat visits from this browser.
+        visitor = '';
+      }
+
+      var source = '';
+      try {
+        source = new URLSearchParams(window.location.search).get('s') || '';
+      } catch (err) { source = ''; }
+
+      function track(name) {
+        var body = JSON.stringify({ event: name, visitor: visitor, source: source });
+        // sendBeacon so demo_click survives the navigation it triggers.
+        try {
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon('/events/landing', new Blob([body], { type: 'application/json' }));
+            return;
+          }
+        } catch (err) { /* fall through to fetch */ }
+        try {
+          fetch('/events/landing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body,
+            keepalive: true
+          }).catch(function () {});
+        } catch (err) { /* counting is never worth an error */ }
+      }
+
+      window.__cnVisitor = visitor;
+      track('landing_view');
+
+      document.addEventListener('click', function (ev) {
+        var hit = ev.target && ev.target.closest
+          ? ev.target.closest('[data-demo-cta]')
+          : null;
+        if (hit) { track('demo_click'); }
+      }, true);
+    })();
+
     const LOGIN_CSRF = __CSRF_TOKEN__;
     async function postJson(url, payload) {
       const response = await fetch(url, {
@@ -1471,7 +1558,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           try {
             await postJson('/auth/google', {
               credential: response.credential,
-              csrf_token: LOGIN_CSRF
+              csrf_token: LOGIN_CSRF,
+              visitor: window.__cnVisitor || ''
             });
             window.location.reload();
           } catch (error) {
@@ -3225,6 +3313,37 @@ def dev_login(request: Request, user_id: str = "default"):
     if not get_user_by_id(user_id):
         return RedirectResponse(url="/", status_code=303)
     request.session[SESSION_USER_KEY] = user_id
+    return RedirectResponse(url="/app", status_code=303)
+
+
+@router.get("/try")
+def public_demo(request: Request):
+    """Token-free demo for cold traffic, opened from the landing page.
+
+    Same curated account as /demo-login, with two differences that matter once
+    strangers can reach it: it needs no secret, so linking it publicly does not
+    burn DEMO_ACCESS_TOKEN as a kill switch, and it marks the session
+    read-only so one visitor's edits are not the next visitor's first
+    impression. Turn it off with DEMO_PUBLIC without touching shared links.
+    """
+    from app.services.auth import (
+        DEMO_LINK_SESSION_KEY,
+        DEMO_PUBLIC_SESSION_KEY,
+        SESSION_USER_KEY,
+        get_user_by_email,
+    )
+
+    if not public_demo_ready():
+        return RedirectResponse(url="/", status_code=303)
+    user = get_user_by_email(settings.demo_account_email)
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+    request.session.clear()
+    request.session[SESSION_USER_KEY] = user["id"]
+    # Inherit every guard the shared link already has, then add the
+    # browse-only restriction on top.
+    request.session[DEMO_LINK_SESSION_KEY] = True
+    request.session[DEMO_PUBLIC_SESSION_KEY] = True
     return RedirectResponse(url="/app", status_code=303)
 
 

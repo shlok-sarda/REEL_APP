@@ -364,6 +364,24 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(folder_id) REFERENCES user_folders(id)
     )
     """,
+    # Landing-page funnel counters. One row per anonymous action so a paid
+    # traffic test can be read as "arrived -> opened the demo -> signed up"
+    # instead of a single ambiguous zero. Deliberately holds no IP, no
+    # user agent and no referrer: a coarse per-browser id is enough to tell
+    # repeat visits from distinct people, and nothing here needs consent.
+    """
+    CREATE TABLE IF NOT EXISTS landing_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        event TEXT NOT NULL,
+        visitor TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_landing_events_event
+        ON landing_events(event, created_at)
+    """,
 ]
 
 # Migrate-by-ALTER pattern (see USER_EXTRA_COLUMNS below): folder_memberships

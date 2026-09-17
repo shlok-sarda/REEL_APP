@@ -11,6 +11,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.deep_search import router as deep_search_router
 from app.api.routes.discover import router as discover_router
+from app.api.routes.events import router as events_router
 from app.api.routes.folders import router as folders_router
 from app.api.routes.diagnostics import router as diagnostics_router
 from app.api.routes.health import router as health_router
@@ -107,6 +108,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent /
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(events_router)
 app.include_router(admin_router)
 app.include_router(webapp_router)
 app.include_router(telegram_router)

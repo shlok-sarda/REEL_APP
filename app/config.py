@@ -31,6 +31,12 @@ class Settings:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()
     demo_account_email: str = os.getenv("DEMO_ACCOUNT_EMAIL", "").strip().lower()
+    # Public, token-free demo at /try, for cold traffic that will not sign up
+    # to find out what the app does. Kept on its own switch so it can be turned
+    # off without rotating DEMO_ACCESS_TOKEN and breaking links already shared
+    # by hand. Opens the same DEMO_ACCOUNT_EMAIL account, but read-only:
+    # visitors from here cannot write anything (see block_public_demo_writes).
+    demo_public: bool = os.getenv("DEMO_PUBLIC", "").strip().lower() in {"1", "true", "yes", "on"}
     # Accounts allowed to see the auto-generated Collections shelves while the
     # engine is still being polished. Comma-separated emails or user ids; the
     # demo showcase account is always included on top of this.

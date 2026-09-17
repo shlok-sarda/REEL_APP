@@ -18,6 +18,11 @@ SESSION_CSRF_KEY = "login_csrf"
 # Set only by the /demo-login/<token> magic link — marks a shared-demo session
 # so destructive endpoints can refuse it while browsing/search stay fully live.
 DEMO_LINK_SESSION_KEY = "demo_link_session"
+# Set additionally by the public /try demo. The token link goes to people we
+# chose, so it stays writable; /try is linked from the landing page and will be
+# hit by paid traffic, where a stranger's edits would be the next visitor's
+# first impression. Public sessions are therefore browse-only.
+DEMO_PUBLIC_SESSION_KEY = "demo_public_session"
 TELEGRAM_LINK_TTL_MINUTES = 15
 INSTAGRAM_LINK_TTL_MINUTES = 15
 
@@ -238,6 +243,45 @@ def block_demo_link_writes(request: Request, action: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This shared demo account can't {action}. Browsing, search, and folders are all open — explore away.",
+        )
+
+
+def public_demo_ready() -> bool:
+    """Whether /try can actually open the demo account right now.
+
+    The landing page and the route both ask this, so the button cannot render
+    for a configuration the route will turn away — a dead CTA on a page paid
+    traffic is pointed at costs real money per click.
+    """
+    if not settings.demo_public or not settings.demo_account_email:
+        return False
+    try:
+        user = get_user_by_email(settings.demo_account_email)
+    except Exception:
+        # The landing page calls this on every render and did no database work
+        # at all before. Fail closed rather than 500 the one page paid traffic
+        # lands on: losing the button costs a click, losing the page costs all
+        # of them.
+        return False
+    return bool(user) and not user_is_admin(user)
+
+
+def is_public_demo_session(request: Request) -> bool:
+    return bool(request.session.get(DEMO_PUBLIC_SESSION_KEY))
+
+
+def block_public_demo_writes(request: Request, action: str) -> None:
+    """Refuse a write from the anonymous /try demo.
+
+    Narrower than block_demo_link_writes on purpose: these are the harmless-
+    looking additive actions (make a folder, add a reel, accept a suggestion).
+    They cost nothing, but they mutate one account that every /try visitor
+    shares, so unchecked they turn the demo into a stranger's scratch pad.
+    """
+    if is_public_demo_session(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"The public demo can't {action} — it's a shared library, so it stays read-only. Sign in to get your own.",
         )
 
 

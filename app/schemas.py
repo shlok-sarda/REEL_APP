@@ -15,6 +15,10 @@ class TelegramIngestRequest(BaseModel):
 class GoogleLoginRequest(BaseModel):
     credential: str = Field(..., min_length=1)
     csrf_token: str = Field(..., min_length=1)
+    # Anonymous landing-page id, so a signup can be joined to the same
+    # browser's earlier landing_view and demo_click. Optional: login must
+    # never fail because analytics was blocked.
+    visitor: str = Field(default="", max_length=64)
 
 
 class UserProfile(BaseModel):
