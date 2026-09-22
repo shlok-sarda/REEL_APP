@@ -8,6 +8,7 @@ from pathlib import Path
 from api_config import get_openai_client
 from data_preprocessing import download_reel, is_app_media, process_reel
 from finale import (
+    EXTRACTION_MODEL,
     extract_product_data,
     extract_visual_data,
     format_hashtags,
@@ -21,7 +22,9 @@ from pipeline_b_prompts import BRANCH_PROMPTS, JUDGE_PROMPT, ROUTER_PROMPT
 
 client = get_openai_client()
 BASE_DIR = Path(__file__).resolve().parent
-MODEL = "gpt-4.1"
+# Router, both branches and the judge. Shares finale.EXTRACTION_MODEL so the
+# whole extraction stage moves together, and defaults to gpt-4.1 (unchanged).
+MODEL = EXTRACTION_MODEL
 
 DEEP_SEARCH_DIAGNOSTIC_COLUMNS = [
     ("Creator", "creator"),
