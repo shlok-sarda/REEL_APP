@@ -192,6 +192,57 @@ python3 api.py
 
 This is still using your existing CSV pipeline under the hood for now, but the API surface is now structured like a deployable backend.
 
+## Per-Reel Processing Cost
+
+Processing one reel costs about **₹0.82** in the current configuration, down from
+₹2.68. Measured, not estimated — at ₹88/USD:
+
+| Step | Before | Now | What changed |
+|---|---:|---:|---|
+| Download (Apify) | 0.24 | 0.24 | unchanged; first ~1,800/month are free |
+| Transcription (`gpt-4o-mini-transcribe`) | 0.13 | 0.13 | unchanged |
+| Visual pass (`gpt-4.1-mini`, ≤10 keyframes) | 0.69 | **0.11** | `KEYFRAME_MAX_EDGE` |
+| Extraction (Pipeline B, 5 calls) | 1.62 | **0.34** | `EXTRACTION_MODEL` |
+| **Total** | **2.68** | **0.82** | |
+
+Both levers are environment variables so either can be rolled back from the
+Render dashboard without a redeploy. Their defaults in code are the OLD
+behaviour, so an unconfigured environment behaves exactly as it did before.
+
+### `EXTRACTION_MODEL` (default `gpt-4.1`, production runs `gpt-4.1-mini`)
+
+Drives Pipeline B's router, both branches, the judge, and the product call.
+
+Measured against the live app's own stored output for **all 439 real user
+reels**, with a blind gpt-4.1 judge on every disagreement: titles matched 94%
+and were level on quality where they differed (52/48); summaries matched 89%.
+Categories are unaffected by this setting — verified by running the genuine
+pipeline (real download, real visual pass) on 5 reels, where `gpt-4.1` and
+`gpt-4.1-mini` produced identical categories 5/5, and confirmed again on 12
+reels reprocessed in production.
+
+### `KEYFRAME_MAX_EDGE` (default `0` = off, production runs `512`)
+
+Downscales each keyframe's long edge before it goes to the visual call.
+Keyframes were previously sent at the video's native resolution, roughly 3,300
+image tokens for a 1920x1080 frame.
+
+Measured on 30 live reels at native / 768 / 512 / 384, using a **second native
+run as the control**: 512px differs from native (`main_subject` similarity
+0.811) by less than native differs from itself (0.827), so the resize costs
+less than the model's own run-to-run variation. 384px is the first size to fall
+clearly below that floor. Set `0` to disable resizing entirely.
+
+`finale.encode_keyframe` falls back to the original bytes when a frame cannot be
+read or resized, so a bad frame degrades to the previous behaviour rather than
+costing the reel its visuals.
+
+### Costs that are not per-reel
+
+Video storage in R2 is **recurring** and accumulates: ~7.7 MB per reel, about
+₹0.30/month for a typical 28-reel user. Processing is paid once; storage is paid
+every month, so it becomes a real line item at scale.
+
 ## Deployment Notes
 
 ### Required environment variables
@@ -200,6 +251,11 @@ This is still using your existing CSV pipeline under the hood for now, but the A
 - `TELEGRAM_BOT_TOKEN`
 - `API_HOST=0.0.0.0`
 - `API_PORT=8000` locally
+
+### Optional cost-control variables
+
+- `EXTRACTION_MODEL` - see Per-Reel Processing Cost above
+- `KEYFRAME_MAX_EDGE` - see Per-Reel Processing Cost above
 
 ### Render
 
