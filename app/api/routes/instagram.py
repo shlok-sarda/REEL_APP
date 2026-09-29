@@ -467,23 +467,14 @@ async def instagram_webhook(
                 outcome="saved", detail=url,
             )
         if saved_here:
-            entry = pending_replies.setdefault(
-                sender_id,
-                {"user_id": user["id"], "username": sender_username, "saved": 0},
-            )
-            entry["saved"] += saved_here
+            # Tracked only so the recovery reply below does not also fire for
+            # someone who just saved something.
+            pending_replies[sender_id] = {"user_id": user["id"], "saved": saved_here}
 
-    # Sent after the response, not during it. Instagram expects a webhook to
-    # be answered promptly and will retry an endpoint that stalls; a send to
-    # Meta has already taken longer than 8 seconds more than once.
-    for reply_sender_id, entry in pending_replies.items():
-        background.add_task(
-            _reply_with_library,
-            entry["user_id"],
-            reply_sender_id,
-            entry["username"],
-            entry["saved"],
-        )
+    # No DM on save. The library hides a reel until it has a title, so a link
+    # sent now opens an empty page for the several minutes processing takes.
+    # The reply happens when the job completes instead - see
+    # app/services/dm_notify.notify_reel_ready.
 
     if linked_accounts or reels_saved:
         ensure_background_progress()

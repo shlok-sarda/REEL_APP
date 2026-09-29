@@ -49,6 +49,9 @@ class Settings:
         value.strip().lower() for value in os.getenv("DM_REPLY_ACCOUNTS", "").split(",") if value.strip()
     )
     dm_reply_for_everyone: bool = os.getenv("DM_REPLY_FOR_EVERYONE", "").strip().lower() in {"1", "true", "yes", "on"}
+    # Minimum gap between automatic DMs to one person. A batch of reels
+    # finishing one after another would otherwise send a message each.
+    dm_cooldown_minutes: int = int(os.getenv("DM_COOLDOWN_MINUTES", "10"))
     # Senders who get the full new-user experience: an account created for
     # them on their first DM, and replies. Accepts Instagram usernames or
     # IGSIDs, comma separated, so a test account can be named by handle

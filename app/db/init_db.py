@@ -422,6 +422,9 @@ USER_EXTRA_COLUMNS = {
     # because Instagram's browser, Safari and a home-screen icon each keep
     # their own cookie jar, so a cookie session dies on every hop between them.
     "library_token": "TEXT NOT NULL DEFAULT ''",
+    # When this account was last DM'd, so a batch of reels finishing together
+    # produces one message rather than one each.
+    "last_dm_at": "TEXT NOT NULL DEFAULT ''",
 }
 
 # Same migrate-by-ALTER pattern for reels: a long-lived production table was

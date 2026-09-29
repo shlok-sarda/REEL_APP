@@ -177,6 +177,17 @@ def process_job(job: dict):
 
     complete_job(job["id"], claim_token)
 
+    # Now that the reel has a title and media, tell the owner - this is the
+    # first moment their library link would actually show them something.
+    # Wrapped so a failed DM can never fail a completed job.
+    if job["job_type"] == "process_reel":
+        try:
+            from app.services.dm_notify import notify_reel_ready
+
+            notify_reel_ready(job["user_id"], job["reel_id"])
+        except Exception:
+            pass
+
 
 def main():
     """Process one job, then re-exec into a fresh process for the next.
