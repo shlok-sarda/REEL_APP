@@ -23,6 +23,11 @@ DEMO_LINK_SESSION_KEY = "demo_link_session"
 # hit by paid traffic, where a stranger's edits would be the next visitor's
 # first impression. Public sessions are therefore browse-only.
 DEMO_PUBLIC_SESSION_KEY = "demo_public_session"
+# Set by the /g/<token> personal library link. Marks a session that reached
+# the app by bearer URL rather than by signing in, so destructive endpoints
+# refuse it: the link travels through an Instagram DM thread and anyone who
+# ends up holding it must not be able to wipe the owner's library.
+GUEST_LINK_SESSION_KEY = "guest_link_session"
 TELEGRAM_LINK_TTL_MINUTES = 15
 INSTAGRAM_LINK_TTL_MINUTES = 15
 
@@ -238,11 +243,26 @@ def is_demo_link_session(request: Request) -> bool:
     return bool(request.session.get(DEMO_LINK_SESSION_KEY))
 
 
-def block_demo_link_writes(request: Request, action: str) -> None:
+def is_guest_link_session(request: Request) -> bool:
+    return bool(request.session.get(GUEST_LINK_SESSION_KEY))
+
+
+def block_link_session_writes(request: Request, action: str) -> None:
+    """Refuse a destructive action from any session opened by a bearer link.
+
+    One policy, two doorways: the shared demo link and a personal library
+    link. Neither proved who is holding it, so neither gets to destroy
+    anything. Saving and browsing stay open — those are the point.
+    """
     if is_demo_link_session(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This shared demo account can't {action}. Browsing, search, and folders are all open — explore away.",
+        )
+    if is_guest_link_session(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Sign in with Google to {action}. Your library link keeps saving and browsing open.",
         )
 
 
@@ -273,7 +293,7 @@ def is_public_demo_session(request: Request) -> bool:
 def block_public_demo_writes(request: Request, action: str) -> None:
     """Refuse a write from the anonymous /try demo.
 
-    Narrower than block_demo_link_writes on purpose: these are the harmless-
+    Narrower than block_link_session_writes on purpose: these are the harmless-
     looking additive actions (make a folder, add a reel, accept a suggestion).
     They cost nothing, but they mutate one account that every /try visitor
     shares, so unchecked they turn the demo into a stranger's scratch pad.
@@ -332,6 +352,67 @@ def ensure_user_access(request: Request, requested_user_id: str | None, allow_de
     if normalized and normalized != user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot access another user's library")
     return user["id"]
+
+
+def get_user_by_library_token(token: str) -> dict[str, Any] | None:
+    """Resolve a /g/<token> link to its owner, or None.
+
+    Matching happens in SQL on a 43-character random token, so there is no
+    meaningful timing signal to protect against here; an unknown token is
+    simply nobody.
+    """
+    normalized = normalize(token)
+    if len(normalized) < 20:
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id, display_name, email, picture_url, google_sub, telegram_user_id,
+                   telegram_username, instagram_user_id, instagram_username, preferred_name, created_at, last_login_at, updated_at
+            FROM users
+            WHERE library_token = ?
+            LIMIT 1
+            """,
+            (normalized,),
+        ).fetchone()
+    return row_to_user(row)
+
+
+def get_or_create_library_token(user_id: str) -> str:
+    """This user's permanent library-link token, minting one on first use.
+
+    Permanent on purpose. The alternative - reissuing a token per visit - is
+    what breaks the only recovery path a guest has, because every older link
+    sitting in their Instagram DM thread would stop working.
+    """
+    normalized_user = normalize(user_id)
+    if not normalized_user:
+        return ""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT library_token FROM users WHERE id = ? LIMIT 1",
+            (normalized_user,),
+        ).fetchone()
+        if not row:
+            return ""
+        existing = normalize(row["library_token"])
+        if existing:
+            return existing
+        token = secrets.token_urlsafe(32)
+        connection.execute(
+            "UPDATE users SET library_token = ?, updated_at = ? WHERE id = ?",
+            (token, iso_now(), normalized_user),
+        )
+    return token
+
+
+def build_library_link(user_id: str) -> str:
+    """Absolute /g/<token> URL, the thing that actually gets DM'd."""
+    token = get_or_create_library_token(user_id)
+    if not token:
+        return ""
+    base = (settings.public_base_url or "").rstrip("/")
+    return f"{base}/g/{token}"
 
 
 def create_telegram_link_code(user_id: str) -> str:

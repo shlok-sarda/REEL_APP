@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
-from app.services.auth import block_demo_link_writes, ensure_user_access, is_demo_link_session
+from app.services.auth import block_link_session_writes, ensure_user_access, is_demo_link_session
 from app.services.discover import (
     build_map_pins,
     build_recipes,
@@ -49,7 +49,7 @@ def reel_recipe_extract(request: Request, payload: dict = Body(...)):
     if user_id and is_demo_user(user_id):
         return {"status": "none"}
     # extraction spends OpenAI credit — shared demo-link sessions can't trigger it
-    block_demo_link_writes(request, "extract recipes")
+    block_link_session_writes(request, "extract recipes")
     resolved = ensure_user_access(request, user_id)
     return extract_reel_recipe(resolved, reel_id)
 

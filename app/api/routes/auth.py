@@ -6,7 +6,8 @@ from app.services.events import record_landing_event
 from app.services.auth import (
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
-    block_demo_link_writes,
+    block_link_session_writes,
+    build_library_link,
     create_instagram_link_code,
     disconnect_instagram,
     build_telegram_link_url,
@@ -76,7 +77,7 @@ def google_login(payload: GoogleLoginRequest, request: Request):
 
 @router.post("/profile-name", response_model=SessionResponse)
 def profile_name(payload: ProfileNameRequest, request: Request):
-    block_demo_link_writes(request, "rename the account")
+    block_link_session_writes(request, "rename the account")
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
@@ -92,7 +93,7 @@ def logout(request: Request):
 
 @router.get("/telegram/connect")
 def telegram_connect(request: Request):
-    block_demo_link_writes(request, "link accounts")
+    block_link_session_writes(request, "link accounts")
     user = current_user(request)
     if not user:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
@@ -101,7 +102,7 @@ def telegram_connect(request: Request):
 
 @router.post("/instagram/connect", response_model=InstagramLinkStartResponse)
 def instagram_connect(request: Request):
-    block_demo_link_writes(request, "link accounts")
+    block_link_session_writes(request, "link accounts")
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
@@ -115,7 +116,7 @@ def instagram_connect(request: Request):
 
 @router.post("/instagram/disconnect")
 def instagram_disconnect(request: Request):
-    block_demo_link_writes(request, "unlink accounts")
+    block_link_session_writes(request, "unlink accounts")
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
@@ -137,3 +138,18 @@ def telegram_link_complete(payload: TelegramLinkCompleteRequest):
         "display_name": user.get("display_name", ""),
         "telegram_user_id": user.get("telegram_user_id", ""),
     }
+
+
+@router.get("/library-link")
+def library_link(request: Request):
+    """This account's own /g/<token> link.
+
+    Signed-in only, and never available to a session that itself arrived by
+    bearer link - otherwise holding someone's link would hand you a permanent
+    copy of it through the API.
+    """
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    block_link_session_writes(request, "view your library link")
+    return JSONResponse({"ok": True, "url": build_library_link(user["id"])})

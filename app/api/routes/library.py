@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.schemas import LibraryResponse
-from app.services.auth import block_demo_link_writes, ensure_user_access
+from app.services.auth import block_link_session_writes, ensure_user_access
 from app.services.collections import (
     reel_cards_export,
     reel_sheet,
@@ -69,5 +69,5 @@ def post_library_rebuild(request: Request, user_id: str = Query(default="")):
     shelves down with it.
     """
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=False)
-    block_demo_link_writes(request, "rebuild collections")
+    block_link_session_writes(request, "rebuild collections")
     return start_shelf_rebuild(resolved_user_id)

@@ -12,7 +12,7 @@ import os
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.services.auth import (
-    block_demo_link_writes,
+    block_link_session_writes,
     block_public_demo_writes,
     ensure_user_access,
 )
@@ -49,7 +49,7 @@ def list_folders(request: Request, user_id: str = ""):
 @router.post("/suggest")
 def suggest(request: Request, payload: dict = Body(...)):
     # Adjudication calls gpt-4.1-mini per reel, so this is a billable endpoint.
-    block_demo_link_writes(request, "suggest folders")
+    block_link_session_writes(request, "suggest folders")
     resolved = _gate(request, str(payload.get("user_id", "")))
     reel_ids = list(payload.get("reel_ids") or [])
     if not reel_ids:
@@ -106,7 +106,7 @@ def detail(request: Request, folder_id: int, user_id: str = ""):
 @router.post("/{folder_id}/rescan")
 def rescan(request: Request, folder_id: int, payload: dict = Body(default={})):
     # Re-routes the whole library through gpt-4.1-mini. Never demo-triggerable.
-    block_demo_link_writes(request, "rescan folders")
+    block_link_session_writes(request, "rescan folders")
     resolved = _gate(request, str(payload.get("user_id", "")))
     data = folders_service.rescan_folder(resolved, folder_id)
     if not data:
@@ -140,7 +140,7 @@ def reject(request: Request, folder_id: int, payload: dict = Body(...)):
 
 @router.delete("/{folder_id}")
 def delete(request: Request, folder_id: int, user_id: str = ""):
-    block_demo_link_writes(request, "delete folders")
+    block_link_session_writes(request, "delete folders")
     resolved = _gate(request, user_id)
     folders_service.delete_folder(resolved, folder_id)
     return {"ok": True}

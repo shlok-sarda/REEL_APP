@@ -3564,6 +3564,48 @@ def demo_link_login(token: str, request: Request):
     return RedirectResponse(url="/app", status_code=303)
 
 
+@router.get("/g/{token}")
+def library_link_login(token: str, request: Request):
+    """Personal library link: opens one account straight into the app.
+
+    This is the entry point for someone who has never signed in - the link
+    arrives in their Instagram DM thread, which is the only durable way back
+    to their library. The token rides in the URL because Instagram's browser,
+    Safari and a home-screen icon keep separate cookie jars, so a cookie
+    cannot survive the trip between them.
+
+    The session it opens is deliberately weaker than a signed-in one: the
+    holder can browse and save, but destructive endpoints refuse it (see
+    block_link_session_writes).
+    """
+    from app.services.auth import (
+        GUEST_LINK_SESSION_KEY,
+        SESSION_USER_KEY,
+        get_user_by_library_token,
+        is_demo_link_session,
+        is_guest_link_session,
+    )
+
+    user = get_user_by_library_token(token)
+    if not user:
+        return RedirectResponse(url="/", status_code=303)
+
+    # Someone already properly signed in as this account should not be
+    # downgraded to a restricted session just for tapping their own link.
+    existing = current_user(request)
+    already_full = (
+        existing
+        and existing["id"] == user["id"]
+        and not is_guest_link_session(request)
+        and not is_demo_link_session(request)
+    )
+    if not already_full:
+        request.session.clear()
+        request.session[SESSION_USER_KEY] = user["id"]
+        request.session[GUEST_LINK_SESSION_KEY] = True
+    return RedirectResponse(url="/app", status_code=303)
+
+
 @router.get("/app/{user_id}", response_class=HTMLResponse)
 def user_app(user_id: str, request: Request):
     if is_demo_user(user_id):
