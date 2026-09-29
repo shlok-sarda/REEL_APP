@@ -58,8 +58,10 @@ def _replies_allowed(user_row) -> bool:
     igsid = (user_row["instagram_user_id"] or "").strip().lower()
     if handle in settings.guest_test_senders or igsid in settings.guest_test_senders:
         return True
+    # No admin bypass: an admin account is not an opted-in account, and
+    # treating it as one sent a DM to a handle nobody had listed.
     email = (user_row["email"] or "").strip().lower()
-    return bool(email) and (email in settings.admin_emails or email in settings.dm_reply_accounts)
+    return bool(email) and email in settings.dm_reply_accounts
 
 
 def notify_reel_ready(user_id: str, reel_id: str) -> None:

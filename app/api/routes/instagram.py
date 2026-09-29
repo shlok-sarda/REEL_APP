@@ -222,13 +222,16 @@ def _dm_replies_allowed(user_id: str) -> bool:
         return False
     if not row:
         return False
-    # A guest has no email at all, so the checks below would refuse the very
-    # accounts this flow exists to serve. Their allowlist is by Instagram
-    # identity instead.
+    # By Instagram identity, because a guest has no email at all and would
+    # otherwise be refused by the very gate that exists to let them through.
     if _is_test_sender(row["instagram_user_id"] or "", row["instagram_username"] or ""):
         return True
+    # Deliberately no admin bypass. It existed so the loop could be tested
+    # before any allowlist was set, and then quietly answered a second admin
+    # account after one handle had been named. Being on this list is the only
+    # way to be messaged.
     email = (row["email"] or "")
-    return bool(email) and (email in settings.admin_emails or email in settings.dm_reply_accounts)
+    return bool(email) and email in settings.dm_reply_accounts
 
 
 def _user_reel_count(user_id: str) -> int:
