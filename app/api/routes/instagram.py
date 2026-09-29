@@ -238,7 +238,7 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             continue
 
         if settings.outbound_dm_test and _is_ping(event):
-            result = send_text(sender_id, "pong - outbound DM works. Sent from ClipNest.")
+            result = send_text(sender_id, "pong. ClipNest can reach you here.")
             _log_webhook_event(
                 "ping", sender_id=sender_id, sender_username=sender_username,
                 outcome="sent" if result["ok"] else "send_failed", detail=result["detail"],

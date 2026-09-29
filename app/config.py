@@ -35,10 +35,11 @@ class Settings:
     instagram_access_token: str = os.getenv("INSTAGRAM_ACCESS_TOKEN", "").strip()
     instagram_graph_version: str = os.getenv("INSTAGRAM_GRAPH_VERSION", "v25.0").strip()
     # Temporary probe for the outbound DM channel, which has never been used.
-    # With this on, DMing the app account the single word PING gets a reply.
-    # Two gates on purpose: this runs inside the live ingest path, so it stays
-    # off by default and fires only on a word no real user will send.
-    outbound_dm_test: bool = os.getenv("OUTBOUND_DM_TEST", "").strip().lower() in {"1", "true", "yes", "on"}
+    # DMing the app account the single word PING gets a reply. On by default so
+    # the probe needs no dashboard trip; set OUTBOUND_DM_TEST=0 to kill it
+    # without a deploy. The trigger is a word no real user sends, and a reply
+    # that somehow fired for one would read as a harmless hello.
+    outbound_dm_test: bool = os.getenv("OUTBOUND_DM_TEST", "1").strip().lower() in {"1", "true", "yes", "on"}
     # Shareable demo login link (/demo-login/<token>). Off unless BOTH are set:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()
