@@ -148,6 +148,33 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     return sender_id, username
 
 
+def _dm_replies_allowed(user_id: str) -> bool:
+    """Whether this account may be answered automatically.
+
+    Deliberately closed by default. The existing users signed up for a bot
+    that never speaks; making it chatty underneath them is a change they did
+    not agree to, and it lands in a channel where annoying people is
+    expensive. Admins always pass so the loop is testable without a
+    dashboard trip.
+    """
+    if settings.dm_reply_for_everyone:
+        return True
+    if not user_id:
+        return False
+    if user_id.strip().lower() in settings.dm_reply_accounts:
+        return True
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+    except Exception:
+        return False
+    email = (row["email"] or "") if row else ""
+    return bool(email) and (email in settings.admin_emails or email in settings.dm_reply_accounts)
+
+
 def _user_reel_count(user_id: str) -> int:
     try:
         with get_connection() as connection:
@@ -169,6 +196,8 @@ def _reply_with_library(user_id: str, sender_id: str, sender_username: str, save
     Any failure is logged and swallowed. A reply that does not arrive is a
     disappointment; a reply that raises would cost them the reel itself.
     """
+    if not _dm_replies_allowed(user_id):
+        return
     try:
         link = build_library_link(user_id)
         if not link.startswith("http"):

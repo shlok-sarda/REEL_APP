@@ -40,6 +40,15 @@ class Settings:
     # without a deploy. The trigger is a word no real user sends, and a reply
     # that somehow fired for one would read as a harmless hello.
     outbound_dm_test: bool = os.getenv("OUTBOUND_DM_TEST", "1").strip().lower() in {"1", "true", "yes", "on"}
+    # Who gets an automatic DM back when a reel saves. Admins always do, so
+    # this can be tested without a dashboard trip. Everyone else has to be
+    # listed here by email or user id: existing users signed up for a silent
+    # bot, and turning it chatty underneath them is a change they did not ask
+    # for. Set DM_REPLY_FOR_EVERYONE=1 for the eventual global rollout.
+    dm_reply_accounts: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("DM_REPLY_ACCOUNTS", "").split(",") if value.strip()
+    )
+    dm_reply_for_everyone: bool = os.getenv("DM_REPLY_FOR_EVERYONE", "").strip().lower() in {"1", "true", "yes", "on"}
     # Shareable demo login link (/demo-login/<token>). Off unless BOTH are set:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()
