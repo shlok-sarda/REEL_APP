@@ -1099,8 +1099,11 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:var(--bg); }
     .map-overlay.show { display:block; }
     #reelMap { position:absolute; inset:0; }
-    /* Dark cartography: invert OSM tiles into the app's night palette. */
-    #reelMap .leaflet-tile-pane { filter:invert(.92) hue-rotate(200deg) saturate(.4) brightness(.92) contrast(.92); }
+    /* Dark cartography: invert OSM's light tiles into the app's night palette.
+       Tuned for tile.openstreetmap.org, which runs hotter than the old CARTO
+       basemap: heavier desaturation and a lower brightness floor keep land near
+       --bg while water holds just enough cool tint to read as sea. */
+    #reelMap .leaflet-tile-pane { filter:invert(1) hue-rotate(185deg) saturate(.22) brightness(.76) contrast(1.08); }
     .map-hud { position:absolute; z-index:600; top:calc(14px + var(--safe-top)); left:14px; background:var(--card);
       border:1px solid var(--line); border-radius:16px; padding:12px 16px; max-width:74vw; }
     .map-hud h2 { margin:0; font-family:var(--serif); font-size:1.25rem; font-weight:600; color:var(--text); }
@@ -1129,6 +1132,16 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .map-overlay .leaflet-popup-content-wrapper { background:var(--card); color:var(--text);
       border:1px solid var(--line); border-radius:16px; box-shadow:0 18px 44px rgba(0,0,0,.5); }
     .map-overlay .leaflet-popup-tip { background:var(--card); border:1px solid var(--line); }
+    /* OSM's tile policy requires visible licence attribution -- keep it readable. */
+    .map-overlay .leaflet-control-attribution { background:rgba(22,22,25,.82); color:var(--muted);
+      border:1px solid var(--line); border-right:none; border-bottom:none; border-radius:10px 0 0 0;
+      padding:3px 8px; font-size:.62rem; backdrop-filter:blur(4px); }
+    .map-overlay .leaflet-control-attribution a { color:var(--accent); text-decoration:none; font-weight:650;
+      transition:opacity .15s ease; }
+    .map-overlay .leaflet-control-attribution a:hover { opacity:.72; }
+    .map-overlay .leaflet-control-attribution a:focus-visible { outline:2px solid var(--accent);
+      outline-offset:2px; border-radius:4px; }
+    .map-overlay .leaflet-control-attribution a:active { opacity:.55; }
     .map-pop-place { font-weight:700; font-size:1rem; font-family:var(--serif); }
     .map-pop-sub { font-size:.72rem; color:var(--muted); font-weight:600; margin-bottom:8px; }
     .map-pop-item { margin:7px 0; padding:8px 10px; background:var(--soft); border:1px solid var(--line); border-radius:12px; }
@@ -2392,8 +2405,13 @@ def build_clipnest_v1_html(user_id: str) -> str:
       if (state.reelMap) { setTimeout(() => state.reelMap.invalidateSize(), 120); return; }
       const map = L.map('reelMap', { zoomControl: false, minZoom: 3, worldCopyJump: true }).setView([21, 78], 4);
       state.reelMap = map;
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+      // CARTO key-gated its raster basemaps: keyless requests still return 200 OK,
+      // but every tile is an "API KEY REQUIRED" placeholder, so nothing errors and
+      // the map silently renders as grey watermarks. OSM standard tiles are keyless
+      // and permitted for a website basemap; the CSS filter above darkens them.
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+        maxZoom: 19,
       }).addTo(map);
       try {
         const res = await fetch('/api/map-data?user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' });
