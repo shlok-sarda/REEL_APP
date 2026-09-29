@@ -45,19 +45,23 @@ costs hours; they are settled.
       `INSTAGRAM_ACCESS_TOKEN` had never been added to Render
 - [ ] Run `/admin/instagram/backfill` to fill historical blank usernames
 
-## Phase 1 — a personal library URL
+## Phase 1 — a personal library URL ✅ DONE 2026-09-29 (`c568876`)
 
-The mechanism. Prove it on Shlok's own account before any stranger sees it.
-
-- [ ] Store a long random token per user (new column on `users`, or its own
-      table if we ever want more than one live at a time)
-- [ ] `GET /g/<token>` — sets the session to that user and redirects into the app
-- [ ] Scope a token session: browse, search and save only. **No delete, no
-      export, no settings, no email shown.** Same shape as
-      `block_demo_link_writes` in `app/services/auth.py`
-- [ ] Constant-time token compare; treat an unknown token as 404, not a hint
-- [ ] Test: open the URL in a private window, confirm it lands logged in, then
-      confirm a destructive endpoint refuses it
+- [x] `users.library_token`, 43-char `secrets.token_urlsafe(32)`, minted lazily
+      by `get_or_create_library_token()`. Permanent by design — reissuing per
+      visit would kill every older link sitting in a DM thread
+- [x] `GET /g/<token>` in `webapp.py` — sets the session, redirects to `/app`
+- [x] Unknown or short token redirects to `/`, never hints
+- [x] Scoped session: `GUEST_LINK_SESSION_KEY`. Browsing and saving open,
+      destructive endpoints refuse it
+- [x] `block_demo_link_writes` → **`block_link_session_writes`**, now covering
+      both bearer-link doorways instead of a second guard at 15 call sites
+- [x] Tapping your own link while properly signed in does **not** downgrade you
+- [x] `GET /auth/library-link` returns your own URL (signed-in only, and
+      refused to link sessions so a link cannot copy itself)
+- [x] Tested: token stable, cross-user read 403, stranger blocked from
+      destructive, migration onto a production-shaped table leaves rows intact
+- [x] Verified in prod: `/g/<bogus>` → 303 (a missing column would have 500'd)
 
 ## Phase 2 — deliver that URL after a save
 
