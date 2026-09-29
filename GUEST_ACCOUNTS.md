@@ -78,12 +78,20 @@ costs hours; they are settled.
       tried to DM a real 27-reel user (`armadillo.4419417`) who had never been
       messaged before. It failed on a network timeout, so nothing was
       delivered — luck, not design
-- [ ] **Move the send off the request path.** It runs synchronously inside the
-      webhook; the timeout above held the response 8 seconds. Instagram
-      expects fast webhook replies and may retry or mark the endpoint
-      unhealthy at volume. Fix before `DM_REPLY_FOR_EVERYONE`
-- [ ] Cooldown *across* deliveries, not just within one — someone sending ten
-      reels over two minutes still gets several replies
+- [x] **Send moved off the request path** (`a11acb2`). Runs as a FastAPI
+      background task after the response. Timeout also raised 8s → 25s after
+      three sends were lost to it; every link-bearing message had failed
+- [x] **Cooldown across deliveries** (`9dfe5c1`), `users.last_dm_at`,
+      `DM_COOLDOWN_MINUTES` default 10
+- [x] **Reply moved to job completion, not save** (`9dfe5c1`). The library
+      hides any reel without a title, so a link sent at save time opened an
+      empty page for the whole pipeline run. Now fires from the worker in
+      `notify_reel_ready`, and names the reel: "Ready: Triceps Press Down"
+
+### Verified live 2026-09-29
+Stranger with no account DMs a reel → account auto-created
+(`user_ig_64c73c99e4425239`, handle `url_testing`, no Google, no email) →
+reel saved → DM delivered with a working library link. The full loop runs.
 
 ## Phase 3 — let strangers in (this is where the funnel actually opens)
 
