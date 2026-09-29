@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
@@ -98,6 +98,43 @@ def _deep_strings(value: Any):
     elif isinstance(value, list):
         for nested in value:
             yield from _deep_strings(nested)
+
+
+def _send_ping_reply(sender_id: str, sender_username: str) -> None:
+    result = send_text(sender_id, "pong. ClipNest can reach you here.")
+    _log_webhook_event(
+        "ping", sender_id=sender_id, sender_username=sender_username,
+        outcome="sent" if result["ok"] else "send_failed", detail=result["detail"],
+    )
+
+
+def _describe_message(message_event: dict) -> str:
+    """Shape of a message we could not read a reel out of.
+
+    Keys and attachment types plus the hostnames of any URLs, never the text
+    itself. A native reel share does not necessarily carry an
+    instagram.com/reel/ permalink, and without seeing the actual structure
+    the fix is guesswork.
+    """
+    import re as _re
+
+    message = message_event.get("message") or {}
+    parts = [f"msg_keys={sorted(message.keys())}"]
+    attachments = message.get("attachments")
+    if isinstance(attachments, list):
+        kinds = []
+        for att in attachments:
+            if isinstance(att, dict):
+                payload = att.get("payload") if isinstance(att.get("payload"), dict) else {}
+                kinds.append(f"{att.get('type')}({sorted(payload.keys())})")
+        parts.append(f"attachments={kinds}")
+    hosts = set()
+    for text in _deep_strings(message):
+        for match in _re.findall(r"https?://([A-Za-z0-9.-]+)", text or ""):
+            hosts.add(match)
+    if hosts:
+        parts.append(f"url_hosts={sorted(hosts)}")
+    return " ".join(parts)[:400]
 
 
 def _extract_candidate_urls(message_event: dict) -> list[str]:
@@ -315,7 +352,11 @@ def instagram_webhook_verify(
 
 
 @router.post("/webhook")
-async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256")):
+async def instagram_webhook(
+    request: Request,
+    background: BackgroundTasks,
+    x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
+):
     raw_body = await request.body()
     if not _verify_signature(raw_body, x_hub_signature_256):
         _log_webhook_event("delivery", outcome="rejected", detail="signature verification failed")
@@ -350,11 +391,7 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             continue
 
         if settings.outbound_dm_test and _is_ping(event):
-            result = send_text(sender_id, "pong. ClipNest can reach you here.")
-            _log_webhook_event(
-                "ping", sender_id=sender_id, sender_username=sender_username,
-                outcome="sent" if result["ok"] else "send_failed", detail=result["detail"],
-            )
+            background.add_task(_send_ping_reply, sender_id, sender_username)
             continue
 
         link_code = _extract_link_code(event)
@@ -408,13 +445,16 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
         if not urls:
             _log_webhook_event(
                 "reel", sender_id=sender_id, sender_username=sender_username,
-                outcome="ignored", detail="no instagram reel url found in message",
+                outcome="ignored",
+                detail="no reel url found :: " + _describe_message(event),
             )
             # Recovery path: any message re-sends their link. The IGSID is
             # permanent, so deleting the conversation must not cost someone
             # their library.
             if sender_id not in pending_replies:
-                _reply_with_library(user["id"], sender_id, sender_username, 0)
+                background.add_task(
+                    _reply_with_library, user["id"], sender_id, sender_username, 0
+                )
         saved_here = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
@@ -433,9 +473,16 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             )
             entry["saved"] += saved_here
 
+    # Sent after the response, not during it. Instagram expects a webhook to
+    # be answered promptly and will retry an endpoint that stalls; a send to
+    # Meta has already taken longer than 8 seconds more than once.
     for reply_sender_id, entry in pending_replies.items():
-        _reply_with_library(
-            entry["user_id"], reply_sender_id, entry["username"], entry["saved"]
+        background.add_task(
+            _reply_with_library,
+            entry["user_id"],
+            reply_sender_id,
+            entry["username"],
+            entry["saved"],
         )
 
     if linked_accounts or reels_saved:

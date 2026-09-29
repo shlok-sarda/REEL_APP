@@ -26,7 +26,11 @@ import requests
 from app.config import settings
 
 GRAPH_HOST = "https://graph.instagram.com"
-REQUEST_TIMEOUT_SECONDS = 8
+# Meta's send endpoint has repeatedly taken longer than 8s from Render, and
+# every timeout is a message the person never receives. Raised - and the call
+# is made off the webhook's request path, so a slow send no longer holds up
+# the reply Instagram is waiting for.
+REQUEST_TIMEOUT_SECONDS = 25
 # Meta rejects anything longer. Truncate rather than fail: a clipped nudge
 # still works, a 400 means the person hears nothing at all.
 MAX_TEXT_BYTES = 1000
