@@ -63,16 +63,27 @@ costs hours; they are settled.
       destructive, migration onto a production-shaped table leaves rows intact
 - [x] Verified in prod: `/g/<bogus>` → 303 (a missing column would have 500'd)
 
-## Phase 2 — deliver that URL after a save
+## Phase 2 — deliver that URL after a save ✅ MOSTLY DONE (`82d8fff`, `7a1e96e`)
 
-- [ ] On a successful `append_reel` from the webhook, reply with the link
-- [ ] **Burst suppression.** People bulk-save; five reels in thirty seconds
-      must not produce five DMs. Reply to the first, then stay quiet for a
-      cooldown and summarise
-- [ ] Never let a send failure affect ingest — `send_text` already returns
-      rather than raises, keep it that way
-- [ ] Log every send outcome to `instagram_webhook_events` so the health view
-      shows delivery, not just receipt
+- [x] Reply with the library link when a reel saves
+- [x] **Burst suppression within a delivery.** Instagram sends each shared
+      reel as its own message event, so replies are collected and sent once
+      per person after the loop. Also fixes a count that was quoted mid-loop
+      while still climbing
+- [x] Send failures logged and swallowed; ingest is never affected
+- [x] Every send outcome logged as a `reply` row, visible in the health view
+- [x] Skips rather than sends when `PUBLIC_BASE_URL` would make a relative link
+- [x] **Gated.** Admins always; others need `DM_REPLY_ACCOUNTS`;
+      `DM_REPLY_FOR_EVERYONE=1` for rollout. Shipped after the ungated version
+      tried to DM a real 27-reel user (`armadillo.4419417`) who had never been
+      messaged before. It failed on a network timeout, so nothing was
+      delivered — luck, not design
+- [ ] **Move the send off the request path.** It runs synchronously inside the
+      webhook; the timeout above held the response 8 seconds. Instagram
+      expects fast webhook replies and may retry or mark the endpoint
+      unhealthy at volume. Fix before `DM_REPLY_FOR_EVERYONE`
+- [ ] Cooldown *across* deliveries, not just within one — someone sending ten
+      reels over two minutes still gets several replies
 
 ## Phase 3 — let strangers in (this is where the funnel actually opens)
 
