@@ -233,6 +233,45 @@ def _debug_authorized(token: str) -> bool:
     return bool(secret) and _secrets.compare_digest(token.strip(), secret)
 
 
+def _instagram_webhook_debug(limit: int = 15) -> dict:
+    """Recent webhook rows, for diagnosing why an expected DM did nothing.
+
+    Token-gated with the rest of the full view. Sender ids are truncated: the
+    triage question is which senders are distinct and whether a reply was
+    attempted, never who they are.
+    """
+    from app.db.database import get_connection
+
+    out: dict = {"sending_enabled": bool(settings.instagram_access_token)}
+    out["outbound_dm_test"] = settings.outbound_dm_test
+    out["graph_version"] = settings.instagram_graph_version
+    try:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT received_at, kind, sender_id, sender_username, outcome, detail
+                FROM instagram_webhook_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        out["events"] = [
+            {
+                "at": r["received_at"],
+                "kind": r["kind"],
+                "sender": ("..." + str(r["sender_id"])[-6:]) if r["sender_id"] else "",
+                "username": r["sender_username"],
+                "outcome": r["outcome"],
+                "detail": (r["detail"] or "")[:220],
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        out["events_error"] = str(exc)[:200]
+    return out
+
+
 @router.get("/health", response_model=HealthResponse)
 def health_check(fix: int = 0, token: str = ""):
     ensure_storage()
@@ -242,6 +281,8 @@ def health_check(fix: int = 0, token: str = ""):
         # OpenAI call) — not something the open internet gets to trigger.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debug token required")
     debug = _queue_debug(full=authorized)
+    if authorized:
+        debug["instagram_webhook"] = _instagram_webhook_debug()
     if fix:
         debug["fix_report"] = _run_inline_fix()
     return HealthResponse(
