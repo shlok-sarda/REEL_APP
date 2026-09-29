@@ -3271,9 +3271,10 @@ def build_clipnest_v1_html(user_id: str) -> str:
       }
       const confirmed = window.confirm(`Delete "${item.name}" from your library?`);
       if (!confirmed) return;
-      const response = await fetch(`/reels/${encodeURIComponent(item.reel_id)}`, { method: 'DELETE' });
+      const response = await fetch(`/reels/${encodeURIComponent(item.reel_id)}`, { method: 'DELETE', credentials: 'same-origin' });
       if (!response.ok) {
-        window.alert('Delete failed. Please try again.');
+        const body = await response.json().catch(() => ({}));
+        window.alert(body.detail || 'Delete failed. Please try again.');
         return;
       }
       removeReelFromState(item.reel_id);

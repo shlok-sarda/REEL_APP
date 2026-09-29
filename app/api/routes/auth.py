@@ -4,6 +4,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from app.schemas import GoogleLoginRequest, InstagramLinkStartResponse, ProfileNameRequest, SessionResponse, TelegramLinkCompleteRequest, UserProfile
 from app.services.events import record_landing_event
 from app.services.auth import (
+    DEMO_LINK_SESSION_KEY,
+    GUEST_LINK_SESSION_KEY,
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
     block_link_session_writes,
@@ -71,6 +73,11 @@ def google_login(payload: GoogleLoginRequest, request: Request):
     if is_new_user:
         record_landing_event("signup", visitor=payload.visitor)
     request.session[SESSION_USER_KEY] = user["id"]
+    # A real Google sign-in proves who is holding the session, so it lifts the
+    # bearer-link restriction. Left in place, a library-link visitor who then
+    # signs in stays locked out of delete until they log out and back in.
+    request.session.pop(GUEST_LINK_SESSION_KEY, None)
+    request.session.pop(DEMO_LINK_SESSION_KEY, None)
     request.session[SESSION_CSRF_KEY] = create_login_csrf(request)
     return _session_payload(request)
 
