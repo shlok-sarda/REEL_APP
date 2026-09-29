@@ -12,6 +12,7 @@ from app.db.database import get_connection
 from app.services.auth import complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.instagram_profile import resolve_instagram_username
+from app.services.instagram_send import send_text
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
@@ -52,6 +53,7 @@ def _log_webhook_event(
 
 INSTAGRAM_URL_FINDER = re.compile(r"https?://(?:www\.)?instagram\.com/(?:reel|p)/[A-Za-z0-9_-]+/?(?:\?[^\s]+)?", re.IGNORECASE)
 LINK_CODE_RE = re.compile(r"\bREEL-\d{6}\b", re.IGNORECASE)
+PING_RE = re.compile(r"^\s*ping\s*$", re.IGNORECASE)
 
 
 def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
@@ -116,6 +118,14 @@ def _extract_link_code(message_event: dict) -> str:
         if match:
             return match.group(0).upper()
     return ""
+
+
+def _is_ping(message_event: dict) -> bool:
+    """True when the message is the bare word PING, the outbound-DM probe."""
+    for text in _deep_strings(message_event.get("message", {})):
+        if PING_RE.match(text or ""):
+            return True
+    return False
 
 
 def _extract_sender(message_event: dict) -> tuple[str, str]:
@@ -225,6 +235,14 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
         if not sender_id:
             ignored_events += 1
             _log_webhook_event("event", outcome="ignored", detail="no sender id in event")
+            continue
+
+        if settings.outbound_dm_test and _is_ping(event):
+            result = send_text(sender_id, "pong - outbound DM works. Sent from ClipNest.")
+            _log_webhook_event(
+                "ping", sender_id=sender_id, sender_username=sender_username,
+                outcome="sent" if result["ok"] else "send_failed", detail=result["detail"],
+            )
             continue
 
         link_code = _extract_link_code(event)
