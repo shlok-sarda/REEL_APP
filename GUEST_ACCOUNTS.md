@@ -90,13 +90,21 @@ costs hours; they are settled.
 Currently a DM from an unknown sender is buffered and the person hears nothing.
 That is exactly how **@haiden.jpeg** was lost — the only recorded case so far.
 
-- [ ] On first DM from an unknown sender, create a guest user row
-      (`instagram_user_id` + `instagram_username`, no `google_sub`). The schema
-      already permits this: `google_sub` is nullable with no unique constraint
-- [ ] Save their reel immediately instead of buffering it
-- [ ] Reply with their new library URL
-- [ ] Recovery path: any later message re-sends their link. The IGSID is stable
-      forever, so losing the DM thread must not lose the account
+- [x] On first DM from an allowed unknown sender, create a guest user row
+      (`create_guest_user`, id `user_ig_<hash of IGSID>`, no `google_sub`, no
+      email). `INSERT OR IGNORE` so a replayed webhook cannot double-create
+- [x] Save their reel immediately instead of buffering it
+- [x] Reply with their new library URL
+- [x] Recovery path: any message with no reel in it re-sends the link
+- [x] **Gated**: `GUEST_TEST_SENDERS` accepts handles or IGSIDs;
+      `GUEST_AUTOCREATE_FOR_EVERYONE` is the rollout switch. Unlisted
+      strangers still buffer exactly as before
+- [x] Guests get their own route through the reply gate, which reads an email
+      they do not have
+- [x] Verified: guest opens their link, sees only their own reels, 403 on
+      destructive; existing linked users save in silence, no DM
+- [ ] **Live end-to-end test from a real new Instagram account** (`url_testing`)
+      — blocked on setting `GUEST_TEST_SENDERS` in Render
 
 ## Phase 4 — nudges, the lock, and the merge
 
