@@ -242,9 +242,19 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     """
     from app.db.database import get_connection
 
+    import os as _os
+
     out: dict = {"sending_enabled": bool(settings.instagram_access_token)}
     out["outbound_dm_test"] = settings.outbound_dm_test
     out["graph_version"] = settings.instagram_graph_version
+    # Names and lengths only, never values. Distinguishes "never set" from
+    # "set under a slightly different name" — the two look identical from
+    # inside the app, and only one of them is fixed by pasting a new token.
+    out["env_names_seen"] = sorted(
+        f"{k}(len={len(v.strip())})"
+        for k, v in _os.environ.items()
+        if "INSTAGRAM" in k.upper() or "IG_" in k.upper()
+    )
     try:
         with get_connection() as connection:
             rows = connection.execute(
