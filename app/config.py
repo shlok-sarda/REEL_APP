@@ -49,6 +49,20 @@ class Settings:
         value.strip().lower() for value in os.getenv("DM_REPLY_ACCOUNTS", "").split(",") if value.strip()
     )
     dm_reply_for_everyone: bool = os.getenv("DM_REPLY_FOR_EVERYONE", "").strip().lower() in {"1", "true", "yes", "on"}
+    # Senders who get the full new-user experience: an account created for
+    # them on their first DM, and replies. Accepts Instagram usernames or
+    # IGSIDs, comma separated, so a test account can be named by handle
+    # without looking its id up first. Everyone else is unaffected - an
+    # unknown sender still just gets buffered, exactly as before.
+    guest_test_senders: frozenset = frozenset(
+        value.strip().lower().lstrip("@")
+        for value in os.getenv("GUEST_TEST_SENDERS", "").split(",")
+        if value.strip()
+    )
+    # The real rollout switch. Every stranger who DMs gets an account.
+    # This is a spending decision: each auto-created guest processes reels at
+    # roughly Rs 0.82 each before they ever sign in.
+    guest_autocreate_for_everyone: bool = os.getenv("GUEST_AUTOCREATE_FOR_EVERYONE", "").strip().lower() in {"1", "true", "yes", "on"}
     # Shareable demo login link (/demo-login/<token>). Off unless BOTH are set:
     # the token gates the link, the email picks which real account it opens.
     demo_access_token: str = os.getenv("DEMO_ACCESS_TOKEN", "").strip()

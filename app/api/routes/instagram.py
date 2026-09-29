@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.db.database import get_connection
-from app.services.auth import build_library_link, complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
+from app.services.auth import build_library_link, complete_instagram_link, create_guest_user, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.instagram_profile import resolve_instagram_username
 from app.services.instagram_send import send_text
@@ -148,6 +148,17 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     return sender_id, username
 
 
+def _is_test_sender(sender_id: str, sender_username: str) -> bool:
+    """Whether this sender is named in GUEST_TEST_SENDERS, by id or handle."""
+    allow = settings.guest_test_senders
+    if not allow:
+        return False
+    if sender_id and sender_id.strip().lower() in allow:
+        return True
+    handle = (sender_username or "").strip().lower().lstrip("@")
+    return bool(handle) and handle in allow
+
+
 def _dm_replies_allowed(user_id: str) -> bool:
     """Whether this account may be answered automatically.
 
@@ -166,12 +177,20 @@ def _dm_replies_allowed(user_id: str) -> bool:
     try:
         with get_connection() as connection:
             row = connection.execute(
-                "SELECT lower(email) AS email FROM users WHERE id = ? LIMIT 1",
+                "SELECT lower(email) AS email, instagram_user_id, instagram_username "
+                "FROM users WHERE id = ? LIMIT 1",
                 (user_id,),
             ).fetchone()
     except Exception:
         return False
-    email = (row["email"] or "") if row else ""
+    if not row:
+        return False
+    # A guest has no email at all, so the checks below would refuse the very
+    # accounts this flow exists to serve. Their allowlist is by Instagram
+    # identity instead.
+    if _is_test_sender(row["instagram_user_id"] or "", row["instagram_username"] or ""):
+        return True
+    email = (row["email"] or "")
     return bool(email) and (email in settings.admin_emails or email in settings.dm_reply_accounts)
 
 
@@ -214,7 +233,11 @@ def _reply_with_library(user_id: str, sender_id: str, sender_username: str, save
             )
             return
         total = _user_reel_count(user_id)
-        if total <= 1:
+        if not saved:
+            # Recovery: they sent something that was not a reel, so nothing
+            # was saved and saying "Saved" would be a lie.
+            text = f"Here is your library: {link}"
+        elif total <= 1:
             text = f"Saved. Your library is here: {link}"
         else:
             text = f"Saved. That is {total} reels now. Your library: {link}"
@@ -354,6 +377,15 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
             continue
 
         user = get_user_by_instagram_user_id(sender_id)
+        if not user and (
+            settings.guest_autocreate_for_everyone or _is_test_sender(sender_id, sender_username)
+        ):
+            user = create_guest_user(sender_id, sender_username)
+            _log_webhook_event(
+                "guest", sender_id=sender_id, sender_username=sender_username,
+                outcome="created" if user else "create_failed",
+                detail=(user or {}).get("id", ""),
+            )
         if not user:
             # Buffer instead of drop: keep each URL so it can be replayed when
             # this sender's link code arrives (possibly later in this same
@@ -378,6 +410,11 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
                 "reel", sender_id=sender_id, sender_username=sender_username,
                 outcome="ignored", detail="no instagram reel url found in message",
             )
+            # Recovery path: any message re-sends their link. The IGSID is
+            # permanent, so deleting the conversation must not cost someone
+            # their library.
+            if sender_id not in pending_replies:
+                _reply_with_library(user["id"], sender_id, sender_username, 0)
         saved_here = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")

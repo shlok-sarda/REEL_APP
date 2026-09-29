@@ -354,6 +354,52 @@ def ensure_user_access(request: Request, requested_user_id: str | None, allow_de
     return user["id"]
 
 
+def build_guest_user_id(instagram_user_id: str) -> str:
+    """Deterministic id for an Instagram-only account.
+
+    Derived from the IGSID the same way a Google account's id is derived from
+    its sub, so a repeated create for the same sender collides on the primary
+    key instead of quietly making a second library.
+    """
+    digest = hashlib.sha256(f"ig:{instagram_user_id}".encode("utf-8")).hexdigest()[:16]
+    return f"user_ig_{digest}"
+
+
+def create_guest_user(instagram_user_id: str, instagram_username: str = "") -> dict[str, Any] | None:
+    """Create an account for someone who has only ever sent a DM.
+
+    No google_sub, no email: the schema allows both to be empty and the
+    Instagram id is the identity. That id is stable for this app forever, so
+    the account remains findable no matter what happens to the DM thread.
+
+    Returns the existing user unchanged if this sender already has one, so a
+    replayed webhook cannot produce duplicates.
+    """
+    normalized_ig = normalize(instagram_user_id)
+    if not normalized_ig:
+        return None
+    existing = get_user_by_instagram_user_id(normalized_ig)
+    if existing:
+        return existing
+
+    handle = normalize(instagram_username).lstrip("@")
+    user_id = build_guest_user_id(normalized_ig)
+    now = iso_now()
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO users (
+                id, telegram_user_id, display_name, created_at, google_sub, email,
+                picture_url, telegram_username, instagram_user_id, instagram_username,
+                last_login_at, updated_at
+            )
+            VALUES (?, NULL, ?, ?, NULL, '', '', '', ?, ?, '', ?)
+            """,
+            (user_id, handle or "Guest", now, normalized_ig, handle, now),
+        )
+    return get_user_by_id(user_id)
+
+
 def get_user_by_library_token(token: str) -> dict[str, Any] | None:
     """Resolve a /g/<token> link to its owner, or None.
 
