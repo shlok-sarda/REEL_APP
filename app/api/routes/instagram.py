@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.db.database import get_connection
-from app.services.auth import complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
+from app.services.auth import build_library_link, complete_instagram_link, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.instagram_profile import resolve_instagram_username
 from app.services.instagram_send import send_text
@@ -148,6 +148,53 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     return sender_id, username
 
 
+def _user_reel_count(user_id: str) -> int:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS n FROM reels WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return int(row["n"] or 0)
+    except Exception:
+        return 0
+
+
+def _reply_with_library(user_id: str, sender_id: str, sender_username: str, saved: int) -> None:
+    """Hand back the library link after a save.
+
+    One reply per delivery, not per reel: a single DM can carry several reels
+    and the person should hear once. Inside the 24h window by construction,
+    because this only ever answers a message they just sent.
+
+    Any failure is logged and swallowed. A reply that does not arrive is a
+    disappointment; a reply that raises would cost them the reel itself.
+    """
+    try:
+        link = build_library_link(user_id)
+        if not link.startswith("http"):
+            _log_webhook_event(
+                "reply", sender_id=sender_id, sender_username=sender_username,
+                outcome="skipped", detail=f"no absolute base url, got {link!r}",
+            )
+            return
+        total = _user_reel_count(user_id)
+        if total <= 1:
+            text = f"Saved. Your library is here: {link}"
+        else:
+            text = f"Saved. That is {total} reels now. Your library: {link}"
+        result = send_text(sender_id, text)
+        _log_webhook_event(
+            "reply", sender_id=sender_id, sender_username=sender_username,
+            outcome="sent" if result["ok"] else "send_failed",
+            detail=f"saved={saved} total={total} :: {result['detail']}",
+        )
+    except Exception as exc:
+        _log_webhook_event(
+            "reply", sender_id=sender_id, sender_username=sender_username,
+            outcome="reply_crashed", detail=str(exc),
+        )
+
+
 def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) -> int:
     """Ingest reels the sender shared before their link completed.
 
@@ -220,6 +267,12 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
     reels_saved = 0
     ignored_events = 0
     saved_reel_ids: list[str] = []
+    # Instagram delivers each shared reel as its own message event, so a bulk
+    # save arrives as many events in one payload. Collect who saved what and
+    # reply once each after the loop: once per reel would fire five DMs for
+    # five reels, and replying mid-loop would quote a count that is still
+    # climbing.
+    pending_replies: dict[str, dict] = {}
 
     events = list(_iter_message_events(payload))
     # Always record that a delivery arrived, so an empty event list is
@@ -289,15 +342,28 @@ async def instagram_webhook(request: Request, x_hub_signature_256: str = Header(
                 "reel", sender_id=sender_id, sender_username=sender_username,
                 outcome="ignored", detail="no instagram reel url found in message",
             )
+        saved_here = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
             job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
             saved_reel_ids.append(reel["id"])
             reels_saved += 1
+            saved_here += 1
             _log_webhook_event(
                 "reel", sender_id=sender_id, sender_username=sender_username,
                 outcome="saved", detail=url,
             )
+        if saved_here:
+            entry = pending_replies.setdefault(
+                sender_id,
+                {"user_id": user["id"], "username": sender_username, "saved": 0},
+            )
+            entry["saved"] += saved_here
+
+    for reply_sender_id, entry in pending_replies.items():
+        _reply_with_library(
+            entry["user_id"], reply_sender_id, entry["username"], entry["saved"]
+        )
 
     if linked_accounts or reels_saved:
         ensure_background_progress()
