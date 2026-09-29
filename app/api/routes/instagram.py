@@ -197,6 +197,13 @@ def _reply_with_library(user_id: str, sender_id: str, sender_username: str, save
     disappointment; a reply that raises would cost them the reel itself.
     """
     if not _dm_replies_allowed(user_id):
+        # Logged, not silent: "no reply arrived" otherwise looks identical to
+        # a send that failed, and those need opposite fixes.
+        _log_webhook_event(
+            "reply", sender_id=sender_id, sender_username=sender_username,
+            outcome="skipped_gate",
+            detail=f"{user_id} is not in DM_REPLY_ACCOUNTS and is not an admin",
+        )
         return
     try:
         link = build_library_link(user_id)
