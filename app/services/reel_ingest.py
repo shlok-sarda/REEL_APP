@@ -257,6 +257,32 @@ def _append_reel_attempt(url: str, user_id: str = "default", source: str = "tele
     return reel
 
 
+# Everything keyed by reel_id that is meaningless once the reel is gone.
+# Foreign keys are off, so nothing cascades: a row left here keeps a deleted
+# reel alive in search results and folder counts until a full rebuild runs,
+# which makes the delete look like it did nothing.
+REEL_CHILD_TABLES = (
+    "reel_item_features",
+    "reel_processing_diagnostics",
+    "deep_search_documents",
+    "reel_locations",
+    "reel_recipes",
+    "folder_memberships",
+    "folder_adjudications",
+    "collection_memberships",
+)
+
+
+def _delete_reel_children(connection, reel_ids: list[str]) -> None:
+    placeholders = ",".join("?" for _ in reel_ids)
+    for table in REEL_CHILD_TABLES:
+        try:
+            connection.execute(f"DELETE FROM {table} WHERE reel_id IN ({placeholders})", reel_ids)
+        except sqlite3.OperationalError:
+            # Some of these tables are created lazily by their feature.
+            continue
+
+
 def delete_reel(reel_id: str) -> bool:
     normalized_reel_id = normalize(reel_id)
     with get_connection() as connection:
@@ -287,6 +313,7 @@ def delete_reel(reel_id: str) -> bool:
             )
         connection.execute("DELETE FROM reel_items WHERE reel_id = ?", (normalized_reel_id,))
         connection.execute("DELETE FROM processing_jobs WHERE reel_id = ?", (normalized_reel_id,))
+        _delete_reel_children(connection, [normalized_reel_id])
         cursor = connection.execute("DELETE FROM reels WHERE id = ?", (normalized_reel_id,))
         deleted = cursor.rowcount > 0
     if deleted:
@@ -340,6 +367,7 @@ def delete_failed_reels(user_id: str | None = None) -> dict:
                 )
             connection.execute(f"DELETE FROM reel_items WHERE reel_id IN ({placeholders})", reel_ids)
             connection.execute(f"DELETE FROM processing_jobs WHERE reel_id IN ({placeholders})", reel_ids)
+            _delete_reel_children(connection, reel_ids)
             cursor = connection.execute(f"DELETE FROM reels WHERE id IN ({placeholders})", reel_ids)
             deleted = cursor.rowcount
 

@@ -3274,6 +3274,12 @@ def build_clipnest_v1_html(user_id: str) -> str:
       const response = await fetch(`/reels/${encodeURIComponent(item.reel_id)}`, { method: 'DELETE', credentials: 'same-origin' });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        // A library-link session is refused until a real sign-in; offer the
+        // way out instead of a dead end.
+        if (response.status === 403 && String(body.detail || '').includes('Sign in with Google')) {
+          if (window.confirm(body.detail + ' Sign in now?')) logout();
+          return;
+        }
         window.alert(body.detail || 'Delete failed. Please try again.');
         return;
       }
@@ -3282,7 +3288,19 @@ def build_clipnest_v1_html(user_id: str) -> str:
       render();
     }
     function removeReelFromState(reelId) {
-      state.data = state.data.map((list) => ({ ...list, items: (list.items || []).filter((item) => item.reel_id !== reelId) }));
+      // Every client-side copy of the library, not just the shelves: missing
+      // one left the reel sitting in Recently saved or search after a
+      // successful delete, which reads as the delete not working.
+      const keep = (item) => item.reel_id !== reelId;
+      state.data = state.data.map((list) => ({ ...list, items: (list.items || []).filter(keep) }));
+      if (Array.isArray(state.recents)) state.recents = state.recents.filter(keep);
+      if (state.deepSearch && Array.isArray(state.deepSearch.results)) state.deepSearch.results = state.deepSearch.results.filter(keep);
+      if (Array.isArray(state.miniList)) state.miniList = state.miniList.filter(keep);
+      const fd = state.folderDetail;
+      if (fd) {
+        if (Array.isArray(fd.members)) fd.members = fd.members.filter(keep);
+        if (Array.isArray(fd.suggestions)) fd.suggestions = fd.suggestions.filter(keep);
+      }
     }
     function setNav(screen) {
       // Tapping Home always returns to a clean browse: drop any active search
