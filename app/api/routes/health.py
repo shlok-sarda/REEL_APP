@@ -247,6 +247,9 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     out: dict = {"sending_enabled": bool(settings.instagram_access_token)}
     out["outbound_dm_test"] = settings.outbound_dm_test
     out["graph_version"] = settings.instagram_graph_version
+    # A library link is only useful if it is absolute. An unset PUBLIC_BASE_URL
+    # silently produces "/g/<token>", which is unopenable from a DM.
+    out["public_base_url"] = settings.public_base_url
     # Names and lengths only, never values. Distinguishes "never set" from
     # "set under a slightly different name" — the two look identical from
     # inside the app, and only one of them is fixed by pasting a new token.
