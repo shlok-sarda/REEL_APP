@@ -253,6 +253,15 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     # Names and lengths only, never values. Distinguishes "never set" from
     # "set under a slightly different name" — the two look identical from
     # inside the app, and only one of them is fixed by pasting a new token.
+    # The switches that decide whether anything is sent at all. Not secrets,
+    # and a typo in one of them is otherwise indistinguishable from the
+    # feature being broken.
+    out["guest_test_senders"] = sorted(settings.guest_test_senders)
+    out["dm_reply_accounts"] = sorted(settings.dm_reply_accounts)
+    out["dm_reply_for_everyone"] = settings.dm_reply_for_everyone
+    out["guest_autocreate_for_everyone"] = settings.guest_autocreate_for_everyone
+    out["guest_lock_enabled"] = settings.guest_lock_enabled
+    out["dm_cooldown_minutes"] = settings.dm_cooldown_minutes
     out["env_names_seen"] = sorted(
         f"{k}(len={len(v.strip())})"
         for k, v in _os.environ.items()

@@ -322,6 +322,14 @@ async def instagram_webhook(
                 outcome="created" if user else "create_failed",
                 detail=(user or {}).get("id", ""),
             )
+            # Anything they sent before the account existed is sitting in the
+            # buffer. Replay it now, or a reel shared while the allowlist was
+            # still wrong is silently lost. append_reel dedupes on
+            # (user_id, url), so replaying twice cannot duplicate anything.
+            if user and user.get("id"):
+                drained = _drain_buffered_reels(sender_id, sender_username, user["id"])
+                if drained:
+                    reels_saved += drained
         if not user:
             # Buffer instead of drop: keep each URL so it can be replayed when
             # this sender's link code arrives (possibly later in this same
