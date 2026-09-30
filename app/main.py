@@ -73,6 +73,16 @@ def _queue_janitor_loop():
         except Exception as exc:
             print(f"[janitor] pass failed: {exc}", flush=True)
         tick += 1
+        # Almost always finds nobody, for the cost of one indexed query.
+        # This is the only thing that can fire a message not triggered by the
+        # person themselves, and it is still a reply inside their own window.
+        try:
+            from app.services.nudge import run_last_call_sweep
+
+            run_last_call_sweep()
+        except Exception as exc:
+            print(f"[janitor] last-call sweep failed: {exc}")
+
         time.sleep(150)
 
 

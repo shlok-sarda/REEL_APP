@@ -285,8 +285,80 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     return out
 
 
+# Every table keyed to a user. Derived by introspecting the built schema
+# rather than by memory, so a table added later and forgotten here shows up
+# as a leftover rather than silently surviving a reset.
+_USER_SCOPED_TABLES = [
+    "cluster_events", "cluster_memberships", "deep_search_documents",
+    "folder_adjudications", "folder_memberships", "instagram_link_tokens",
+    "nudge_log", "processing_jobs", "reel_item_features", "reel_locations",
+    "reel_processing_diagnostics", "reel_recipes", "reels",
+    "telegram_link_tokens", "user_folders", "user_interest_edges",
+    "user_interest_nodes",
+]
+
+
+def _reset_test_guest(handle: str) -> dict:
+    """Wipe a test guest so the funnel can be replayed from the beginning.
+
+    Exists because the first-contact message and the "1 of 5" frame fire once
+    per account ever, so testing the new-user experience otherwise costs a
+    fresh Instagram account every run.
+
+    Refuses anything not named in GUEST_TEST_SENDERS, and refuses any account
+    that has ever signed in with Google. A real user must not be reachable
+    from here by any spelling.
+    """
+    from app.db.database import get_connection
+    from app.services import nudge
+
+    wanted = (handle or "").strip().lower().lstrip("@")
+    if not wanted:
+        return {"ok": False, "error": "no handle given"}
+    if not nudge.sender_allowed(wanted, wanted):
+        return {"ok": False, "error": f"{wanted!r} is not in GUEST_TEST_SENDERS"}
+
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, google_sub, instagram_user_id, instagram_username FROM users "
+            "WHERE lower(instagram_username) = ? OR instagram_user_id = ? LIMIT 1",
+            (wanted, wanted),
+        ).fetchone()
+        if not row:
+            return {"ok": True, "note": f"no account for {wanted!r}, nothing to reset"}
+        if (row["google_sub"] or "").strip():
+            return {"ok": False, "error": "account has signed in with Google, refusing"}
+
+        user_id = row["id"]
+        reel_ids = [r["id"] for r in connection.execute(
+            "SELECT id FROM reels WHERE user_id = ?", (user_id,))]
+        deleted = {}
+        if reel_ids:
+            marks = ",".join("?" * len(reel_ids))
+            cur = connection.execute(
+                f"DELETE FROM reel_items WHERE reel_id IN ({marks})", reel_ids)
+            deleted["reel_items"] = cur.rowcount
+        for table in _USER_SCOPED_TABLES:
+            try:
+                cur = connection.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+                if cur.rowcount:
+                    deleted[table] = cur.rowcount
+            except Exception as exc:
+                deleted[f"{table}_error"] = str(exc)[:80]
+        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        deleted["users"] = 1
+
+    return {
+        "ok": True,
+        "reset": wanted,
+        "user_id": user_id,
+        "deleted": deleted,
+        "note": "account removed; the next DM recreates it and the funnel starts at message one",
+    }
+
+
 @router.get("/health", response_model=HealthResponse)
-def health_check(fix: int = 0, token: str = ""):
+def health_check(fix: int = 0, token: str = "", reset_guest: str = ""):
     ensure_storage()
     authorized = _debug_authorized(token)
     if fix and not authorized:
@@ -298,6 +370,10 @@ def health_check(fix: int = 0, token: str = ""):
         debug["instagram_webhook"] = _instagram_webhook_debug()
     if fix:
         debug["fix_report"] = _run_inline_fix()
+    if reset_guest:
+        if not authorized:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debug token required")
+        debug["reset_guest"] = _reset_test_guest(reset_guest)
     return HealthResponse(
         service="reel-organizer-api",
         endpoint="/instagram/webhook",

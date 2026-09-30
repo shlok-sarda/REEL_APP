@@ -30,6 +30,19 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS nudge_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        message_key TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_nudge_log_user ON nudge_log(user_id, message_key)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS instagram_link_tokens (
         code TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -425,6 +438,9 @@ USER_EXTRA_COLUMNS = {
     # When this account was last DM'd, so a batch of reels finishing together
     # produces one message rather than one each.
     "last_dm_at": "TEXT NOT NULL DEFAULT ''",
+    # When they last messaged us. The 24h reply window is measured from this,
+    # and the last-call nudge fires at 23h against it.
+    "last_inbound_at": "TEXT NOT NULL DEFAULT ''",
 }
 
 # Same migrate-by-ALTER pattern for reels: a long-lived production table was

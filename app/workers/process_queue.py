@@ -182,9 +182,15 @@ def process_job(job: dict):
     # Wrapped so a failed DM can never fail a completed job.
     if job["job_type"] == "process_reel":
         try:
-            from app.services.dm_notify import notify_reel_ready
+            from app.db.database import get_connection as _conn
+            from app.services import nudge
 
-            notify_reel_ready(job["user_id"], job["reel_id"])
+            with _conn() as c:
+                row = c.execute(
+                    "SELECT item_name FROM reel_items WHERE reel_id = ? AND item_name != '' LIMIT 1",
+                    (job["reel_id"],),
+                ).fetchone()
+            nudge.fire(job["user_id"], "reel_ready", title=(row["item_name"] if row else ""))
         except Exception:
             pass
 

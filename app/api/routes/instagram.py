@@ -9,10 +9,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.db.database import get_connection
-from app.services.auth import build_library_link, complete_instagram_link, create_guest_user, current_user, get_user_by_instagram_user_id, iso_now
+from app.services.auth import complete_instagram_link, create_guest_user, current_user, get_user_by_instagram_user_id, iso_now
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.instagram_profile import resolve_instagram_username
 from app.services.instagram_send import send_text
+from app.services import nudge
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
@@ -185,115 +186,6 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     return sender_id, username
 
 
-def _is_test_sender(sender_id: str, sender_username: str) -> bool:
-    """Whether this sender is named in GUEST_TEST_SENDERS, by id or handle."""
-    allow = settings.guest_test_senders
-    if not allow:
-        return False
-    if sender_id and sender_id.strip().lower() in allow:
-        return True
-    handle = (sender_username or "").strip().lower().lstrip("@")
-    return bool(handle) and handle in allow
-
-
-def _dm_replies_allowed(user_id: str) -> bool:
-    """Whether this account may be answered automatically.
-
-    Deliberately closed by default. The existing users signed up for a bot
-    that never speaks; making it chatty underneath them is a change they did
-    not agree to, and it lands in a channel where annoying people is
-    expensive. Admins always pass so the loop is testable without a
-    dashboard trip.
-    """
-    if settings.dm_reply_for_everyone:
-        return True
-    if not user_id:
-        return False
-    if user_id.strip().lower() in settings.dm_reply_accounts:
-        return True
-    try:
-        with get_connection() as connection:
-            row = connection.execute(
-                "SELECT lower(email) AS email, instagram_user_id, instagram_username "
-                "FROM users WHERE id = ? LIMIT 1",
-                (user_id,),
-            ).fetchone()
-    except Exception:
-        return False
-    if not row:
-        return False
-    # By Instagram identity, because a guest has no email at all and would
-    # otherwise be refused by the very gate that exists to let them through.
-    if _is_test_sender(row["instagram_user_id"] or "", row["instagram_username"] or ""):
-        return True
-    # Deliberately no admin bypass. It existed so the loop could be tested
-    # before any allowlist was set, and then quietly answered a second admin
-    # account after one handle had been named. Being on this list is the only
-    # way to be messaged.
-    email = (row["email"] or "")
-    return bool(email) and email in settings.dm_reply_accounts
-
-
-def _user_reel_count(user_id: str) -> int:
-    try:
-        with get_connection() as connection:
-            row = connection.execute(
-                "SELECT COUNT(*) AS n FROM reels WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        return int(row["n"] or 0)
-    except Exception:
-        return 0
-
-
-def _reply_with_library(user_id: str, sender_id: str, sender_username: str, saved: int) -> None:
-    """Hand back the library link after a save.
-
-    One reply per delivery, not per reel: a single DM can carry several reels
-    and the person should hear once. Inside the 24h window by construction,
-    because this only ever answers a message they just sent.
-
-    Any failure is logged and swallowed. A reply that does not arrive is a
-    disappointment; a reply that raises would cost them the reel itself.
-    """
-    if not _dm_replies_allowed(user_id):
-        # Logged, not silent: "no reply arrived" otherwise looks identical to
-        # a send that failed, and those need opposite fixes.
-        _log_webhook_event(
-            "reply", sender_id=sender_id, sender_username=sender_username,
-            outcome="skipped_gate",
-            detail=f"{user_id} is not in DM_REPLY_ACCOUNTS and is not an admin",
-        )
-        return
-    try:
-        link = build_library_link(user_id)
-        if not link.startswith("http"):
-            _log_webhook_event(
-                "reply", sender_id=sender_id, sender_username=sender_username,
-                outcome="skipped", detail=f"no absolute base url, got {link!r}",
-            )
-            return
-        total = _user_reel_count(user_id)
-        if not saved:
-            # Recovery: they sent something that was not a reel, so nothing
-            # was saved and saying "Saved" would be a lie.
-            text = f"Here is your library: {link}"
-        elif total <= 1:
-            text = f"Saved. Your library is here: {link}"
-        else:
-            text = f"Saved. That is {total} reels now. Your library: {link}"
-        result = send_text(sender_id, text)
-        _log_webhook_event(
-            "reply", sender_id=sender_id, sender_username=sender_username,
-            outcome="sent" if result["ok"] else "send_failed",
-            detail=f"saved={saved} total={total} :: {result['detail']}",
-        )
-    except Exception as exc:
-        _log_webhook_event(
-            "reply", sender_id=sender_id, sender_username=sender_username,
-            outcome="reply_crashed", detail=str(exc),
-        )
-
-
 def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) -> int:
     """Ingest reels the sender shared before their link completed.
 
@@ -397,6 +289,9 @@ async def instagram_webhook(
             background.add_task(_send_ping_reply, sender_id, sender_username)
             continue
 
+        # The 24h window and the last-call timer both hang off this.
+        nudge.record_inbound(sender_id)
+
         link_code = _extract_link_code(event)
         if link_code:
             try:
@@ -418,7 +313,8 @@ async def instagram_webhook(
 
         user = get_user_by_instagram_user_id(sender_id)
         if not user and (
-            settings.guest_autocreate_for_everyone or _is_test_sender(sender_id, sender_username)
+            settings.guest_autocreate_for_everyone
+            or nudge.sender_allowed(sender_id, sender_username)
         ):
             user = create_guest_user(sender_id, sender_username)
             _log_webhook_event(
@@ -455,9 +351,7 @@ async def instagram_webhook(
             # permanent, so deleting the conversation must not cost someone
             # their library.
             if sender_id not in pending_replies:
-                background.add_task(
-                    _reply_with_library, user["id"], sender_id, sender_username, 0
-                )
+                background.add_task(nudge.fire, user["id"], "plain_message")
         saved_here = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
@@ -470,14 +364,17 @@ async def instagram_webhook(
                 outcome="saved", detail=url,
             )
         if saved_here:
-            # Tracked only so the recovery reply below does not also fire for
-            # someone who just saved something.
+            # Tracked so the recovery reply does not also fire for someone who
+            # just saved something.
             pending_replies[sender_id] = {"user_id": user["id"], "saved": saved_here}
+            # Only the first-ever reel gets an immediate word. Five minutes of
+            # silence on a stranger's first message reads as broken, not as
+            # processing. Every later reel waits for its title.
+            background.add_task(nudge.fire, user["id"], "reel_saved")
 
-    # No DM on save. The library hides a reel until it has a title, so a link
-    # sent now opens an empty page for the several minutes processing takes.
-    # The reply happens when the job completes instead - see
-    # app/services/dm_notify.notify_reel_ready.
+    # Replies are decided in app/services/nudge, not here. This route's job
+    # is to record what happened and say so; what the bot says about it is one
+    # decision in one place.
 
     if linked_accounts or reels_saved:
         ensure_background_progress()
