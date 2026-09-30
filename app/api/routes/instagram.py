@@ -340,6 +340,20 @@ async def instagram_webhook(
             ignored_events += 1
             continue
 
+        # The wall. Hold the reel rather than process it, and rather than
+        # reject it: signing in then saves everything waiting in one go.
+        if nudge.is_locked(user["id"]):
+            held = _extract_candidate_urls(event)
+            for url in held:
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="buffered", detail=url,
+                )
+            if held:
+                background.add_task(nudge.fire, user["id"], "reel_held")
+                ignored_events += 1
+                continue
+
         urls = _extract_candidate_urls(event)
         if not urls:
             _log_webhook_event(

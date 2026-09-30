@@ -55,106 +55,122 @@ applies.
 | `locked` | 20+ reels, not signed in |
 | `converted` | Signed in with Google. **The bot stops nudging. It has what it wanted** |
 | `dormant` | Window closed. Unreachable. Not a state we can act on, only count |
+| `locked` enforcement | `GUEST_LOCK_ENABLED=1` makes the wall real: reels past 20 are held, not processed |
 
 ## 4. The messages
 
-Each fires at most **once ever** unless marked repeatable. Cooldown between
-any two messages to one person: **10 minutes** (`DM_COOLDOWN_MINUTES`).
+**The bot speaks when someone is drifting, not when they act.** The first
+draft of this document confirmed every reel, which came to 21 messages for 21
+reels, aimed at a person who was actively saving and needed no reminding. A
+user who reaches 20 reels should hear from us about six times in total.
 
-### M1 — first contact acknowledgement
-**Trigger:** their very first reel is saved, immediately, before processing.
-**Fires:** once ever.
-**Why:** the most fragile moment in the funnel. Someone shared a reel to an
-account they have never interacted with and then heard nothing for five
-minutes. They are not thinking "it must be processing", they are thinking this
-is dead. This message costs one send and converts "broken" into "working".
+Each fires **once ever** unless marked repeatable. Cooldown between any two
+messages to one person: **10 minutes** (`DM_COOLDOWN_MINUTES`).
 
-> Got it. Give me two minutes, I am watching the reel.
+### M1 — first contact, instant
+**Trigger:** their very first reel is saved, before processing. Once ever.
+**Why:** the most fragile moment in the funnel. Someone messaged an account
+they have never interacted with and then heard nothing for five minutes. They
+are not thinking "it must be processing", they are thinking this is dead.
 
-### M2 — the reel is ready
-**Trigger:** processing completes. **Repeatable**, subject to cooldown.
-**Why:** the magic moment. It works because it names something they never
-typed, which proves the app watched the video rather than read the caption.
-Lead with the title, always.
+> Thank you for saving a reel with me. It is processing now, give me a couple of minutes.
 
-> Ready: {title}. Your library is here: {link}
+### M2 — the first library link
+**Trigger:** their first reel finishes processing. Once ever.
+**Why:** the magic moment, and the only one that needs announcing. It names
+something they never typed, which proves the app watched the video rather
+than read the caption. The "1 of 5" frame rides here.
 
-On the first reel only, append the progress frame:
-
-> Ready: {title}. Your library is here: {link}
-> That is 1 of 5. At five reels it starts grouping them for you.
+> Saved it as {title}. Here is your library: {link} That is 1 of 5. At five reels it starts grouping them for you.
 
 **Why "1 of 5" and never "send 4 more":** Nunes and Drèze (2006) gave one group
 a ten stamp card with two already filled and another a blank eight stamp card.
-Identical work remaining. Completion was 34% against 19%. Progress already
-made beats distance still to go, for free.
+Identical work remaining. Completion was 34% against 19%.
 
-### M3 — last call
-**Trigger:** 23 hours since their **most recent inbound message**, and they
-have sent nothing since, and they are not `converted`.
-**Fires:** once per dormancy. **This is the single highest leverage message in
-the funnel**, because after it you can never speak to them again.
-**Why:** anchor to the last message, never to the first reel. The window resets
-on every message they send, so anchoring to the first reel fires the shot
-hours early and wastes it.
+### Reels two onward: silence
+No message. They have seen the library, the link never changes, and a
+confirmation per reel is the single biggest annoyance risk in the design.
 
-> You saved {title} yesterday. Anything else you want to keep, just send it
-> here. It takes about five before this really starts being useful.
+### M3 — the quiet nudge
+**Trigger:** 23 hours since their **most recent inbound message** with nothing
+since, and not `converted`. Repeatable, once per dormancy.
+**Why:** the only message aimed at someone forgetting the app exists, which is
+the entire reason the bot has a voice. Anchor to the last message, never the
+first reel: the window resets on every message they send, so anchoring to the
+first reel fires hours early and wastes the only shot left.
 
-Low pressure on purpose. This is a door left open, not a sales pitch, and a
-pitch here is what gets reported.
+Asks for one specific small thing rather than describing the product:
+
+> Send me one more reel and I can start grouping them for you.
+
+> {n} saved so far. One more gets you to five, which is where it starts sorting itself.
+
+> Still here whenever you find something worth keeping. Your library: {link}
+
+**No cap is needed, and this is not an oversight.** The 24 hour window already
+enforces one. A nudge that goes unanswered is followed by the window closing,
+after which the person cannot be messaged at all, so at most one nudge per
+dormancy can ever be sent. A counter for it would only ever hold 0 or 1.
 
 ### M4 — home screen
-**Trigger:** reel count crosses 5.
-**Why here and not earlier:** at five reels the library finally looks like
-something worth returning to. Asking someone to install anything when they have
-one reel is asking before there is a reason.
+**Trigger:** reel count crosses 5. Once ever.
+**Why here:** at five reels the library finally looks worth returning to.
+Asking anyone to install something when they have one reel is asking before
+there is a reason.
 
-> {n} reels now. Put ClipNest on your home screen so you are not digging
-> through DMs for this link: {link}
+> {n} reels now. Put ClipNest on your home screen so you are not digging through DMs for this link: {link}
 
-**Known ceiling, do not design around it:** installing requires escaping
-Instagram's in-app browser into Safari, which is fiddly, and iOS cannot be
-prompted programmatically. Expect very few to do it. It is worth saying once
-because the home screen is the only door you own that is not Meta's.
+**Known ceiling:** installing means escaping Instagram's in-app browser into
+Safari, and iOS cannot be prompted programmatically. Expect very few. Worth
+saying once because the home screen is the only door you own that is not
+Meta's.
 
 ### M5 — heads up
-**Trigger:** reel count crosses 17.
-**Why:** the lock must never be an ambush. A warned wall is a deadline; an
-unwarned one is a betrayal.
+**Trigger:** reel count crosses 17. Once ever.
+**Why:** a warned wall is a deadline, an unwarned one is a betrayal.
 
-> {n} saved. At 20 you will need a free account to keep going. One tap, and
-> everything you have stays exactly where it is.
+> {n} saved. At 20 you will need a free account to keep going. One tap, and everything you have stays exactly where it is.
 
 ### M6 — the lock
-**Trigger:** reel count reaches 20, not signed in.
-**Why:** maximum accumulated value, so maximum to lose. Goal gradient
-territory, where effort accelerates toward a visible finish line.
+**Trigger:** reel count reaches 20, not signed in. Once ever.
+**Why:** maximum accumulated value, so maximum to lose.
 
 > That is 20 reels. Sign in to keep saving and it is all still here: {link}
 
-### M7 — saved past the lock
-**Trigger:** a reel arrives while `locked`. **Repeatable**, subject to cooldown.
-**Why:** never reject their reel. Buffer it, and make signing in pay off
-instantly instead of merely unblocking them.
+### M7 — a reel arrives past the lock
+**Trigger:** a reel sent while locked. Repeatable, subject to cooldown.
+**Why:** never reject their reel. It is buffered, not dropped, so signing in
+pays off instantly rather than merely unblocking them. The wall is real:
+`GUEST_LOCK_ENABLED` stops the reel being processed, because every one past
+the wall costs ₹0.82 of a guest who has not signed in.
 
 > Holding that one for you. Sign in and it saves straight away: {link}
 
 ### M8 — recovery
-**Trigger:** any message with no reel in it. **Repeatable**, subject to
-cooldown.
-**Why:** the DM thread is the only way back to their library. Their Instagram
-id is permanent, so any message must be able to regenerate the link. Deleting
-the conversation must never cost someone their account.
+**Trigger:** any message with no reel in it. Repeatable, subject to cooldown.
+**Why:** the DM thread is the only way back to their library, and their
+Instagram id is permanent, so any message must regenerate the link.
 
 > Here is your library: {link}
 
 ## 5. Precedence
 
-If more than one applies, highest wins and the rest are dropped, not queued:
+Highest wins, the rest are dropped rather than queued:
 
-`M6 lock` → `M5 heads up` → `M4 home screen` → `M7 past lock` → `M2 ready` →
-`M8 recovery` → `M3 last call`
+`M6 lock` → `M5 heads up` → `M4 home screen` → `M7 past lock` →
+`M2 first library` → `M1 first ack` → `M8 recovery` → `M3 quiet nudge`
+
+## 5a. What a full journey actually costs
+
+Measured by walking a simulated user from reel 1 to reel 21:
+
+| | Messages |
+|---|---|
+| First draft, confirm everything | 21 |
+| This design | **6** |
+
+M1, M2, home screen at 5, heads up at 17, lock at 20, and one held reel.
+Plus a quiet nudge each time they drift.
 
 ## 6. Validator
 

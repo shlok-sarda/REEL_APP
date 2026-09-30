@@ -37,13 +37,19 @@ PRECEDENCE = [
     "m5_heads_up",
     "m4_home_screen",
     "m7_past_lock",
-    "m2_ready",
-    "m1_first_contact",
+    "m2_first_library",
+    "m1_first_ack",
     "m8_recovery",
-    "m3_last_call",
+    "m3_quiet_nudge",
 ]
 
-ONCE_EVER = {"m1_first_contact", "m4_home_screen", "m5_heads_up", "m6_lock"}
+ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock"}
+
+# There is deliberately no cap on quiet nudges. The 24 hour window already
+# enforces one: a nudge that goes unanswered is followed by the window
+# closing, after which the person cannot be messaged at all. So at most one
+# nudge per dormancy can ever be sent, and a counter for it would be a
+# variable that is only ever 0 or 1.
 
 
 def _now() -> datetime:
@@ -124,12 +130,40 @@ def replies_allowed(user: dict[str, Any]) -> bool:
     return bool(email) and email in settings.dm_reply_accounts
 
 
+def is_locked(user_id: str) -> bool:
+    """Has this account hit the wall without signing in?
+
+    The wall has to actually hold, not just be announced. Every reel past it
+    costs real money to process, and a guest who never signs in could
+    otherwise sit at forty reels on the house. The reel is still kept: it is
+    buffered and drains the moment they sign in.
+    """
+    if not settings.guest_lock_enabled:
+        return False
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(google_sub, '') AS g, "
+                "(SELECT COUNT(*) FROM reels WHERE user_id = users.id) AS n "
+                "FROM users WHERE id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return False
+        if (row["g"] or "").strip():
+            return False
+        return int(row["n"] or 0) >= LOCK_AT
+    except Exception:
+        return False
+
+
 def load_state(user_id: str) -> dict[str, Any] | None:
     """Everything a decision needs, in one read."""
     with get_connection() as connection:
         row = connection.execute(
             "SELECT id, email, google_sub, instagram_user_id, instagram_username, "
-            "library_token, last_dm_at, last_inbound_at FROM users WHERE id = ? LIMIT 1",
+            "library_token, last_dm_at, last_inbound_at "
+            "FROM users WHERE id = ? LIMIT 1",
             (user_id,),
         ).fetchone()
         if not row:
@@ -190,13 +224,22 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     candidates: list[str] = []
 
     if trigger == "reel_saved":
-        if n <= 1 and "m1_first_contact" not in sent:
-            candidates.append("m1_first_contact")
-        if n > LOCK_AT:
-            candidates.append("m7_past_lock")
+        if n <= 1 and "m1_first_ack" not in sent:
+            candidates.append("m1_first_ack")
+
+    if trigger == "reel_held":
+        candidates.append("m7_past_lock")
 
     if trigger == "reel_ready":
-        candidates.append("m2_ready")
+        # Only the first reel is announced. After that they have seen the
+        # library and know it works, so a message per reel is noise: it was
+        # 21 DMs for 21 reels, aimed at someone who needs no reminding
+        # because they are actively saving. The bot speaks when they drift,
+        # not when they act.
+        if "m2_first_library" not in sent:
+            candidates.append("m2_first_library")
+        # Milestones still fire on the crossing, but each exists once in a
+        # lifetime, so the whole set is three messages, not one per reel.
         if n >= LOCK_AT and "m6_lock" not in sent:
             candidates.append("m6_lock")
         elif HEADS_UP_AT <= n < LOCK_AT and "m5_heads_up" not in sent:
@@ -208,7 +251,7 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         candidates.append("m8_recovery")
 
     if trigger == "timer":
-        candidates.append("m3_last_call")
+        candidates.append("m3_quiet_nudge")
 
     candidates = [c for c in candidates if not (c in ONCE_EVER and c in sent)]
     for key in PRECEDENCE:
@@ -223,25 +266,23 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
     link = library_link(user)
     n = user["reel_count"]
 
-    if key == "m1_first_contact":
-        return "Got it. Give me two minutes, I am watching the reel."
-    if key == "m2_ready":
+    if key == "m1_first_ack":
+        return "Thank you for saving a reel with me. It is processing now, give me a couple of minutes."
+    if key == "m2_first_library":
+        head = f"Here is your library: {link}"
+        if title:
+            head = f"Saved it as {title}. Here is your library: {link}"
+        return head + " That is 1 of 5. At five reels it starts grouping them for you."
+    if key == "m3_quiet_nudge":
+        # The only message aimed at someone who is drifting, so it asks for
+        # one specific small thing rather than describing the product.
         if n <= 1:
-            head = f"Ready: {title}. Your library is here: {link}" if title else f"Ready. Your library is here: {link}"
-            return head + " That is 1 of 5. At five reels it starts grouping them for you."
-        if title:
-            return f"Ready: {title}. Your library: {link}"
-        return f"Ready. That is {n} reels now. Your library: {link}"
-    if key == "m3_last_call":
-        if title:
-            return (
-                f"You saved {title} yesterday. Anything else you want to keep, just send it here. "
-                "It takes about five before this really starts being useful."
-            )
-        return (
-            "Anything else you want to keep, just send it here. "
-            "It takes about five before this really starts being useful."
-        )
+            if title:
+                return f"You saved {title} yesterday. Send me one more and I can start grouping them for you."
+            return "Send me one more reel and I can start grouping them for you."
+        if n < HOME_SCREEN_AT:
+            return f"{n} saved so far. One more gets you to five, which is where it starts sorting itself."
+        return f"Still here whenever you find something worth keeping. Your library: {link}"
     if key == "m4_home_screen":
         return f"{n} reels now. Put ClipNest on your home screen so you are not digging through DMs for this link: {link}"
     if key == "m5_heads_up":
@@ -329,7 +370,7 @@ def due_for_last_call(limit: int = 20) -> list[str]:
                   AND u.instagram_user_id != ''
                   AND NOT EXISTS (
                     SELECT 1 FROM nudge_log n
-                    WHERE n.user_id = u.id AND n.message_key = 'm3_last_call'
+                    WHERE n.user_id = u.id AND n.message_key = 'm3_quiet_nudge'
                       AND n.sent_at > u.last_inbound_at
                   )
                 LIMIT ?
