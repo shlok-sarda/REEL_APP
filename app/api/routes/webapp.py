@@ -1325,16 +1325,93 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }
     .linkish:hover { color:var(--text); }
 
-    /* ---------- PHONE ---------- */
+    /* ---------- PROOF STACK (replaces the old static phone-video mockup) ----------
+       Scattered real reel-photo cards behind a floating search card whose query
+       types/erases on a loop and whose results swap to match. No device bezel,
+       no screen recording to keep in sync with the product - this is built UI,
+       same reasoning as the share-sheet/collections mocks further down the page. */
     .phone-wrap { margin-top:44px; display:grid; justify-items:center; gap:14px; }
-    .phone {
-      width:min(272px,66vw); aspect-ratio:720/1394;
-      border-radius:34px; padding:5px; background:#0e0e10;
-      border:1px solid rgba(255,255,255,0.11);
-      box-shadow:0 44px 90px -34px rgba(0,0,0,0.95), 0 0 0 1px rgba(0,0,0,0.6) inset;
-      overflow:hidden;
+    .proof-stack {
+      position:relative;
+      width:min(300px, 80vw);
+      margin-inline:auto;
+      height:440px;
     }
-    .phone-video { width:100%; height:100%; object-fit:cover; border-radius:29px; background:#000; }
+    .scatter-card {
+      position:absolute;
+      width:108px; height:140px;
+      border-radius:16px;
+      background-color:var(--soft);
+      background-size:cover; background-position:center;
+      border:1px solid var(--line);
+      box-shadow:0 18px 34px -16px rgba(0,0,0,.6);
+    }
+    .scatter-card::after {
+      content:""; position:absolute; inset:0; border-radius:inherit;
+      background:
+        linear-gradient(135deg, rgba(10,10,11,.05), rgba(10,10,11,.38) 80%),
+        linear-gradient(135deg, rgba(242,168,102,.12), transparent 65%);
+    }
+    @keyframes cardfloat { 0%,100% { translate:0 0; } 50% { translate:0 -8px; } }
+    .js .scatter-card { animation:cardfloat 5.5s ease-in-out infinite; }
+    .scatter-1 { top:0;       left:0;     rotate:-10deg; background-image:url('https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/India-coffee-house-kolkata.jpg/500px-India-coffee-house-kolkata.jpg'); animation-delay:.3s; }
+    .scatter-2 { top:-8px;    right:4px;  rotate:8deg;   background-image:url('https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6e/Himalaya_mountain_-_Kashmir_%283531494596%29_%28cropped%29.jpg/500px-Himalaya_mountain_-_Kashmir_%283531494596%29_%28cropped%29.jpg'); animation-delay:.9s; }
+    .scatter-3 { bottom:36px; left:-14px; rotate:7deg;   background-image:url('https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2f/Tandoori_Paneer_Tikka.jpg/500px-Tandoori_Paneer_Tikka.jpg'); animation-delay:.6s; }
+    .scatter-4 { bottom:14px; right:-10px; rotate:-8deg; background-image:url('https://thumb.wikimedia.org/wikipedia/commons/thumb/2/25/Patriot-games-weightlifting-competition_50709735463_o.jpg/500px-Patriot-games-weightlifting-competition_50709735463_o.jpg'); animation-delay:1.2s; }
+
+    .search-card {
+      position:relative; z-index:2; width:100%; margin-top:84px;
+      background:var(--card); border:1px solid var(--line); border-radius:20px;
+      padding:16px 16px 18px;
+      box-shadow:0 30px 60px -20px rgba(0,0,0,.65), 0 1px 0 rgba(255,255,255,.04) inset;
+    }
+    .search-cap { color:var(--faint); font-size:0.78rem; margin-bottom:10px; }
+    .search-card .bar {
+      display:flex; align-items:center; gap:9px;
+      background:var(--soft); border:1px solid var(--line); border-radius:999px;
+      padding:9px 7px 9px 13px; font-size:.82rem; color:var(--text);
+      transition:border-color .3s var(--ease), box-shadow .3s var(--ease);
+    }
+    .search-card .bar.active {
+      border-color:rgba(242,168,102,.55);
+      box-shadow:0 0 0 1px rgba(242,168,102,.3), 0 0 20px 3px rgba(242,168,102,.3);
+    }
+    .search-card .bar svg { flex:0 0 auto; color:var(--faint); }
+    .bar-q { white-space:nowrap; overflow:hidden; }
+    .bar-caret { width:2px; height:14px; background:var(--tan); flex:0 0 auto; margin-left:-4px; }
+    .js .bar-caret { animation:caretBlink 1s steps(2) infinite; }
+    @keyframes caretBlink { 0%,50% { opacity:1; } 51%,100% { opacity:0; } }
+    .search-card .bar .plus {
+      margin-left:auto; width:26px; height:26px; border-radius:50%;
+      background:var(--brand-grad); color:#1a0f05; font-weight:800;
+      display:flex; align-items:center; justify-content:center; font-size:.95rem; flex:0 0 auto;
+    }
+    .search-card .proof-results { margin-top:12px; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .search-card .proof-results .t, .search-card .proof-results .c, .search-card .proof-results .thumb { transition:opacity .2s var(--ease); }
+    .search-card .proof-results.swapping .t, .search-card .proof-results.swapping .c, .search-card .proof-results.swapping .thumb { opacity:0; }
+    .proof-result .thumb {
+      position:relative; width:100%; aspect-ratio:4/5; border-radius:11px;
+      background-color:var(--soft); background-size:cover; background-position:center;
+      border:1px solid var(--line-soft); margin-bottom:6px; overflow:hidden;
+    }
+    .proof-result .thumb::after { content:""; position:absolute; inset:0; background:linear-gradient(0deg, rgba(10,10,11,.55), transparent 55%); }
+    .proof-result .play {
+      position:absolute; left:6px; bottom:6px; z-index:1;
+      width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); color:#17120c;
+      display:flex; align-items:center; justify-content:center; font-size:8px;
+    }
+    .proof-result .meta .t { font-size:.78rem; font-weight:650; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .proof-result .meta .c { font-size:.66rem; color:var(--faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+
+    .list-peek {
+      position:absolute; z-index:1; right:-10px; bottom:-14px; width:150px; rotate:4deg;
+      background:var(--card); border:1px solid var(--line); border-radius:15px;
+      padding:9px 11px; display:flex; align-items:center; gap:8px;
+      box-shadow:0 20px 40px -18px rgba(0,0,0,.6);
+    }
+    .list-peek .chip { width:24px; height:24px; border-radius:7px; background:rgba(242,168,102,.16); border:1px solid rgba(242,168,102,.3); display:flex; align-items:center; justify-content:center; font-size:.78rem; flex:0 0 auto; }
+    .list-peek .t { font-size:.7rem; font-weight:650; }
+    .list-peek .n { font-size:.6rem; color:var(--faint); }
     .phone-cap { color:var(--faint); font-size:0.82rem; letter-spacing:0.02em; }
 
     /* ---------- SHARED SECTION FURNITURE ---------- */
@@ -1492,6 +1569,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       html { scroll-behavior:auto; }
       .js .reveal, .js .reveal.in, .hero-body > * { opacity:1 !important; transform:none !important; animation:none !important; transition:none !important; }
       .sm-caret, .glow, .scroll-cue span { animation:none; }
+      .bar-caret { animation:none !important; opacity:0; }
+      .scatter-card { animation:none !important; }
       .sm-hit { opacity:1; transform:none; }
       .hook-cycle > span { animation:none; }
       .brand-mark-wrap::before { animation:none; opacity:0.6; }
@@ -1509,7 +1588,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       .cta-stack { grid-area:cta; }
       .user-card { grid-area:cta; }
       .phone-wrap { grid-area:phone; margin-top:0; }
-      .phone { width:min(310px,100%); }
+      .proof-stack { width:min(320px,100%); }
       .step-list { grid-template-columns:repeat(3,1fr); gap:34px; }
       .facts { grid-template-columns:repeat(2,1fr); }
       .sec { padding:104px 0; }
@@ -1544,10 +1623,33 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         <p class="lede">Send a reel to ClipNest in a DM. It watches the video, files it into a collection that builds itself, and hands it back the second you ask.</p>
         __TOP_AUTH__
         <div class="phone-wrap">
-          <div class="phone">
-            <video class="phone-video" autoplay muted loop playsinline preload="metadata" poster="/static/hero_phone_poster.jpg">
-              <source src="/static/hero_phone.mp4" type="video/mp4" />
-            </video>
+          <div class="proof-stack" aria-hidden="true">
+            <div class="scatter-card scatter-1"></div>
+            <div class="scatter-card scatter-2"></div>
+            <div class="scatter-card scatter-3"></div>
+            <div class="scatter-card scatter-4"></div>
+            <div class="search-card">
+              <p class="search-cap">Search any reel you saved.</p>
+              <div class="bar" id="heroBar">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <span class="bar-q" id="heroQuery">Cafes in mumbai</span><span class="bar-caret" id="heroCaret"></span>
+                <span class="plus">+</span>
+              </div>
+              <div class="proof-results" id="heroResults">
+                <div class="proof-result">
+                  <div class="thumb" data-r="0-img" style="background-image:url('/static/mum_boojee.jpg')"><span class="play">&#9654;</span></div>
+                  <div class="meta"><div class="t" data-r="0-t">Boojee Cafe</div><div class="c" data-r="0-c">Food &amp; Dining</div></div>
+                </div>
+                <div class="proof-result">
+                  <div class="thumb" data-r="1-img" style="background-image:url('/static/mum_bawri.jpg')"><span class="play">&#9654;</span></div>
+                  <div class="meta"><div class="t" data-r="1-t">Bawri BKC</div><div class="c" data-r="1-c">Restaurants</div></div>
+                </div>
+              </div>
+            </div>
+            <div class="list-peek">
+              <div class="chip">&#127958;&#65039;</div>
+              <div><div class="t">Goa trip</div><div class="n">7 reels</div></div>
+            </div>
           </div>
           <p class="phone-cap">A real search, in a real library.</p>
         </div>
@@ -1793,18 +1895,81 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         }
       }
 
-      // Autoplay gets refused often enough on mobile that it needs nudging.
-      var vids = document.querySelectorAll('.phone-video');
-      var kick = function () {
-        for (var v = 0; v < vids.length; v++) {
-          if (vids[v].paused) { vids[v].play().catch(function () {}); }
-        }
-      };
-      document.addEventListener('visibilitychange', kick);
-      window.addEventListener('touchstart', kick, { once: true, passive: true });
-      window.addEventListener('click', kick, { once: true });
-      setTimeout(kick, 700);
-      setInterval(kick, 5000);
+      // Hero search bar: a typewriter loop through a few real, verified
+      // queries. Plain textContent updates, not an opacity/visibility
+      // animation - so there's no "stuck invisible" failure mode even if
+      // this never runs (the static HTML value just keeps showing).
+      var heroQueryEl = document.getElementById('heroQuery');
+      var heroResultsEl = document.getElementById('heroResults');
+      var heroBarEl = document.getElementById('heroBar');
+      if (heroQueryEl && !calm) {
+        var proofQueries = [
+          { q: 'Cafes in mumbai', results: [
+            { t: 'Boojee Cafe', c: 'Food & Dining', img: '/static/mum_boojee.jpg' },
+            { t: 'Bawri BKC', c: 'Restaurants', img: '/static/mum_bawri.jpg' }
+          ] },
+          { q: 'that high protein paneer thing', results: [
+            { t: 'Paneer Kathi Rolls', c: 'Recipes & Cooking', img: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/7/75/Paneer_kathi_roll_homemade.jpg/500px-Paneer_kathi_roll_homemade.jpg' },
+            { t: 'High Protein Manchurian', c: 'Recipes & Cooking', img: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e8/Gobi_manchurian.jpg/500px-Gobi_manchurian.jpg' }
+          ] },
+          { q: 'Airbnbs in bali', results: [
+            { t: 'Ubud Jungle Villa', c: 'Travel & Places', img: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8b/1_Tegalalang_rice_terrace_ubud_bali.jpg/500px-1_Tegalalang_rice_terrace_ubud_bali.jpg' },
+            { t: 'Canggu Beachfront Stay', c: 'Travel & Places', img: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/c/ca/Canggu_beach_2.jpg/500px-Canggu_beach_2.jpg' }
+          ] }
+        ];
+        var proofIndex = 0;
+        var applyProofResults = function (idx) {
+          if (!heroResultsEl) return;
+          heroResultsEl.classList.add('swapping');
+          setTimeout(function () {
+            proofQueries[idx].results.forEach(function (r, i) {
+              var tEl = heroResultsEl.querySelector('[data-r="' + i + '-t"]');
+              var cEl = heroResultsEl.querySelector('[data-r="' + i + '-c"]');
+              var imgEl = heroResultsEl.querySelector('[data-r="' + i + '-img"]');
+              if (tEl) tEl.textContent = r.t;
+              if (cEl) cEl.textContent = r.c;
+              if (imgEl) imgEl.style.backgroundImage = "url('" + r.img + "')";
+            });
+            heroResultsEl.classList.remove('swapping');
+          }, 200);
+        };
+        var typeProofQuery = function () {
+          var target = proofQueries[proofIndex].q;
+          var pos = 0;
+          if (heroBarEl) heroBarEl.classList.add('active');
+          var typeTick = function () {
+            pos += 1;
+            heroQueryEl.textContent = target.slice(0, pos);
+            if (pos < target.length) {
+              setTimeout(typeTick, 48);
+            } else {
+              applyProofResults(proofIndex);
+              if (heroBarEl) heroBarEl.classList.remove('active');
+              setTimeout(eraseProofQuery, 1500);
+            }
+          };
+          typeTick();
+        };
+        var eraseProofQuery = function () {
+          var target = proofQueries[proofIndex].q;
+          var pos = target.length;
+          if (heroBarEl) heroBarEl.classList.add('active');
+          var eraseTick = function () {
+            pos -= 1;
+            heroQueryEl.textContent = target.slice(0, pos);
+            if (pos > 0) {
+              setTimeout(eraseTick, 26);
+            } else {
+              if (heroBarEl) heroBarEl.classList.remove('active');
+              proofIndex = (proofIndex + 1) % proofQueries.length;
+              setTimeout(typeProofQuery, 350);
+            }
+          };
+          eraseTick();
+        };
+        heroQueryEl.textContent = '';
+        setTimeout(typeProofQuery, 900);
+      }
 
       // Setup video modal.
       var setupBtn = document.getElementById('setupVideoButton');
