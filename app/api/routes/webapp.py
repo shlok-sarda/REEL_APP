@@ -999,6 +999,7 @@ def build_data_deletion_html() -> str:
 def build_landing_html(csrf_token: str, user: dict | None) -> str:
     google_client_id = settings.google_client_id
     instagram_app_username = settings.instagram_app_username
+    canonical_url = (settings.public_base_url or "https://clipnest.in").rstrip("/") + "/"
     google_script = (
         '<script src="https://accounts.google.com/gsi/client" async defer></script>'
         if google_client_id
@@ -1106,12 +1107,36 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>ClipNest</title>
+  <title>ClipNest: find any reel you saved on Instagram</title>
   <meta name="description" content="Share a reel to ClipNest and it files itself. Search what you remember, find it in a second." />
   <meta name="theme-color" content="#0a0a0b" />
+  <link rel="canonical" href="__CANONICAL_URL__" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
   <link rel="icon" type="image/png" href="/static/favicon.png" />
   <link rel="manifest" href="/static/manifest.json" />
+  <meta property="og:title" content="ClipNest" />
+  <meta property="og:description" content="Share a reel to ClipNest and it files itself. Search what you remember, find it in a second." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="__CANONICAL_URL__" />
+  <meta property="og:image" content="/static/icon-512.png" />
+  <meta name="twitter:card" content="summary" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ClipNest",
+    "description": "ClipNest files Instagram reels you share to it into collections that build themselves, and makes them searchable by what is actually in the reel.",
+    "url": "__CANONICAL_URL__",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Web",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "Free beta"
+    }
+  }
+  </script>
   __GOOGLE_SCRIPT__
   <style>
     /* Same identity as the app (app/ui_ux/clipnest_v1.py): near-black ground,
@@ -1191,8 +1216,29 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .scroll-cue span { width:1px; height:44px; background:linear-gradient(180deg, rgba(242,168,102,0.8), rgba(242,168,102,0)); animation:cue 2.4s ease-in-out infinite; transform-origin:top; }
     @keyframes cue { 0%,100% { transform:scaleY(0.35); opacity:0.35 } 50% { transform:scaleY(1); opacity:1 } }
     .hero-body { position:relative; }
-    .brand { display:flex; align-items:center; gap:11px; margin-bottom:38px; }
-    .brand-mark { width:38px; height:38px; border-radius:11px; }
+    /* Hook cycle: the three escalating "you save that..." lines from the v11
+       promo, played once on load as a small kicker above the brand row. Pure
+       flourish - the real message lives in the always-visible h1/lede below,
+       so a visitor with JS off or reduced motion loses nothing. */
+    .hook-cycle { min-height:1.3em; margin-bottom:14px; }
+    .hook-cycle > span {
+      display:none; font-family:var(--serif); font-size:0.98rem; color:var(--muted);
+      opacity:0;
+    }
+    .hook-cycle > span.on { display:inline; animation:hookIn .55s var(--ease) both; }
+    .hook-cycle > span .accent { color:var(--tan); }
+    @keyframes hookIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
+
+    .brand { display:flex; align-items:center; gap:11px; margin-bottom:38px; position:relative; }
+    .brand-mark-wrap { position:relative; display:flex; }
+    .brand-mark-wrap::before {
+      content:""; position:absolute; inset:-10px; border-radius:50%;
+      background:radial-gradient(circle, rgba(242,168,102,0.45) 0%, rgba(242,168,102,0) 68%);
+      opacity:0.7;
+    }
+    .js .brand-mark-wrap::before { animation:iconGlow 3.2s ease-in-out infinite; }
+    @keyframes iconGlow { 0%,100% { opacity:0.45; transform:scale(0.92) } 50% { opacity:0.85; transform:scale(1.08) } }
+    .brand-mark { width:38px; height:38px; border-radius:11px; position:relative; }
     .brand-word { font-family:var(--serif); font-size:1.32rem; letter-spacing:-0.01em; }
 
     .display { font-size:clamp(2.7rem,12.4vw,4.6rem); }
@@ -1272,6 +1318,24 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .ss-name { font-size:0.74rem; color:var(--muted); }
     .ss-tile--ghost .ss-name { width:44px; height:7px; border-radius:99px; background:#26262b; }
 
+    /* collections mock: built here too, same reason as the share sheet -
+       these are categories from a real library, not names worth re-screenshotting. */
+    .cl { padding:20px 16px; background:#111113; display:grid; gap:10px; }
+    .cl-row {
+      display:flex; align-items:center; gap:12px; padding:13px 14px;
+      background:#161619; border:1px solid var(--line); border-radius:14px;
+    }
+    .cl-chip {
+      width:34px; height:34px; border-radius:10px; flex:none;
+      background:rgba(242,168,102,0.14); border:1px solid rgba(242,168,102,0.28);
+      display:flex; align-items:center; justify-content:center; font-size:1rem;
+    }
+    .cl-name { font-size:0.95rem; font-weight:600; }
+    .cl-more {
+      margin-left:auto; font-size:0.74rem; font-weight:700; color:var(--tan);
+      background:rgba(242,168,102,0.14); border-radius:99px; padding:3px 9px;
+    }
+
     /* live search mock */
     .sm { padding:22px 16px 24px; background:#0f0f11; }
     .sm-bar { height:46px; border-radius:13px; background:#1b1b1f; display:flex; align-items:center; gap:10px; padding:0 15px; border:1px solid var(--line); }
@@ -1288,6 +1352,24 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .sm-dot { width:30px; height:30px; border-radius:9px; background:var(--brand-grad); flex:none; }
     .sm-t { font-size:0.9rem; font-weight:600; }
     .sm-s { font-size:0.76rem; color:var(--faint); }
+
+    /* ---------- SMART LISTS ---------- */
+    .slist { margin-top:36px; display:grid; gap:12px; max-width:480px; }
+    .slist-row {
+      display:flex; align-items:center; gap:13px; padding:16px 18px;
+      background:var(--card); border:1px solid var(--line); border-radius:16px;
+    }
+    .slist-chip {
+      width:38px; height:38px; border-radius:11px; flex:none;
+      background:rgba(242,168,102,0.14); border:1px solid rgba(242,168,102,0.28);
+      display:flex; align-items:center; justify-content:center; font-size:1.05rem;
+    }
+    .slist-meta { min-width:0; }
+    .slist-name { font-size:0.98rem; font-weight:650; }
+    .slist-badge {
+      margin-left:auto; font-size:0.78rem; font-weight:700; color:var(--tan);
+      background:rgba(242,168,102,0.14); border-radius:99px; padding:4px 10px; flex:none;
+    }
 
     /* ---------- FACTS ---------- */
     .facts { margin-top:40px; display:grid; gap:2px; border-radius:18px; overflow:hidden; border:1px solid var(--line); }
@@ -1306,6 +1388,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .close .sec-h { margin:0 auto; max-width:14ch; }
     .close .cta-stack { margin:32px auto 0; }
     .close .lede { margin:16px auto 0; text-align:center; }
+    .loop-line { text-align:center; color:var(--faint); font-size:0.88rem; padding:0 0 30px; max-width:36ch; margin-inline:auto; }
     footer { padding:0 0 calc(40px + var(--safe-bottom)); text-align:center; color:var(--faint); font-size:0.8rem; }
 
     /* ---------- SIGNED-IN CARD ---------- */
@@ -1355,6 +1438,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       .js .reveal, .js .reveal.in, .hero-body > * { opacity:1 !important; transform:none !important; animation:none !important; transition:none !important; }
       .sm-caret, .glow, .scroll-cue span { animation:none; }
       .sm-hit { opacity:1; transform:none; }
+      .hook-cycle > span { animation:none; }
+      .brand-mark-wrap::before { animation:none; opacity:0.6; }
     }
 
     /* ---------- DESKTOP ---------- */
@@ -1390,8 +1475,14 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         <div class="hero-scrim"></div>
       </div>
       <div class="wrap hero-body">
+        <p class="hook-cycle" id="hookCycle" aria-hidden="true">
+          <span data-hook="0">You save that recipe.</span>
+          <span data-hook="1">You save that cafe.</span>
+          <span data-hook="2">You save that place you swore you'd visit.</span>
+          <span data-hook="3">Can you find <span class="accent">that one</span> again?</span>
+        </p>
         <div class="brand">
-          <img class="brand-mark" src="/static/icon-192.png" alt="" />
+          <span class="brand-mark-wrap"><img class="brand-mark" src="/static/icon-192.png" alt="" /></span>
           <span class="brand-word">ClipNest</span>
         </div>
         <h1 class="display">Everything you saved.<br /><span class="accent">Finally findable.</span></h1>
@@ -1449,7 +1540,12 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
             <h3>It files itself</h3>
             <p>ClipNest watches the video and reads what is on screen, then drops it into a collection. You never name a folder or drag anything.</p>
             <div class="step-art">
-              <img src="/static/step_sorted.jpg" alt="Collections in ClipNest, each one built automatically" loading="lazy" />
+              <div class="cl">
+                <div class="cl-row"><span class="cl-chip">&#127860;&#65039;</span><span class="cl-name">Food &amp; Restaurants</span></div>
+                <div class="cl-row"><span class="cl-chip">&#127859;</span><span class="cl-name">Recipes &amp; Cooking</span></div>
+                <div class="cl-row"><span class="cl-chip">&#9992;&#65039;</span><span class="cl-name">Travel &amp; Places</span></div>
+                <div class="cl-row"><span class="cl-chip">&#128170;</span><span class="cl-name">Gym &amp; Fitness</span><span class="cl-more">+1</span></div>
+              </div>
             </div>
           </li>
 
@@ -1472,6 +1568,19 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           </li>
 
         </ol>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="wrap">
+        <p class="eyebrow reveal">Smart lists</p>
+        <h2 class="sec-h reveal">New reels join on their own.</h2>
+        <p class="lede reveal" style="margin-top:14px;">Describe a list once, like "protein recipes with paneer." From then on, matching reels join it by themselves. Need something more specific than a collection? This is that.</p>
+        <div class="slist reveal">
+          <div class="slist-row"><span class="slist-chip">&#129361;</span><div class="slist-meta"><span class="slist-name">Protein recipes with paneer</span></div><span class="slist-badge">+4</span></div>
+          <div class="slist-row"><span class="slist-chip">&#127958;&#65039;</span><div class="slist-meta"><span class="slist-name">Goa trip</span></div><span class="slist-badge">+3</span></div>
+          <div class="slist-row"><span class="slist-chip">&#128170;</span><div class="slist-meta"><span class="slist-name">Triceps workout</span></div><span class="slist-badge">+2</span></div>
+        </div>
       </div>
     </section>
 
@@ -1533,6 +1642,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       </div>
     </section>
 
+    <p class="loop-line reveal wrap">Know someone with 900 saved reels they will never find again? Forward them this page.</p>
+
     <footer><div class="wrap">ClipNest &middot; made in India</div></footer>
 
   </main>
@@ -1542,6 +1653,34 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     // if this script never runs, every section is already readable.
     (function () {
       var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // Hook cycle: slam through the three regret lines once, then settle.
+      var hookEl = document.getElementById('hookCycle');
+      if (hookEl) {
+        var hookLines = hookEl.querySelectorAll('[data-hook]');
+        if (calm) {
+          hookEl.style.display = 'none';
+        } else {
+          var hookStep = 0;
+          var showHook = function () {
+            for (var h = 0; h < hookLines.length; h++) { hookLines[h].classList.remove('on'); }
+            hookLines[hookStep].classList.add('on');
+            hookStep += 1;
+            if (hookStep < hookLines.length) {
+              setTimeout(showHook, 1100);
+            } else {
+              // Plain display:none rather than an opacity/max-height transition:
+              // this element is a direct .hero-body child, which already carries
+              // a one-time "rise" entrance animation ending at opacity:1 - that
+              // animation's fill-mode wins over a later inline opacity, so a
+              // fade-out here would silently never show. display is untouched
+              // by that keyframe, so it's the reliable way to remove this.
+              setTimeout(function () { hookEl.style.display = 'none'; }, 1400);
+            }
+          };
+          setTimeout(showHook, 260);
+        }
+      }
 
       // Reveal on scroll.
       var items = document.querySelectorAll('.reveal');
@@ -1904,7 +2043,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }
   </script>
 </body>
-</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__TOP_AUTH__", top_auth).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id)).replace("__INSTAGRAM_DM_HREF__", repr(instagram_dm_href if user else "#"))
+</html>""".replace("__GOOGLE_SCRIPT__", google_script).replace("__AUTH_SECTION__", auth_section).replace("__TOP_AUTH__", top_auth).replace("__CSRF_TOKEN__", repr(csrf_token)).replace("__GOOGLE_CLIENT_ID__", repr(google_client_id)).replace("__INSTAGRAM_DM_HREF__", repr(instagram_dm_href if user else "#")).replace("__CANONICAL_URL__", canonical_url)
 
 
 def build_web_app_html(user_id: str) -> str:
