@@ -314,12 +314,18 @@ def fire(user_id: str, trigger: str, title: str = "") -> str | None:
         if not window_open(user):
             log_event("nudge", igsid, "skipped_window", f"{user_id} last inbound {user.get('last_inbound_at')!r}")
             return None
-        if not cooldown_clear(user):
-            log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
-            return None
 
         key = decide(user, trigger)
         if not key:
+            return None
+        # Cooldown exists to stop a repeatable message firing in a burst. A
+        # once-ever message can, by construction, never repeat - so applying
+        # it there only breaks the opening pair on purpose: M1 fires
+        # instantly, M2 fires a few minutes later once processing finishes,
+        # and 10 minutes is comfortably inside that gap. This was silently
+        # eating M2 for every single guest.
+        if key not in ONCE_EVER and not cooldown_clear(user):
+            log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
             return None
         text = render(key, user, title=title)
         if not text or "://" in text and not library_link(user):
