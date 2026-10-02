@@ -996,6 +996,60 @@ def build_data_deletion_html() -> str:
     )
 
 
+def build_demo_coming_soon_html() -> str:
+    # The landing page's demo CTA used to link straight to /try. It's being
+    # routed here instead while that path gets properly verified end to end -
+    # a calm "not yet" beats sending cold traffic into something unproven.
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ClipNest - demo coming soon</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0a0a0b; --card:#161619; --line:#232327;
+      --text:#f4f4f5; --muted:#9a9aa2;
+      --tan:#f2a866; --tan-deep:#ee7f2f;
+      --brand-grad:linear-gradient(135deg,#f9a660 0%,#ee7f2f 100%);
+      --serif:ui-serif,"New York",Georgia,"Times New Roman",serif;
+      --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+      font-family:var(--sans); display:flex; align-items:center; justify-content:center;
+      padding:24px; text-align:center;
+    }
+    .card { width:min(420px,100%); }
+    .mark { width:48px; height:48px; border-radius:14px; margin:0 auto 22px; }
+    h1 { font-family:var(--serif); font-weight:600; font-size:1.7rem; margin:0 0 12px; letter-spacing:-0.01em; }
+    p { color:var(--muted); font-size:0.98rem; line-height:1.6; margin:0 0 28px; }
+    a.back {
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      min-height:52px; padding:0 26px; border-radius:14px;
+      background:var(--brand-grad); color:#1b1206; font-weight:650; font-size:0.98rem;
+      text-decoration:none;
+      transition:transform .2s ease, filter .2s ease;
+    }
+    a.back:hover { transform:translateY(-1px); filter:brightness(1.05); }
+    a.back:active { transform:translateY(0); filter:brightness(.97); }
+    a.back:focus-visible { outline:2px solid var(--tan); outline-offset:3px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img class="mark" src="/static/icon-192.png" alt="" />
+    <h1>This one's still in production.</h1>
+    <p>The no-signup demo is being rebuilt properly before it goes in front of real visitors. Connect your own Google account instead, it takes about two minutes.</p>
+    <a class="back" href="/">Back to ClipNest</a>
+  </div>
+</body>
+</html>"""
+
+
 def build_landing_html(csrf_token: str, user: dict | None) -> str:
     google_client_id = settings.google_client_id
     instagram_app_username = settings.instagram_app_username
@@ -1064,15 +1118,16 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         """
     else:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
-        # Looking costs nothing; signing in costs a Google account and a DM to a
-        # bot. So the demo leads and Google follows, in both CTA blocks. The
-        # gate is public_demo_ready() rather than a hardcoded link, because a
-        # dead CTA on traffic you paid for is worse than no CTA at all.
+        # Looking costs nothing; signing in costs a Google account and a DM to
+        # a bot. So the demo leads and Google follows, in both CTA blocks.
+        # Points at /demo-soon rather than the real /try for now - the no-
+        # signup demo hasn't been verified end to end yet, so cold traffic
+        # gets a calm "not yet" instead of an unproven path. Always rendered
+        # (not gated on public_demo_ready()): a static placeholder link is
+        # never a dead CTA the way an unconfigured real one would be.
         demo_cta = (
-            '<a class="cta cta-primary" data-demo-cta href="/try">'
+            '<a class="cta cta-primary" data-demo-cta href="/demo-soon">'
             '<span>See it working</span><span class="cta-note">no signup</span></a>'
-            if public_demo_ready()
-            else ""
         )
         top_auth = f"""
       <div class="cta-stack">
@@ -3640,6 +3695,11 @@ def dev_login(request: Request, user_id: str = "default"):
         return RedirectResponse(url="/", status_code=303)
     request.session[SESSION_USER_KEY] = user_id
     return RedirectResponse(url="/app", status_code=303)
+
+
+@router.get("/demo-soon", response_class=HTMLResponse)
+def demo_coming_soon_page():
+    return HTMLResponse(build_demo_coming_soon_html())
 
 
 @router.get("/try")
