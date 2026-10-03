@@ -1271,18 +1271,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .scroll-cue span { width:1px; height:44px; background:linear-gradient(180deg, rgba(242,168,102,0.8), rgba(242,168,102,0)); animation:cue 2.4s ease-in-out infinite; transform-origin:top; }
     @keyframes cue { 0%,100% { transform:scaleY(0.35); opacity:0.35 } 50% { transform:scaleY(1); opacity:1 } }
     .hero-body { position:relative; }
-    /* Hook cycle: the three escalating "you save that..." lines from the v11
-       promo, played once on load as a small kicker above the brand row. Pure
-       flourish - the real message lives in the always-visible h1/lede below,
-       so a visitor with JS off or reduced motion loses nothing. */
-    .hook-cycle { min-height:1.3em; margin-bottom:14px; }
-    .hook-cycle > span {
-      display:none; font-family:var(--serif); font-size:0.98rem; color:var(--muted);
-      opacity:0;
-    }
-    .hook-cycle > span.on { display:inline; animation:hookIn .55s var(--ease) both; }
-    .hook-cycle > span .accent { color:var(--tan); }
-    @keyframes hookIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
 
     .brand { display:flex; align-items:center; gap:11px; margin-bottom:20px; position:relative; }
     .brand-mark-wrap { position:relative; display:flex; }
@@ -1585,7 +1573,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       .bar-caret { animation:none !important; opacity:0; }
       .scatter-card { animation:none !important; }
       .sm-hit { opacity:1; transform:none; }
-      .hook-cycle > span { animation:none; }
       .brand-mark-wrap::before { animation:none; opacity:0.6; }
     }
 
@@ -1622,12 +1609,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         <div class="hero-scrim"></div>
       </div>
       <div class="wrap hero-body">
-        <p class="hook-cycle" id="hookCycle" aria-hidden="true">
-          <span data-hook="0">You save that recipe.</span>
-          <span data-hook="1">You save that cafe.</span>
-          <span data-hook="2">You save that place you swore you'd visit.</span>
-          <span data-hook="3">Can you find <span class="accent">that one</span> again?</span>
-        </p>
         <div class="brand">
           <span class="brand-mark-wrap"><img class="brand-mark" src="/static/icon-192.png" alt="" /></span>
           <span class="brand-word">ClipNest</span>
@@ -1823,34 +1804,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     // if this script never runs, every section is already readable.
     (function () {
       var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-      // Hook cycle: slam through the three regret lines once, then settle.
-      var hookEl = document.getElementById('hookCycle');
-      if (hookEl) {
-        var hookLines = hookEl.querySelectorAll('[data-hook]');
-        if (calm) {
-          hookEl.style.display = 'none';
-        } else {
-          var hookStep = 0;
-          var showHook = function () {
-            for (var h = 0; h < hookLines.length; h++) { hookLines[h].classList.remove('on'); }
-            hookLines[hookStep].classList.add('on');
-            hookStep += 1;
-            if (hookStep < hookLines.length) {
-              setTimeout(showHook, 1100);
-            } else {
-              // Plain display:none rather than an opacity/max-height transition:
-              // this element is a direct .hero-body child, which already carries
-              // a one-time "rise" entrance animation ending at opacity:1 - that
-              // animation's fill-mode wins over a later inline opacity, so a
-              // fade-out here would silently never show. display is untouched
-              // by that keyframe, so it's the reliable way to remove this.
-              setTimeout(function () { hookEl.style.display = 'none'; }, 1400);
-            }
-          };
-          setTimeout(showHook, 260);
-        }
-      }
 
       // Reveal on scroll.
       var items = document.querySelectorAll('.reveal');
