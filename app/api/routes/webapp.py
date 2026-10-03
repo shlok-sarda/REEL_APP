@@ -1284,7 +1284,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .hook-cycle > span .accent { color:var(--tan); }
     @keyframes hookIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
 
-    .brand { display:flex; align-items:center; gap:11px; margin-bottom:38px; position:relative; }
+    .brand { display:flex; align-items:center; gap:11px; margin-bottom:20px; position:relative; }
     .brand-mark-wrap { position:relative; display:flex; }
     .brand-mark-wrap::before {
       content:""; position:absolute; inset:-10px; border-radius:50%;
@@ -1301,23 +1301,23 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       background:var(--brand-grad); -webkit-background-clip:text; background-clip:text;
       -webkit-text-fill-color:transparent; color:var(--tan);
     }
-    .lede { margin-top:20px; max-width:34ch; color:var(--muted); font-size:1.06rem; line-height:1.58; }
+    .lede { margin-top:10px; max-width:34ch; color:var(--muted); font-size:0.92rem; line-height:1.5; }
 
     /* ---------- CTAs ---------- */
-    .cta-stack { margin-top:30px; display:grid; gap:12px; max-width:420px; }
+    .cta-stack { margin-top:16px; display:grid; gap:9px; max-width:420px; }
     .cta {
       display:flex; align-items:center; justify-content:center; gap:10px;
-      min-height:56px; padding:0 22px; border-radius:15px;
-      font-size:1.02rem; font-weight:600; text-decoration:none; border:1px solid transparent;
+      min-height:46px; padding:0 20px; border-radius:13px;
+      font-size:0.92rem; font-weight:600; text-decoration:none; border:1px solid transparent;
       transition:transform .22s var(--ease), box-shadow .22s var(--ease), filter .22s var(--ease);
     }
-    .cta-primary { background:var(--brand-grad); color:#1b1206; box-shadow:0 12px 34px -14px rgba(242,168,102,0.85); }
+    .cta-primary { background:var(--brand-grad); color:#1b1206; box-shadow:0 10px 28px -14px rgba(242,168,102,0.85); }
     .cta-primary:active { transform:translateY(1px) scale(0.995); }
-    .cta-note { font-weight:500; opacity:0.62; font-size:0.88rem; }
+    .cta-note { font-weight:500; opacity:0.62; font-size:0.8rem; }
     .cta-note::before { content:"·"; margin-right:8px; }
-    .google-shell { min-height:44px; display:flex; justify-content:center; }
+    .google-shell { min-height:38px; display:flex; justify-content:center; }
     .google-shell > div { width:100% !important; }
-    .cta-foot { margin-top:2px; text-align:center; color:var(--faint); font-size:0.84rem; }
+    .cta-foot { margin-top:2px; text-align:center; color:var(--faint); font-size:0.76rem; }
     .linkish {
       margin-top:4px; background:none; border:0; color:var(--muted);
       font-family:var(--sans); font-size:0.9rem; text-decoration:underline;
@@ -1330,7 +1330,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
        types/erases on a loop and whose results swap to match. No device bezel,
        no screen recording to keep in sync with the product - this is built UI,
        same reasoning as the share-sheet/collections mocks further down the page. */
-    .phone-wrap { margin-top:44px; display:grid; justify-items:center; gap:14px; }
+    .phone-wrap { margin-top:22px; display:grid; justify-items:center; gap:10px; }
     .proof-stack {
       position:relative;
       width:min(300px, 80vw);
@@ -1524,21 +1524,21 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     footer { padding:0 0 calc(40px + var(--safe-bottom)); text-align:center; color:var(--faint); font-size:0.8rem; }
 
     /* ---------- SIGNED-IN CARD ---------- */
-    .user-card { margin-top:30px; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:22px 20px; display:grid; gap:14px; max-width:460px; }
-    .user-row { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
-    .user-card h2 { font-size:1.4rem; }
-    .avatar { width:48px; height:48px; border-radius:50%; flex:none; }
-    .tiny { color:var(--muted); font-size:0.85rem; line-height:1.5; }
-    .tiny-label { text-transform:uppercase; letter-spacing:0.14em; font-size:0.68rem; color:var(--faint); }
-    .action-grid { display:grid; gap:10px; }
+    .user-card { margin-top:16px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px; display:grid; gap:8px; max-width:460px; }
+    .user-row { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+    .user-card h2 { font-size:1.05rem; }
+    .avatar { width:34px; height:34px; border-radius:50%; flex:none; }
+    .tiny { color:var(--muted); font-size:0.76rem; line-height:1.4; }
+    .tiny-label { text-transform:uppercase; letter-spacing:0.12em; font-size:0.6rem; color:var(--faint); }
+    .action-grid { display:grid; gap:7px; }
     .primary-link, .secondary-link, .action-grid button {
-      display:flex; align-items:center; justify-content:center; min-height:50px; padding:0 18px;
-      border-radius:13px; font-size:0.98rem; font-weight:600; text-decoration:none; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; min-height:40px; padding:0 16px;
+      border-radius:11px; font-size:0.85rem; font-weight:600; text-decoration:none; cursor:pointer;
       font-family:var(--sans); border:1px solid var(--line);
     }
     .primary-link { background:var(--brand-grad); color:#1b1206; border-color:transparent; }
     .secondary-link, .action-grid button { background:var(--soft); color:var(--text); }
-    .ghost-button { background:none; border:0; color:var(--muted); font-family:var(--sans); font-size:0.88rem; cursor:pointer; text-decoration:underline; text-underline-offset:3px; padding:8px; }
+    .ghost-button { background:none; border:0; color:var(--muted); font-family:var(--sans); font-size:0.78rem; cursor:pointer; text-decoration:underline; text-underline-offset:3px; padding:4px; }
     .small-ghost { text-decoration:none; }
 
     /* ---------- MODALS ---------- */
@@ -2091,7 +2091,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           el.dataset.mounted = '1';
           window.google.accounts.id.renderButton(
             el,
-            { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
+            { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320 }
           );
         });
         return true;
@@ -2116,7 +2116,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         el.dataset.mounted = '1';
         window.google.accounts.id.renderButton(
           el,
-          { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320 }
+          { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320 }
         );
       });
       return true;
