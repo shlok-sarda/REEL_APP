@@ -127,23 +127,29 @@ That is exactly how **@haiden.jpeg** was lost — the only recorded case so far.
 - [ ] Warning around reel 7, lock at reel 10
 - [ ] Reels sent after the lock are **buffered, not rejected** — reuse
       `_drain_buffered_reels`, so signing in instantly saves what's pending
-- [ ] **The merge.** Signing in with Google must attach `google_sub` to the
-      existing guest row, never create a second one. Rule: always attach, never
-      migrate data between rows
-- [ ] `complete_instagram_link` currently throws 409 when the IGSID already has
-      an owner (`app/services/auth.py:460`). Make it merge when that owner is a
-      guest with no `google_sub`
-- [ ] Two real accounts colliding: refuse and handle by hand. At 18 users, do
-      not build for it
+- [x] **The merge** (`528dbbd`). `google_login` attaches `google_sub` to the
+      guest row in place via `attach_google_to_user`; reels, Instagram link and
+      library token never move. Verified: no duplicate row, all reels kept,
+      held reels drained, wall lifted
+- [x] Instagram link-code flow is no longer needed for guests at all: the guest
+      row already is the Instagram-connected account
+- [x] Two real accounts colliding: refuses with 409, guest row untouched
+- [x] Held reels survive the 200-row webhook-log prune until drained
 
 ## Cross-cutting
 
-- [ ] PWA manifest, `apple-touch-icon`, `apple-mobile-web-app-title` so the
-      icon reads "Clipnest" while the URL underneath carries the token
-- [ ] Do **not** set a manifest `start_url` that strips the token — it would
-      produce an icon that opens logged out. Test on a real iPhone
-- [ ] Detect Instagram's in-app browser and show "open in Safari" before asking
-      anyone to install
+- [x] Home screen icon carries the key (`528dbbd`): `/g/<token>` renders in
+      place instead of redirecting to `/app`, and `/g/<token>/manifest.webmanifest`
+      gives each person `start_url=/g/<token>`. `display: browser`, not
+      standalone, because full screen iPhone web apps handle Google's sign-in
+      popup badly. **Still needs a real iPhone test**
+- [x] Claim card in the library: home screen at 5, sign in from 17, no dismiss
+      at 20
+- [x] Instagram in-app browser escape: `instagram://extbrowser/?url=` on iPhone
+      (ends in Meta's one-tap dialog), Chrome `intent://` on Android, manual
+      ··· fallback text. **Needs a real-phone test on both**
+- [ ] Landing page's Google button has the same in-app-browser problem and no
+      escape yet
 - [ ] **Token expiry alarm.** `INSTAGRAM_ACCESS_TOKEN` dies ~mid-November and
       everything above fails *silently* when it does. This already happened
       once: the Sept-17 username fix sat dead for twelve days
