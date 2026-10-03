@@ -211,6 +211,37 @@ def login_or_create_google_user(payload: dict[str, Any]) -> dict[str, Any]:
     return get_user_by_id(user_id)
 
 
+def attach_google_to_user(user_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Give an Instagram-only guest account its Google identity, in place.
+
+    The alternative, creating a second account and moving data across, would
+    have to touch every table keyed to a user and could fail half way, leaving
+    someone with a shredded library at the exact moment they committed. The
+    reels, the Instagram link and the library token all stay on this row.
+
+    Only ever fills an empty google_sub. Returns None if the row already had
+    one, so a guest row cannot be quietly re-pointed at a different person.
+    """
+    google_sub = normalize(payload.get("sub"))
+    email = normalize(payload.get("email"))
+    display_name = normalize(payload.get("name")) or (email.split("@")[0] if email else "User")
+    picture_url = normalize(payload.get("picture"))
+    now = iso_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE users
+            SET google_sub = ?, email = ?, display_name = ?, picture_url = ?,
+                last_login_at = ?, updated_at = ?
+            WHERE id = ? AND COALESCE(google_sub, '') = ''
+            """,
+            (google_sub, email, display_name, picture_url, now, now, normalize(user_id)),
+        )
+        if cursor.rowcount != 1:
+            return None
+    return get_user_by_id(user_id)
+
+
 def current_user(request: Request) -> dict[str, Any] | None:
     user_id = normalize(request.session.get(SESSION_USER_KEY))
     if not user_id:

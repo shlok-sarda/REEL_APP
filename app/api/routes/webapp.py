@@ -1,6 +1,6 @@
 import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.config import settings
@@ -3968,7 +3968,71 @@ def library_link_login(token: str, request: Request):
         request.session.clear()
         request.session[SESSION_USER_KEY] = user["id"]
         request.session[GUEST_LINK_SESSION_KEY] = True
-    return RedirectResponse(url="/app", status_code=303)
+
+    # Rendered here rather than redirected to /app, so the address bar keeps
+    # the key. iPhone builds a home screen icon from whatever URL is on screen
+    # when Add to Home Screen is tapped; after a redirect that was /app, which
+    # carries no key, and since nothing shares cookies with Instagram's
+    # browser the icon opened logged out on the landing page.
+    from app.services import nudge
+
+    claim_stage = ""
+    if request.session.get(GUEST_LINK_SESSION_KEY) and not (user.get("google_sub") or "").strip():
+        state = nudge.load_state(user["id"]) or {}
+        n = int(state.get("reel_count") or 0)
+        if n >= nudge.LOCK_AT:
+            claim_stage = "locked"
+        elif n >= nudge.HEADS_UP_AT:
+            claim_stage = "signin"
+        elif n >= nudge.HOME_SCREEN_AT:
+            claim_stage = "home"
+    return app_shell(
+        build_clipnest_v1_html(
+            user["id"],
+            library_token=token,
+            claim_stage=claim_stage,
+            login_csrf=create_login_csrf(request) if claim_stage in ("signin", "locked") else "",
+            google_client_id=settings.google_client_id if claim_stage in ("signin", "locked") else "",
+        )
+    )
+
+
+@router.get("/g/{token}/manifest.webmanifest")
+def library_link_manifest(token: str):
+    """A home screen manifest whose start_url is this person's own link.
+
+    Android builds the icon from the manifest's start_url, and sources disagree
+    on whether iPhone does too or only uses the current URL. The page keeps
+    the key in the address bar for the second case; this covers the first.
+    It only echoes back a token the requester already holds.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.services.auth import get_user_by_library_token
+
+    if not get_user_by_library_token(token):
+        raise HTTPException(status_code=404, detail="Not found")
+    return JSONResponse(
+        {
+            "name": "ClipNest",
+            "short_name": "ClipNest",
+            "description": "Your saved reels, organized and searchable.",
+            "start_url": f"/g/{token}",
+            "scope": "/",
+            # Deliberately not standalone. A full-screen home screen app on
+            # iPhone handles Google's sign-in popup badly, and sign-in is the
+            # step the whole guest flow converts on. Opening as a Safari tab
+            # costs some polish and keeps sign-in working.
+            "display": "browser",
+            "background_color": "#0a0a0b",
+            "theme_color": "#0a0a0b",
+            "icons": [
+                {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            ],
+        },
+        media_type="application/manifest+json",
+    )
 
 
 @router.get("/app/{user_id}", response_class=HTMLResponse)

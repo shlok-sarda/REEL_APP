@@ -1,7 +1,19 @@
 import os
 
 
-def build_clipnest_v1_html(user_id: str) -> str:
+def _token_safe(value: str) -> str:
+    """Only characters that can sit inside a single-quoted JS string and an
+    HTML attribute untouched. Tokens, client ids and stage names all fit."""
+    return "".join(c for c in (value or "") if c.isalnum() or c in "._-")
+
+
+def build_clipnest_v1_html(
+    user_id: str,
+    library_token: str = "",
+    claim_stage: str = "",
+    login_csrf: str = "",
+    google_client_id: str = "",
+) -> str:
     safe_user_id = user_id.replace("\\", "\\\\").replace("'", "\\'")
     # Collections shelves are visible to the demo showcase account plus any
     # account listed in COLLECTIONS_ACCOUNTS, so the engine can be polished
@@ -24,7 +36,8 @@ def build_clipnest_v1_html(user_id: str) -> str:
   <meta name="theme-color" content="#0a0a0b" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
   <link rel="icon" type="image/png" href="/static/favicon.png" />
-  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="manifest" href="__MANIFEST_HREF__" />
+  <meta name="apple-mobile-web-app-title" content="ClipNest" />
   <title>ClipNest</title>
   <style>
     :root {
@@ -110,6 +123,27 @@ def build_clipnest_v1_html(user_id: str) -> str:
     .name-ask-row input::placeholder { color:var(--faint); opacity:.6; }
     .name-ask-row button { background:var(--accent); color:var(--bg); border:none; border-radius:10px; padding:0 16px; font-weight:700; }
     .name-ask-skip { background:none; border:none; color:var(--muted); font-size:.75rem; margin-top:8px; padding:0; }
+    /* Claim card: home screen at 5 reels, sign in from 17, the wall at 20.
+       Sits outside #app because render() rewrites #app wholesale. */
+    .claim-card { margin:calc(12px + var(--safe-top)) 18px -4px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px;
+      box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 10px 28px -18px rgba(0,0,0,.9); opacity:0; transform:translateY(-4px); transition:opacity .25s ease, transform .25s ease; }
+    .claim-card.show { opacity:1; transform:none; }
+    .claim-card.locked { border-color:rgba(242,168,102,.45); box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 12px 32px -16px rgba(238,127,47,.45); }
+    .claim-title { margin:0; font-family:var(--serif); font-size:1.05rem; font-weight:600; letter-spacing:-.01em; color:var(--text); }
+    .claim-sub { margin:3px 0 12px; font-size:.78rem; line-height:1.45; color:var(--muted); }
+    .claim-btn { display:inline-flex; align-items:center; justify-content:center; background:var(--brand-grad); color:#1a0f06; border-radius:999px; padding:10px 18px; font-weight:700; font-size:.88rem; text-decoration:none;
+      box-shadow:0 6px 18px -8px rgba(238,127,47,.6); transition:transform .15s ease, opacity .15s ease; }
+    .claim-btn:hover { opacity:.92; }
+    .claim-btn:active { transform:scale(.97); }
+    .claim-btn:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    .claim-hint { margin:10px 0 0; font-size:.72rem; line-height:1.4; color:var(--faint); }
+    .claim-err { margin:10px 0 0; font-size:.75rem; color:var(--danger); }
+    /* No display rule here on purpose: setting one overrides the [hidden]
+       attribute, which is how the locked card hides this button. */
+    .claim-skip { margin-top:10px; color:var(--muted); font-size:.75rem; transition:opacity .15s ease; }
+    .claim-skip:hover { opacity:.75; }
+    .claim-skip:active { opacity:.55; }
+    .claim-skip:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
 
     .section-head {
       display:flex;
@@ -1354,6 +1388,14 @@ def build_clipnest_v1_html(user_id: str) -> str:
 </head>
 <body>
   <div class="phone-shell">
+    <section id="claimCard" class="claim-card" hidden aria-live="polite">
+      <p id="claimTitle" class="claim-title"></p>
+      <p id="claimSub" class="claim-sub"></p>
+      <div id="claimAction"></div>
+      <p id="claimHint" class="claim-hint" hidden></p>
+      <p id="claimErr" class="claim-err" hidden></p>
+      <button id="claimSkip" class="claim-skip" type="button" hidden>Not now</button>
+    </section>
     <main id="app" class="screen"></main>
     <section id="miniPlayer" class="reel-player" aria-label="Reel player">
       <div class="player-top">
@@ -3428,6 +3470,139 @@ def build_clipnest_v1_html(user_id: str) -> str:
     sheetBackdrop.addEventListener('click', closeActionSheet);
     loadData();
   </script>
+  <script>
+    // Claim card. Separate block on purpose: an error in here must never take
+    // the library down with it. No backslashes anywhere in this block - the
+    // page is built from a non-raw Python string and would eat them.
+    (function () {
+      const STAGE = '__CLAIM_STAGE__';
+      const LIB_TOKEN = '__LIB_TOKEN__';
+      const LOGIN_CSRF = '__LOGIN_CSRF__';
+      const GOOGLE_CLIENT_ID = '__GOOGLE_CLIENT_ID__';
+      if (!STAGE || !LIB_TOKEN) return;
+
+      const ua = navigator.userAgent || '';
+      const inInstagram = /Instagram/i.test(ua);
+      const isIOS = /iPhone|iPad|iPod/i.test(ua);
+      const isAndroid = /Android/i.test(ua);
+      const card = document.getElementById('claimCard');
+      const title = document.getElementById('claimTitle');
+      const sub = document.getElementById('claimSub');
+      const action = document.getElementById('claimAction');
+      const hint = document.getElementById('claimHint');
+      const err = document.getElementById('claimErr');
+      const skip = document.getElementById('claimSkip');
+      const skipKey = 'cn_claim_skip_' + STAGE;
+
+      try { if (STAGE !== 'locked' && localStorage.getItem(skipKey)) return; } catch (e) {}
+
+      const fullUrl = location.origin + '/g/' + LIB_TOKEN;
+
+      // Instagram opens every link in its own browser, and that browser can
+      // neither add to the home screen nor sign in with Google (Google refuses
+      // embedded browsers outright). These are Meta's own escape hatch on
+      // iPhone and Android's documented intent for Chrome. Both are
+      // undocumented in Instagram and can break, hence the manual hint.
+      function escapeHref() {
+        if (isAndroid) {
+          return 'intent://' + location.host + '/g/' + LIB_TOKEN +
+            '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' +
+            encodeURIComponent(fullUrl) + ';end';
+        }
+        return 'instagram://extbrowser/?url=' + encodeURIComponent(fullUrl);
+      }
+      function escapeButton(label) {
+        const a = document.createElement('a');
+        a.className = 'claim-btn';
+        a.href = escapeHref();
+        a.textContent = label;
+        action.appendChild(a);
+        hint.textContent = 'Nothing happened? Tap the ··· at the top, then Open in external browser.';
+        hint.hidden = false;
+      }
+      const browserName = isAndroid ? 'Chrome' : 'Safari';
+
+      if (STAGE === 'home') {
+        title.textContent = 'Add ClipNest to your home screen';
+        sub.textContent = 'One tap back to your library, instead of digging through DMs for the link.';
+        if (inInstagram) {
+          escapeButton('Open in ' + browserName);
+        } else if (isIOS) {
+          sub.textContent += ' Tap the Share button, then Add to Home Screen.';
+        } else if (isAndroid) {
+          sub.textContent += ' Tap the menu, then Add to Home screen.';
+        } else {
+          return;
+        }
+      } else {
+        title.textContent = STAGE === 'locked' ? 'You have saved 20 reels' : 'Keep your library safe';
+        sub.textContent = STAGE === 'locked'
+          ? 'Sign in with Google to keep saving. Everything stays exactly where it is, and anything you sent since will save straight away.'
+          : 'Sign in with Google so this library is yours for good. Everything you saved stays right here.';
+        if (STAGE === 'locked') card.classList.add('locked');
+        if (inInstagram) {
+          escapeButton('Open in ' + browserName + ' to sign in');
+          hint.textContent = 'Google does not allow signing in inside Instagram. ' + hint.textContent;
+        } else if (GOOGLE_CLIENT_ID && LOGIN_CSRF) {
+          const slot = document.createElement('div');
+          action.appendChild(slot);
+          const s = document.createElement('script');
+          s.src = 'https://accounts.google.com/gsi/client';
+          s.async = true;
+          s.onload = function () {
+            window.google.accounts.id.initialize({
+              client_id: GOOGLE_CLIENT_ID,
+              callback: async function (response) {
+                err.hidden = true;
+                try {
+                  const r = await fetch('/auth/google', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ credential: response.credential, csrf_token: LOGIN_CSRF, visitor: '' })
+                  });
+                  if (!r.ok) {
+                    const body = await r.json().catch(function () { return {}; });
+                    throw new Error(body.detail || 'Sign in failed. Please try again.');
+                  }
+                  location.reload();
+                } catch (e) {
+                  err.textContent = e.message;
+                  err.hidden = false;
+                }
+              }
+            });
+            window.google.accounts.id.renderButton(slot, { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with' });
+          };
+          document.head.appendChild(s);
+        }
+      }
+
+      if (STAGE !== 'locked') {
+        skip.hidden = false;
+        skip.addEventListener('click', function () {
+          try { localStorage.setItem(skipKey, '1'); } catch (e) {}
+          card.classList.remove('show');
+          setTimeout(function () { card.hidden = true; }, 250);
+        });
+      }
+      card.hidden = false;
+      requestAnimationFrame(function () { card.classList.add('show'); });
+    })();
+  </script>
 </body>
 </html>"""
-    return html.replace("__USER_ID__", safe_user_id).replace("__BUILD_SHA__", build_sha).replace("__SHOW_COLLECTIONS__", show_collections).replace("__SHOW_RECIPES__", show_recipes)
+    token = _token_safe(library_token)
+    manifest_href = f"/g/{token}/manifest.webmanifest" if token else "/static/manifest.json"
+    stage = claim_stage if claim_stage in ("home", "signin", "locked") else ""
+    return (
+        html.replace("__USER_ID__", safe_user_id)
+        .replace("__BUILD_SHA__", build_sha)
+        .replace("__SHOW_COLLECTIONS__", show_collections)
+        .replace("__SHOW_RECIPES__", show_recipes)
+        .replace("__MANIFEST_HREF__", manifest_href)
+        .replace("__CLAIM_STAGE__", stage)
+        .replace("__LIB_TOKEN__", token)
+        .replace("__LOGIN_CSRF__", _token_safe(login_csrf))
+        .replace("__GOOGLE_CLIENT_ID__", _token_safe(google_client_id))
+    )

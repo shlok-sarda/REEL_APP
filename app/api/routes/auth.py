@@ -8,6 +8,7 @@ from app.services.auth import (
     GUEST_LINK_SESSION_KEY,
     SESSION_CSRF_KEY,
     SESSION_USER_KEY,
+    attach_google_to_user,
     block_link_session_writes,
     build_library_link,
     create_instagram_link_code,
@@ -17,6 +18,7 @@ from app.services.auth import (
     create_login_csrf,
     current_user,
     get_user_by_google_sub,
+    get_user_by_id,
     login_or_create_google_user,
     normalize,
     set_preferred_name,
@@ -65,11 +67,50 @@ def google_login(payload: GoogleLoginRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid login session. Please refresh and try again.")
 
     token_payload = verify_google_credential(payload.credential)
+    google_sub = normalize(token_payload.get("sub"))
     # Checked before the call, because login_or_create_google_user upserts and
     # cannot tell us afterwards whether this was a new account or a return
     # visit. Only the first one is a signup.
-    is_new_user = get_user_by_google_sub(normalize(token_payload.get("sub"))) is None
-    user = login_or_create_google_user(token_payload)
+    existing_google = get_user_by_google_sub(google_sub)
+    is_new_user = existing_google is None
+
+    # A guest signing in from their own library. Their reels and their
+    # Instagram link live on the guest row, so Google is attached to that row
+    # rather than a fresh one being created - creating one is what used to
+    # land a guest in an empty library at the exact moment they committed.
+    guest_id = ""
+    if request.session.get(GUEST_LINK_SESSION_KEY):
+        guest = get_user_by_id(normalize(request.session.get(SESSION_USER_KEY)))
+        if guest and not normalize(guest.get("google_sub")):
+            guest_id = guest["id"]
+
+    if guest_id and existing_google and existing_google["id"] != guest_id:
+        # Two real libraries for one person. Merging them automatically means
+        # moving rows between accounts, which is where data gets lost; at
+        # this size it is safer to refuse and fix it by hand.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That Google account already has its own ClipNest library. Message us on Instagram and we will join the two.",
+        )
+
+    if guest_id and is_new_user:
+        user = attach_google_to_user(guest_id, token_payload)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This library is already linked to a Google account.")
+        # Reels sent after the 20-reel wall were held, not processed. Now
+        # that they have signed in, the wall is gone, so play them through.
+        # "Sign in and it saves straight away" has to be true.
+        try:
+            from app.api.routes.instagram import _drain_buffered_reels
+            from app.services.jobs import ensure_background_progress
+
+            igsid = normalize(user.get("instagram_user_id"))
+            if igsid and _drain_buffered_reels(igsid, normalize(user.get("instagram_username")), user["id"]):
+                ensure_background_progress()
+        except Exception as exc:  # a failed drain must not fail the sign-in
+            print(f"[auth] held-reel drain after guest sign-in failed: {exc}")
+    else:
+        user = login_or_create_google_user(token_payload)
     if is_new_user:
         record_landing_event("signup", visitor=payload.visitor)
     request.session[SESSION_USER_KEY] = user["id"]

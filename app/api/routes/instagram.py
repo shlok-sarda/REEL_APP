@@ -40,13 +40,18 @@ def _log_webhook_event(
                 """,
                 (iso_now(), kind, sender_id, sender_username, link_code, outcome, detail[:500]),
             )
-            # Keep the table small — retain the most recent 200 rows.
+            # Keep the table small — retain the most recent 200 rows. Except
+            # buffered reels: this table doubles as the holding pen for reels
+            # sent before an account existed or past the 20-reel wall, and
+            # pruning those would silently lose a reel the person was told
+            # was being held. They become prunable once drained.
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE id NOT IN (
+                WHERE outcome != 'buffered'
+                  AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
-                )
+                  )
                 """
             )
     except Exception as exc:  # pragma: no cover - diagnostics must not crash ingest
