@@ -148,8 +148,10 @@ That is exactly how **@haiden.jpeg** was lost — the only recorded case so far.
 - [x] Instagram in-app browser escape: `instagram://extbrowser/?url=` on iPhone
       (ends in Meta's one-tap dialog), Chrome `intent://` on Android, manual
       ··· fallback text. **Needs a real-phone test on both**
-- [ ] Landing page's Google button has the same in-app-browser problem and no
-      escape yet
+- [x] Landing page Google buttons swapped for the same escape inside
+      Instagram's browser (`21c206f`). New funnel counters `instagram_view` and
+      `escape_click` in `funnel_summary`, so the next traffic test shows how
+      many visitors arrive in a browser that cannot sign in
 - [ ] **Token expiry alarm.** `INSTAGRAM_ACCESS_TOKEN` dies ~mid-November and
       everything above fails *silently* when it does. This already happened
       once: the Sept-17 username fix sat dead for twelve days
