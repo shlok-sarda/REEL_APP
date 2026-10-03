@@ -17,7 +17,11 @@ from datetime import datetime, timezone
 from app.db.database import get_connection
 
 # Allowlisted so a public endpoint cannot be used to write arbitrary rows.
-LANDING_EVENTS = frozenset({"landing_view", "demo_click", "signup"})
+# instagram_view: a landing view that happened inside Instagram's in-app
+# browser, where Google refuses sign-in outright. escape_click: tapped the
+# "Open in Safari" button that replaces Google there. Both are derived on the
+# client; no user agent is ever sent or stored.
+LANDING_EVENTS = frozenset({"landing_view", "demo_click", "signup", "instagram_view", "escape_click"})
 
 _MAX_VISITOR = 64
 _MAX_SOURCE = 40
@@ -82,6 +86,8 @@ def funnel_summary(days: int = 30) -> dict:
     views = by_event.get("landing_view", {}).get("people", 0)
     demos = by_event.get("demo_click", {}).get("people", 0)
     signups = by_event.get("signup", {}).get("people", 0)
+    in_instagram = by_event.get("instagram_view", {}).get("people", 0)
+    escapes = by_event.get("escape_click", {}).get("people", 0)
 
     def pct(part: int, whole: int) -> float:
         return round(100.0 * part / whole, 1) if whole else 0.0
@@ -93,10 +99,15 @@ def funnel_summary(days: int = 30) -> dict:
             "landing_view": views,
             "demo_click": demos,
             "signup": signups,
+            "instagram_view": in_instagram,
+            "escape_click": escapes,
         },
         "rates": {
             "view_to_demo": pct(demos, views),
             "view_to_signup": pct(signups, views),
+            # Share of visitors stuck in a browser that cannot sign in at all.
+            "views_inside_instagram": pct(in_instagram, views),
+            "instagram_to_escape": pct(escapes, in_instagram),
             "demo_to_signup": pct(signups, demos),
         },
     }

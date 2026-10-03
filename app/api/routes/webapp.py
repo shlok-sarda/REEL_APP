@@ -1316,6 +1316,15 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .cta-note { font-weight:500; opacity:0.62; font-size:0.8rem; }
     .cta-note::before { content:"·"; margin-right:8px; }
     .google-shell { min-height:38px; display:flex; justify-content:center; }
+    /* Stands in for the Google button inside Instagram's browser. Secondary
+       weight, so it never competes with the primary CTA above it. */
+    .escape-wrap { display:grid; gap:7px; }
+    .cta-escape { background:rgba(255,255,255,0.045); border-color:var(--line); color:var(--text);
+      box-shadow:0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 22px -16px rgba(0,0,0,0.9); }
+    .cta-escape:hover { filter:brightness(1.12); }
+    .cta-escape:active { transform:translateY(1px) scale(0.995); }
+    .cta-escape:focus-visible { outline:2px solid var(--tan, #f2a866); outline-offset:3px; }
+    .escape-hint { margin:0; text-align:center; color:var(--faint); font-size:0.74rem; line-height:1.45; }
     .google-shell > div { width:100% !important; }
     .cta-foot { margin-top:2px; text-align:center; color:var(--faint); font-size:0.76rem; }
     .linkish {
@@ -2051,12 +2060,17 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
 
       window.__cnVisitor = visitor;
       track('landing_view');
+      if (/Instagram/i.test(navigator.userAgent || '')) { track('instagram_view'); }
 
       document.addEventListener('click', function (ev) {
         var hit = ev.target && ev.target.closest
           ? ev.target.closest('[data-demo-cta]')
           : null;
         if (hit) { track('demo_click'); }
+        var esc = ev.target && ev.target.closest
+          ? ev.target.closest('[data-escape-cta]')
+          : null;
+        if (esc) { track('escape_click'); }
       }, true);
     })();
 
@@ -2075,10 +2089,44 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     }
 
     let googleInitDone = false;
+    // Google refuses sign-in inside embedded browsers (403 disallowed_useragent),
+    // and Instagram opens every bio and DM link in one. A Google button there
+    // is guaranteed to fail, so it is replaced with a way out. No backslashes
+    // in this block: the page is built from a non-raw Python string.
+    const IN_INSTAGRAM = /Instagram/i.test(navigator.userAgent || '');
+    function escapeHref() {
+      if (/Android/i.test(navigator.userAgent || '')) {
+        return 'intent://' + location.host + location.pathname + location.search +
+          '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' +
+          encodeURIComponent(location.href) + ';end';
+      }
+      return 'instagram://extbrowser/?url=' + encodeURIComponent(location.href);
+    }
     function mountGoogleButton() {
       const targets = ['googleButtonTop', 'googleButton']
         .map((id) => document.getElementById(id))
         .filter((el) => el !== null);
+      if (targets.length && IN_INSTAGRAM) {
+        const browser = /Android/i.test(navigator.userAgent || '') ? 'Chrome' : 'Safari';
+        targets.forEach((el) => {
+          if (el.dataset.mounted === '1') return;
+          el.dataset.mounted = '1';
+          const wrap = document.createElement('div');
+          wrap.className = 'escape-wrap';
+          const a = document.createElement('a');
+          a.className = 'cta cta-escape';
+          a.href = escapeHref();
+          a.setAttribute('data-escape-cta', '');
+          a.textContent = 'Open in ' + browser + ' to sign in';
+          const hint = document.createElement('p');
+          hint.className = 'escape-hint';
+          hint.textContent = 'Google does not allow signing in inside Instagram. If the button does nothing, tap the ··· at the top, then Open in external browser.';
+          wrap.appendChild(a);
+          wrap.appendChild(hint);
+          el.appendChild(wrap);
+        });
+        return true;
+      }
       if (!targets.length || !window.google || !window.google.accounts || !window.google.accounts.id) {
         return false;
       }
