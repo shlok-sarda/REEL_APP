@@ -1296,7 +1296,11 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .brand-mark { width:38px; height:38px; border-radius:11px; position:relative; }
     .brand-word { font-family:var(--serif); font-size:1.32rem; letter-spacing:-0.01em; }
 
-    .display { font-size:clamp(2.7rem,12.4vw,4.6rem); }
+    /* Mobile hero H1 sized to the 28-40px range research backs for SaaS
+       landing pages (was rendering ~46.5px on a 375px phone - above every
+       guideline, and the 4-line wrap it caused ate a quarter of the
+       viewport before any CTA was visible). */
+    .display { font-size:clamp(2rem,9vw,4.2rem); }
     .display .accent {
       background:var(--brand-grad); -webkit-background-clip:text; background-clip:text;
       -webkit-text-fill-color:transparent; color:var(--tan);
