@@ -205,6 +205,17 @@ def build_clipnest_v1_html(
     .search-plus { transition:transform .18s ease, background .18s ease; }
     /* Selecting mode: the + rotates into an x and hollows out = "cancel". */
     .search-plus.active { background:var(--soft); border:1.5px solid var(--brand-hi); color:var(--brand-hi); transform:translateY(-50%) rotate(45deg); }
+    /* Admin-only report button, just left of the +. Hollow so the + stays the
+       primary action. */
+    .search.has-report input { padding-right:96px; }
+    .search-report { position:absolute; right:49px; top:50%; transform:translateY(-50%);
+      width:36px; height:36px; border-radius:50%; padding:0; display:grid; place-items:center; cursor:pointer;
+      background:var(--card); border:1.5px solid rgba(238,127,47,.55); color:var(--brand-hi);
+      box-shadow:0 6px 16px -10px rgba(238,127,47,.7); transition:transform .14s ease; }
+    .search-report svg { width:18px; height:18px; }
+    .search-report:hover { border-color:var(--brand-hi); }
+    .search-report:focus-visible { outline:2px solid var(--brand-hi); outline-offset:2px; }
+    .search-report:active { transform:translateY(-50%) scale(.9); }
     /* Brand loader, square one: the simple bookmark silhouette in the brand
        gradient, gently pulsing. */
     .load-wrap { display:flex; justify-content:center; padding:44px 0; }
@@ -1277,20 +1288,6 @@ def build_clipnest_v1_html(
     .rx-meta .rx-exact { color:var(--accent); border-color:rgba(238,127,47,.5); }
 
     /* ---------- search report ---------- */
-    .report-cta { width:100%; display:flex; align-items:center; gap:12px; text-align:left;
-      background:var(--card); border:1px solid rgba(238,127,47,.32); border-radius:16px;
-      padding:11px 14px; margin:2px 0 14px; color:var(--text);
-      box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 28px -20px rgba(238,127,47,.55), 0 2px 6px -3px rgba(0,0,0,.6);
-      transition:transform 140ms ease; }
-    .report-cta:hover { border-color:rgba(238,127,47,.6); }
-    .report-cta:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-    .report-cta:active { transform:scale(.985); }
-    .report-cta .rc-mark { width:34px; height:34px; border-radius:11px; flex:none; display:grid; place-items:center;
-      background:var(--brand-grad); color:#fff; font-size:15px; box-shadow:0 6px 14px -8px rgba(238,127,47,.9); }
-    .report-cta .rc-text { flex:1; min-width:0; }
-    .report-cta b { display:block; font-family:var(--serif); font-size:1rem; font-weight:600; letter-spacing:-.01em; }
-    .report-cta small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:1px; }
-    .report-cta .rc-go { color:var(--accent); font-size:1.2rem; }
     /* Sits BELOW the player (40) and the reel sheet (50/60): tapping a cited
        reel opens it on top of the report, and closing it lands back here. */
     .recipes-overlay.report-overlay { z-index:35; }
@@ -1571,6 +1568,7 @@ def build_clipnest_v1_html(
 
     const SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
     // Loader: the actual 3D mascot from the logo (transparent cutout), pulsing.
+    const REPORT_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>';
     const LOADER_HTML = '<div class="load-wrap"><span class="spinner" aria-label="Loading"></span></div>';
     const CHEV_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
     const BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
@@ -1886,7 +1884,7 @@ def build_clipnest_v1_html(
           </div>
         </div>
         ${renderNamePrompt()}
-        <label class="search"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="Search anything you saved..." autocomplete="off" /><button id="newListBtn" class="search-plus${state.selecting ? ' active' : ''}" type="button" aria-label="New list from search">+</button></label>
+        <label class="search${SHOW_REPORT && !state.selecting ? ' has-report' : ''}"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="${SHOW_REPORT && !state.selecting ? 'Search anything...' : 'Search anything you saved...'}" autocomplete="off" />${SHOW_REPORT && !state.selecting ? `<button id="reportBtn" class="search-report" type="button" aria-label="Report on these search results">${REPORT_SVG}</button>` : ''}<button id="newListBtn" class="search-plus${state.selecting ? ' active' : ''}" type="button" aria-label="New list from search">+</button></label>
         <section id="homeResults" ${searching ? '' : 'hidden'}></section>
         <div id="homeBrowse" ${searching ? 'hidden' : ''}>
           ${recents.length ? `
@@ -1919,6 +1917,11 @@ def build_clipnest_v1_html(
         document.getElementById('homeResults')?.toggleAttribute('hidden', !active);
         document.getElementById('homeBrowse')?.toggleAttribute('hidden', active);
         scheduleDeepSearch();
+      });
+      document.getElementById('reportBtn')?.addEventListener('click', () => {
+        const q = state.magicQuery.trim();
+        if (!q) { document.getElementById('deepSearchInput')?.focus(); return; }
+        openSearchReport(q);
       });
       document.getElementById('newListBtn')?.addEventListener('click', () => {
         if (state.selecting) { exitSelect(); return; }
@@ -2228,16 +2231,13 @@ def build_clipnest_v1_html(
       }).slice(0, 30);
       const resultList = document.getElementById('homeResults');
       if (!resultList) return;
-      const canReport = SHOW_REPORT && q && deepResults.length > 0 && !state.deepSearch.loading;
       resultList.innerHTML = `
-        ${canReport ? `<button class="report-cta" type="button" id="reportCta"><span class="rc-mark" aria-hidden="true">✦</span><span class="rc-text"><b>Report on these reels</b><small>What they actually say about “${escapeHtml(q)}”, in one page</small></span><span class="rc-go" aria-hidden="true">›</span></button>` : ''}
         ${q && state.deepSearch.loading && state.deepSearch.query === q ? LOADER_HTML : ''}
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.length ? renderMasonry(results, renderItemCard) : ''}
       `;
       state.lastSearchResults = results;
-      document.getElementById('reportCta')?.addEventListener('click', () => openSearchReport(q));
       resultList.querySelectorAll('[data-open-item]').forEach((button) => {
         button.addEventListener('click', (event) => {
           if (state.selecting) {
@@ -2334,7 +2334,9 @@ def build_clipnest_v1_html(
       const total = used.length + skippedRaw.filter((s) => s.why !== 'Removed by you').length;
       let html = '<div class="recipes-shell">' + reportHead(d.title || r.query)
         + '<p class="recipes-sub">From ' + used.length + ' of ' + total + ' reels for “' + escapeHtml(r.query) + '”</p>';
-      if (d.status !== 'ok') {
+      if (d.status === 'empty') {
+        html += '<div class="empty">Nothing in your library matches “' + escapeHtml(r.query) + '” yet.</div>';
+      } else if (d.status !== 'ok') {
         html += '<div class="empty">None of these reels say anything specific about “' + escapeHtml(r.query) + '”. Add any that should count from the list below.</div>';
       }
       if (d.summary) html += '<p class="rp-summary">' + escapeHtml(d.summary) + '</p>';
