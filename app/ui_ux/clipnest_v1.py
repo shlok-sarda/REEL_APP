@@ -25,6 +25,10 @@ def build_clipnest_v1_html(
     # Recipes hub + ingredient buy links: admin/RECIPES_ACCOUNTS only while
     # the founder bakes the feature in his own library.
     show_recipes = "1" if recipes_enabled(user_id) else "0"
+    # Search reports: admin-only while the founder tries them on his library.
+    from app.services.search_report import search_report_enabled
+
+    show_report = "1" if search_report_enabled(user_id) else "0"
     # Render exposes the deployed commit; locally this shows "dev". Surfaced in
     # Profile so a stale cached build can be spotted from the phone instantly.
     build_sha = (os.getenv("RENDER_GIT_COMMIT") or "dev")[:7]
@@ -1271,6 +1275,76 @@ def build_clipnest_v1_html(
     .rx-meta span { background:var(--soft); border:1px solid var(--line); border-radius:999px;
       font-size:.68rem; font-weight:650; color:var(--muted); padding:4px 10px; }
     .rx-meta .rx-exact { color:var(--accent); border-color:rgba(238,127,47,.5); }
+
+    /* ---------- search report ---------- */
+    .report-cta { width:100%; display:flex; align-items:center; gap:12px; text-align:left;
+      background:var(--card); border:1px solid rgba(238,127,47,.32); border-radius:16px;
+      padding:11px 14px; margin:2px 0 14px; color:var(--text);
+      box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 28px -20px rgba(238,127,47,.55), 0 2px 6px -3px rgba(0,0,0,.6);
+      transition:transform 140ms ease; }
+    .report-cta:hover { border-color:rgba(238,127,47,.6); }
+    .report-cta:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .report-cta:active { transform:scale(.985); }
+    .report-cta .rc-mark { width:34px; height:34px; border-radius:11px; flex:none; display:grid; place-items:center;
+      background:var(--brand-grad); color:#fff; font-size:15px; box-shadow:0 6px 14px -8px rgba(238,127,47,.9); }
+    .report-cta .rc-text { flex:1; min-width:0; }
+    .report-cta b { display:block; font-family:var(--serif); font-size:1rem; font-weight:600; letter-spacing:-.01em; }
+    .report-cta small { display:block; color:var(--muted); font-size:.74rem; line-height:1.35; margin-top:1px; }
+    .report-cta .rc-go { color:var(--accent); font-size:1.2rem; }
+    /* Sits BELOW the player (40) and the reel sheet (50/60): tapping a cited
+       reel opens it on top of the report, and closing it lands back here. */
+    .recipes-overlay.report-overlay { z-index:35; }
+    .report-overlay .recipes-head { align-items:flex-start; }
+    .report-overlay .recipes-head h1 { font-size:1.42rem; line-height:1.2; letter-spacing:-.02em; padding-top:6px; }
+    .rp-summary { font-size:.95rem; line-height:1.62; color:var(--text); margin:4px 2px 18px; }
+    .rp-section { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 16px 6px; margin:0 0 12px;
+      box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 14px 32px -24px rgba(0,0,0,.95), 0 2px 8px -6px rgba(238,127,47,.18); }
+    .rp-section h2 { margin:0 0 10px; font-family:var(--serif); font-size:1.14rem; font-weight:600; letter-spacing:-.015em; }
+    .rp-points { list-style:none; margin:0; padding:0; }
+    .rp-points li { position:relative; padding:0 0 11px 15px; font-size:.88rem; line-height:1.58; }
+    .rp-points li::before { content:''; position:absolute; left:0; top:.66em; width:5px; height:5px; border-radius:50%; background:var(--accent); }
+    .rp-ref { display:inline-grid; place-items:center; min-width:22px; height:20px; padding:0 6px; margin-left:5px; border-radius:7px;
+      background:rgba(238,127,47,.14); color:var(--accent); font-size:.68rem; font-weight:750; vertical-align:1px;
+      transition:transform 120ms ease; }
+    .rp-ref:hover { background:rgba(238,127,47,.26); }
+    .rp-ref:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+    .rp-ref:active { transform:scale(.9); }
+    .rp-gaps { color:var(--muted); font-size:.8rem; line-height:1.5; margin:2px 2px 4px; }
+    .rp-label { color:var(--muted); font-size:.7rem; font-weight:750; letter-spacing:.07em; text-transform:uppercase; margin:20px 2px 8px; }
+    .rp-skipped > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:6px; }
+    .rp-skipped > summary::-webkit-details-marker { display:none; }
+    .rp-skipped > summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+    .rp-skipped > summary .chev { display:inline-block; transition:transform 160ms ease; }
+    .rp-skipped[open] > summary .chev { transform:rotate(90deg); }
+    .rp-reels { display:flex; flex-direction:column; gap:8px; }
+    .rp-reel { display:flex; align-items:center; gap:8px; background:var(--soft); border:1px solid var(--line); border-radius:14px; padding:7px 8px 7px 7px;
+      transition:opacity 160ms ease; }
+    .rp-reel.off { opacity:.45; }
+    .rp-reel.picked { border-color:rgba(238,127,47,.55); }
+    .rp-open { flex:1; min-width:0; display:flex; align-items:center; gap:10px; text-align:left; color:var(--text); border-radius:10px;
+      transition:transform 120ms ease; }
+    .rp-open:hover .rp-name { color:var(--accent); }
+    .rp-open:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .rp-open:active { transform:scale(.985); }
+    .rp-thumb { position:relative; width:42px; height:54px; border-radius:9px; overflow:hidden; flex:none; display:block; }
+    .rp-thumb img, .rp-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    .rp-num { position:absolute; left:3px; top:3px; z-index:2; min-width:17px; height:17px; padding:0 4px; border-radius:6px;
+      display:grid; place-items:center; background:var(--brand-grad); color:#fff; font-size:.62rem; font-weight:800; }
+    .rp-meta { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .rp-name { font-size:.82rem; font-weight:620; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .rp-why { color:var(--faint); font-size:.72rem; line-height:1.3; }
+    .rp-toggle { width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center;
+      background:var(--card); border:1px solid var(--line); color:var(--muted); font-size:14px; font-weight:700;
+      transition:transform 120ms ease; }
+    .rp-toggle:hover { color:var(--text); border-color:rgba(238,127,47,.5); }
+    .rp-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .rp-toggle:active { transform:scale(.9); }
+    .rp-reel.picked .rp-toggle { background:var(--brand-grad); color:#fff; border-color:transparent; }
+    .rp-update { position:sticky; bottom:calc(14px + var(--safe-bottom)); width:100%; margin-top:18px; padding:13px;
+      background:var(--brand-grad); color:#fff; border:0; border-radius:14px; font-size:.86rem; font-weight:750;
+      box-shadow:0 14px 30px -14px rgba(238,127,47,.85), 0 4px 10px -6px rgba(0,0,0,.8); transition:transform 120ms ease; }
+    .rp-update:focus-visible { outline:2px solid #fff; outline-offset:2px; }
+    .rp-update:active { transform:scale(.985); }
     .folder-desc {
       color:var(--muted);
       font-size:.85rem;
@@ -1435,6 +1509,7 @@ def build_clipnest_v1_html(
     const USER_ID = '__USER_ID__';
     const SHOW_COLLECTIONS = '__SHOW_COLLECTIONS__' === '1';
     const SHOW_RECIPES = '__SHOW_RECIPES__' === '1';
+    const SHOW_REPORT = '__SHOW_REPORT__' === '1';
     const state = {
       data: [],
       recents: [],
@@ -2153,13 +2228,16 @@ def build_clipnest_v1_html(
       }).slice(0, 30);
       const resultList = document.getElementById('homeResults');
       if (!resultList) return;
+      const canReport = SHOW_REPORT && q && deepResults.length > 0 && !state.deepSearch.loading;
       resultList.innerHTML = `
+        ${canReport ? `<button class="report-cta" type="button" id="reportCta"><span class="rc-mark" aria-hidden="true">✦</span><span class="rc-text"><b>Report on these reels</b><small>What they actually say about “${escapeHtml(q)}”, in one page</small></span><span class="rc-go" aria-hidden="true">›</span></button>` : ''}
         ${q && state.deepSearch.loading && state.deepSearch.query === q ? LOADER_HTML : ''}
         ${q && state.deepSearch.error && !results.length ? `<div class="empty">${escapeHtml(state.deepSearch.error)}</div>` : ''}
         ${q && !state.deepSearch.loading && !results.length ? '<div class="empty">No matches yet. Try a broader word.</div>' : ''}
         ${results.length ? renderMasonry(results, renderItemCard) : ''}
       `;
       state.lastSearchResults = results;
+      document.getElementById('reportCta')?.addEventListener('click', () => openSearchReport(q));
       resultList.querySelectorAll('[data-open-item]').forEach((button) => {
         button.addEventListener('click', (event) => {
           if (state.selecting) {
@@ -2176,6 +2254,148 @@ def build_clipnest_v1_html(
           if (state.selecting) { toggleSelect(el.closest('.m-card')?.dataset.reel || ''); return; }
           openActionSheet(results[Number(el.dataset.itemMenu)], Number(el.dataset.itemMenu), results);
         });
+      });
+    }
+
+    /* ---------- SEARCH REPORT (admin) ---------- */
+    function openSearchReport(query) {
+      let ov = document.getElementById('reportOverlay');
+      if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'reportOverlay'; ov.className = 'recipes-overlay report-overlay';
+        document.body.appendChild(ov);
+      }
+      state.report = { query, include: [], exclude: [], data: null, skippedOpen: false };
+      ov.classList.add('show');
+      ov.scrollTop = 0;
+      loadSearchReport();
+    }
+    function closeSearchReport() {
+      document.getElementById('reportOverlay')?.classList.remove('show');
+      state.report = null;
+    }
+    function reportHead(title) {
+      return '<div class="recipes-head"><button class="back-button" type="button" data-report-close aria-label="Close report">‹</button>'
+        + '<h1>' + escapeHtml(title) + '</h1></div>';
+    }
+    async function loadSearchReport() {
+      const ov = document.getElementById('reportOverlay');
+      const r = state.report;
+      if (!ov || !r) return;
+      ov.innerHTML = '<div class="recipes-shell">' + reportHead('Report')
+        + '<p class="recipes-sub">Reading your reels about “' + escapeHtml(r.query) + '”…</p>' + LOADER_HTML + '</div>';
+      ov.querySelector('[data-report-close]').addEventListener('click', closeSearchReport);
+      try {
+        const res = await fetch('/api/search-report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ user_id: USER_ID, query: r.query, include: r.include, exclude: r.exclude }) });
+        const data = await res.json().catch(() => ({}));
+        if (state.report !== r) return;
+        if (!res.ok) throw new Error(data.detail || 'Could not make the report.');
+        r.data = data;
+        if (data.status !== 'ok') r.skippedOpen = true;
+        r.pendingInclude = new Set(r.include);
+        r.pendingExclude = new Set(r.exclude);
+        renderSearchReport();
+      } catch (e) {
+        if (state.report !== r) return;
+        ov.querySelector('.load-wrap')?.remove();
+        const msg = document.createElement('div');
+        msg.className = 'empty';
+        msg.textContent = e.message || 'Could not make the report.';
+        ov.querySelector('.recipes-shell').appendChild(msg);
+      }
+    }
+    function reportDirty(r) {
+      const same = (set, list) => set.size === list.length && list.every((id) => set.has(id));
+      return !same(r.pendingInclude, r.include) || !same(r.pendingExclude, r.exclude);
+    }
+    function reportReelRow(item, i, kind, why, state_) {
+      const num = kind === 'used' ? '<span class="rp-num">' + (i + 1) + '</span>' : '';
+      const label = kind === 'used'
+        ? (state_ === 'off' ? 'Put this reel back' : 'Leave this reel out')
+        : (state_ === 'picked' ? 'Undo adding this reel' : 'Add this reel to the report');
+      const glyph = kind === 'used' ? (state_ === 'off' ? '↺' : '✕') : (state_ === 'picked' ? '✓' : '+');
+      return '<div class="rp-reel ' + state_ + '">'
+        + '<button class="rp-open" type="button" data-rp-open="' + kind + ':' + i + '">'
+        + reelThumb(item, 'rp-thumb', 'lazy', num)
+        + '<span class="rp-meta"><span class="rp-name">' + escapeHtml(item.name) + '</span>'
+        + (why ? '<span class="rp-why">' + escapeHtml(why) + '</span>' : '') + '</span></button>'
+        + '<button class="rp-toggle" type="button" data-rp-toggle="' + kind + ':' + i + '" aria-label="' + label + '">' + glyph + '</button></div>';
+    }
+    function renderSearchReport() {
+      const ov = document.getElementById('reportOverlay');
+      const r = state.report;
+      if (!ov || !r || !r.data) return;
+      const d = r.data;
+      const usedRaw = d.used || [];
+      const skippedRaw = d.skipped || [];
+      const used = usedRaw.map(deepSearchItem);
+      const skipped = skippedRaw.map(deepSearchItem);
+      const total = used.length + skippedRaw.filter((s) => s.why !== 'Removed by you').length;
+      let html = '<div class="recipes-shell">' + reportHead(d.title || r.query)
+        + '<p class="recipes-sub">From ' + used.length + ' of ' + total + ' reels for “' + escapeHtml(r.query) + '”</p>';
+      if (d.status !== 'ok') {
+        html += '<div class="empty">None of these reels say anything specific about “' + escapeHtml(r.query) + '”. Add any that should count from the list below.</div>';
+      }
+      if (d.summary) html += '<p class="rp-summary">' + escapeHtml(d.summary) + '</p>';
+      (d.sections || []).forEach((s) => {
+        html += '<section class="rp-section">' + (s.heading ? '<h2>' + escapeHtml(s.heading) + '</h2>' : '')
+          + '<ul class="rp-points">' + (s.points || []).map((p) => '<li>' + escapeHtml(p.text)
+            + (p.refs || []).map((n) => '<button class="rp-ref" type="button" data-rp-ref="' + n + '" aria-label="Open reel ' + n + '">' + n + '</button>').join('')
+            + '</li>').join('') + '</ul></section>';
+      });
+      if (d.gaps) html += '<p class="rp-gaps">' + escapeHtml(d.gaps) + '</p>';
+      if (used.length) {
+        html += '<p class="rp-label">Reels used</p><div class="rp-reels">'
+          + used.map((it, i) => reportReelRow(it, i, 'used', '', r.pendingExclude.has(usedRaw[i].reel_id) ? 'off' : '')).join('')
+          + '</div>';
+      }
+      if (skipped.length) {
+        html += '<details class="rp-skipped"' + (r.skippedOpen ? ' open' : '') + '><summary class="rp-label"><span class="chev">›</span> Skipped ' + skipped.length + '</summary><div class="rp-reels">'
+          + skipped.map((it, i) => reportReelRow(it, i, 'skipped', skippedRaw[i].why || '', r.pendingInclude.has(skippedRaw[i].reel_id) ? 'picked' : '')).join('')
+          + '</div></details>';
+      }
+      if (reportDirty(r)) html += '<button class="rp-update" type="button" id="reportUpdate">Update report</button>';
+      html += '</div>';
+      const keepScroll = ov.scrollTop;
+      ov.innerHTML = html;
+      ov.scrollTop = keepScroll;
+      ov.querySelector('[data-report-close]').addEventListener('click', closeSearchReport);
+      ov.querySelector('.rp-skipped')?.addEventListener('toggle', (e) => { r.skippedOpen = e.target.open; });
+      ov.querySelectorAll('[data-rp-ref]').forEach((b) => b.addEventListener('click', () => {
+        const n = Number(b.dataset.rpRef);
+        if (used[n - 1]) openMiniPlayer(used[n - 1], n - 1, used);
+      }));
+      ov.querySelectorAll('[data-rp-open]').forEach((b) => b.addEventListener('click', () => {
+        const [kind, i] = b.dataset.rpOpen.split(':');
+        const list = kind === 'used' ? used : skipped;
+        openMiniPlayer(list[Number(i)], Number(i), list);
+      }));
+      ov.querySelectorAll('[data-rp-toggle]').forEach((b) => b.addEventListener('click', () => {
+        const [kind, i] = b.dataset.rpToggle.split(':');
+        const id = (kind === 'used' ? usedRaw : skippedRaw)[Number(i)].reel_id;
+        if (kind === 'used') {
+          if (r.pendingExclude.has(id)) {
+            r.pendingExclude.delete(id);
+            if (r.include.includes(id)) r.pendingInclude.add(id);
+          } else {
+            r.pendingExclude.add(id);
+            r.pendingInclude.delete(id);
+          }
+        } else if (r.pendingInclude.has(id)) {
+          r.pendingInclude.delete(id);
+          if (r.exclude.includes(id)) r.pendingExclude.add(id);
+        } else {
+          r.pendingInclude.add(id);
+          r.pendingExclude.delete(id);
+        }
+        renderSearchReport();
+      }));
+      ov.querySelector('#reportUpdate')?.addEventListener('click', () => {
+        r.include = [...r.pendingInclude];
+        r.exclude = [...r.pendingExclude];
+        ov.scrollTop = 0;
+        loadSearchReport();
       });
     }
 
@@ -3600,6 +3820,7 @@ def build_clipnest_v1_html(
         .replace("__BUILD_SHA__", build_sha)
         .replace("__SHOW_COLLECTIONS__", show_collections)
         .replace("__SHOW_RECIPES__", show_recipes)
+        .replace("__SHOW_REPORT__", show_report)
         .replace("__MANIFEST_HREF__", manifest_href)
         .replace("__CLAIM_STAGE__", stage)
         .replace("__LIB_TOKEN__", token)

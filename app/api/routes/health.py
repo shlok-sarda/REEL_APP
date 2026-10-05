@@ -302,7 +302,7 @@ _USER_SCOPED_TABLES = [
     "folder_adjudications", "folder_memberships", "instagram_link_tokens",
     "nudge_log", "processing_jobs", "reel_item_features", "reel_locations",
     "reel_processing_diagnostics", "reel_recipes", "reels",
-    "telegram_link_tokens", "user_folders", "user_interest_edges",
+    "search_reports", "telegram_link_tokens", "user_folders", "user_interest_edges",
     "user_interest_nodes",
 ]
 

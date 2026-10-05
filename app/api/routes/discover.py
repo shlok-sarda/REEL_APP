@@ -1,4 +1,4 @@
-"""Discover data APIs: reel-map pins and per-reel recipe cards.
+"""Discover data APIs: reel-map pins, per-reel recipe cards, search reports.
 
 No standalone pages here — the map is a full-screen overlay INSIDE the main
 app (users install the web app to their home screen, so everything must stay
@@ -18,6 +18,7 @@ from app.services.discover import (
     reel_recipe_status,
 )
 from app.services.library import is_demo_user
+from app.services.search_report import ReportError, build_search_report, search_report_enabled
 
 router = APIRouter(tags=["discover"])
 
@@ -52,6 +53,25 @@ def reel_recipe_extract(request: Request, payload: dict = Body(...)):
     block_link_session_writes(request, "extract recipes")
     resolved = ensure_user_access(request, user_id)
     return extract_reel_recipe(resolved, reel_id)
+
+
+@router.post("/api/search-report")
+def search_report(request: Request, payload: dict = Body(...)):
+    """One AI-written report across the reels a search returned. Admin-only."""
+    user_id = str(payload.get("user_id", ""))
+    if user_id and is_demo_user(user_id):
+        raise HTTPException(status_code=404, detail="Reports are not enabled for this account")
+    # generating spends OpenAI credit — shared link sessions can't trigger it
+    block_link_session_writes(request, "make reports")
+    resolved = ensure_user_access(request, user_id)
+    if not search_report_enabled(resolved):
+        raise HTTPException(status_code=404, detail="Reports are not enabled for this account")
+    include = [str(x) for x in (payload.get("include") or []) if x][:40]
+    exclude = [str(x) for x in (payload.get("exclude") or []) if x][:40]
+    try:
+        return build_search_report(resolved, str(payload.get("query", "")), include=include, exclude=exclude)
+    except ReportError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 @router.get("/api/recipes")
