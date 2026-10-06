@@ -103,6 +103,12 @@ class Settings:
     recipes_accounts: frozenset = frozenset(
         value.strip().lower() for value in os.getenv("RECIPES_ACCOUNTS", "").split(",") if value.strip()
     )
+    # Accounts that get search reports beyond the admins. The founder signs in
+    # with two Google accounts and only one is a hardcoded admin, so the other
+    # is always included here: the report must work whichever one he uses.
+    report_accounts: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("REPORT_ACCOUNTS", "").split(",") if value.strip()
+    ) | {"shloksarda2804@gmail.com"}
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

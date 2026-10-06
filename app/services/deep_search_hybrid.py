@@ -617,9 +617,16 @@ class _Index:
         return ranked, similarity
 
 
-def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) -> list[dict] | None:
+def search_documents_hybrid(
+    documents: list[dict], query: str, limit: int = 20, recall_fill: int = 0
+) -> list[dict] | None:
     """Return ranked _result_payload dicts, or None if semantic is unavailable
-    (caller then falls back to the existing lexical search)."""
+    (caller then falls back to the existing lexical search).
+
+    recall_fill > 0 tops the list up to that many with the best-fused docs the
+    gate turned away, marked "admitted": False. The gate is tuned for the
+    search list, where showing junk is the failure; a caller with its own
+    relevance judge (search reports) wants recall instead and filters itself."""
     from app.services.deep_search import _result_payload
 
     query = (query or "").strip()
@@ -706,6 +713,17 @@ def search_documents_hybrid(documents: list[dict], query: str, limit: int = 20) 
         results.append(payload)
         if len(results) >= limit:
             break
+    if recall_fill > len(results):
+        taken = {r["reel_id"] for r in results}
+        for rid in ordered:
+            if len(results) >= recall_fill:
+                break
+            document = index.by_id.get(rid)
+            if rid in taken or not document:
+                continue
+            payload = _result_payload(document, int(round(fused[rid] * 100000)), [])
+            payload["admitted"] = False
+            results.append(payload)
     return results
 
 

@@ -7,7 +7,10 @@ on one URL), and recipes are per-reel actions in the reel sheet.
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from app.services.auth import block_link_session_writes, ensure_user_access, is_demo_link_session
 from app.services.discover import (
@@ -18,7 +21,7 @@ from app.services.discover import (
     reel_recipe_status,
 )
 from app.services.library import is_demo_user
-from app.services.search_report import ReportError, build_search_report, search_report_enabled
+from app.services.search_report import ReportError, build_search_report, report_events, search_report_enabled
 
 router = APIRouter(tags=["discover"])
 
@@ -55,9 +58,7 @@ def reel_recipe_extract(request: Request, payload: dict = Body(...)):
     return extract_reel_recipe(resolved, reel_id)
 
 
-@router.post("/api/search-report")
-def search_report(request: Request, payload: dict = Body(...)):
-    """One AI-written report across the reels a search returned. Admin-only."""
+def _report_request(request: Request, payload: dict) -> tuple[str, str, list[str], list[str]]:
     user_id = str(payload.get("user_id", ""))
     if user_id and is_demo_user(user_id):
         raise HTTPException(status_code=404, detail="Reports are not enabled for this account")
@@ -68,10 +69,42 @@ def search_report(request: Request, payload: dict = Body(...)):
         raise HTTPException(status_code=404, detail="Reports are not enabled for this account")
     include = [str(x) for x in (payload.get("include") or []) if x][:40]
     exclude = [str(x) for x in (payload.get("exclude") or []) if x][:40]
+    return resolved, str(payload.get("query", "")), include, exclude
+
+
+@router.post("/api/search-report")
+def search_report(request: Request, payload: dict = Body(...)):
+    """One AI-written report across the reels a search returned (finished
+    report in one response; the app uses the streaming route below)."""
+    user_id, query, include, exclude = _report_request(request, payload)
     try:
-        return build_search_report(resolved, str(payload.get("query", "")), include=include, exclude=exclude)
+        return build_search_report(user_id, query, include=include, exclude=exclude)
     except ReportError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+
+
+@router.post("/api/search-report/stream")
+def search_report_stream(request: Request, payload: dict = Body(...)):
+    """The same report as server-sent events, so cards render as they are
+    written. Access errors are normal HTTP errors (raised before streaming);
+    anything after that arrives as an {"event": "error"} frame."""
+    user_id, query, include, exclude = _report_request(request, payload)
+
+    def frames():
+        try:
+            for event in report_events(user_id, query, include=include, exclude=exclude):
+                yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+        except ReportError as exc:
+            yield "data: " + json.dumps({"event": "error", "status": exc.status, "detail": str(exc)}) + "\n\n"
+        except Exception:
+            yield "data: " + json.dumps({"event": "error", "status": 500,
+                                         "detail": "Couldn't write the report right now. Try again in a bit."}) + "\n\n"
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/recipes")
