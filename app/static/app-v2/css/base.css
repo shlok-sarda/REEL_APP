@@ -1,0 +1,185 @@
+/* Base: reset, device shell, stage, tab bar, typography helpers. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body {
+  background: var(--s0);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+img, video { display: block; max-width: 100%; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button {
+  -webkit-tap-highlight-color: transparent;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+a { color: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+h1, h2, h3, h4, p { margin: 0; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+[hidden] { display: none !important; }
+::selection { background: var(--accent-tint-strong); }
+
+/* ---------- device shell ---------- */
+#device {
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--s0);
+  isolation: isolate;
+  contain: layout paint;
+}
+#stage { position: absolute; inset: 0; }
+.tab-layer { position: absolute; inset: 0; }
+.tab-layer:not(.is-active) { visibility: hidden; pointer-events: none; }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--s0);
+  padding: calc(var(--safe-top) + 12px) var(--gut) calc(var(--dock-h) + var(--safe-bottom) + 40px);
+  scrollbar-width: none;
+  will-change: transform;
+}
+.screen::-webkit-scrollbar { display: none; }
+.screen.is-under { pointer-events: none; }
+/* Dimming shade drawn over the screen underneath a push. Opacity only. */
+.screen-shade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ---------- layers above the stage ---------- */
+#overlays { position: absolute; inset: 0; pointer-events: none; z-index: var(--z-player); }
+#stage { transform-origin: 50% 0; }
+#stage.is-recessed { pointer-events: none; }
+#overlays > * { pointer-events: auto; }
+
+/* ---------- type helpers ---------- */
+.eyebrow {
+  font-size: var(--t-eyebrow);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow.is-quiet { color: var(--faint); }
+.display {
+  font-family: var(--serif);
+  font-size: var(--t-display);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+  font-weight: 600;
+}
+.display em, .title em, .head em { font-style: normal; color: var(--accent); }
+.title {
+  font-family: var(--serif);
+  font-size: var(--t-title);
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+  font-weight: 600;
+}
+.head {
+  font-family: var(--serif);
+  font-size: var(--t-head);
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  font-weight: 600;
+}
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.sm { font-size: var(--t-sm); line-height: 1.45; }
+.xs { font-size: var(--t-xs); line-height: 1.4; }
+.clamp-1, .clamp-2, .clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-1 { -webkit-line-clamp: 1; }
+.clamp-2 { -webkit-line-clamp: 2; }
+.clamp-3 { -webkit-line-clamp: 3; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- reduced motion: transforms become calm fades ---------- */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduced"] .is-pressed { transform: none !important; }
+
+/* ---------- desktop presentation: phone frame ---------- */
+#frame-caption { display: none; }
+@media (min-width: 760px) and (min-height: 560px) {
+  body {
+    background:
+      radial-gradient(60% 50% at 30% 20%, rgba(242, 168, 102, 0.07), transparent 70%),
+      radial-gradient(50% 40% at 80% 90%, rgba(238, 127, 47, 0.05), transparent 70%),
+      #050506;
+  }
+  #device {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    width: 390px;
+    height: 844px;
+    border-radius: 46px;
+    transform: translate(-50%, -50%) scale(var(--frame-scale, 1));
+    box-shadow:
+      0 0 0 1px #2a2a30,
+      0 0 0 10px #0d0d0f,
+      0 0 0 11px #26262b,
+      0 40px 80px -30px rgba(0, 0, 0, 0.9),
+      0 80px 160px -60px rgba(238, 127, 47, 0.12);
+    --safe-top: 14px;
+    --safe-bottom: 14px;
+  }
+  #frame-caption {
+    display: block;
+    position: fixed;
+    left: calc(50% + 195px * var(--frame-scale, 1) + 56px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: 260px;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  #frame-caption h1 { font-family: var(--serif); font-size: 1.375rem; font-weight: 600; color: var(--text); letter-spacing: -0.02em; margin: 8px 0 10px; }
+  #frame-caption p + p { margin-top: 10px; }
+  #frame-caption code { color: var(--accent); font-size: 0.78rem; }
+}
+@media (min-width: 760px) and (max-width: 1100px) {
+  #frame-caption { display: none; }
+}
+
+/* Reduced motion: ambient loops stop; loaders keep a calm opacity pulse. */
+html[data-motion="reduced"] .brand::before,
+html[data-motion="reduced"] .w-dot::after,
+html[data-motion="reduced"] .pm-pin { animation: none !important; }
+html[data-motion="reduced"] .spinner-mark,
+html[data-motion="reduced"] .cand.is-working .cand-th,
+html[data-motion="reduced"] .rs-feature.is-working .icon-tile,
+html[data-motion="reduced"] .nl-drafting svg { animation: calmPulse calc(1400ms * var(--motion-scale)) ease-in-out infinite !important; }
+@keyframes calmPulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+html[data-motion="reduced"] .dock { transition: opacity var(--d-fast) var(--ease-out); }

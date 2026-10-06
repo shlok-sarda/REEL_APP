@@ -109,6 +109,12 @@ class Settings:
     report_accounts: frozenset = frozenset(
         value.strip().lower() for value in os.getenv("REPORT_ACCOUNTS", "").split(",") if value.strip()
     ) | {"shloksarda2804@gmail.com"}
+    # Who gets the new app UI (app/static/app-v2) at /app. Admins always; the
+    # founder's second Google account too, for the same reason as above.
+    # Everyone else keeps the classic UI until listed here by email or id.
+    app_v2_accounts: frozenset = frozenset(
+        value.strip().lower() for value in os.getenv("APP_V2_ACCOUNTS", "").split(",") if value.strip()
+    ) | {"shloksarda2804@gmail.com"}
     apify_token: str = os.getenv("APIFY_TOKEN", "").strip()
     meili_host: str = os.getenv("MEILI_HOST", "").strip()
     meili_master_key: str = os.getenv("MEILI_MASTER_KEY", "").strip()

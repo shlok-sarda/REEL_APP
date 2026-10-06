@@ -1,0 +1,28 @@
+/* Dev panel + frame meter. */
+.sheet-dev .sheet-body { padding-bottom: calc(var(--safe-bottom) + 40px); }
+.dev-h { margin: 22px 0 10px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.dev-scen { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dev-card { display: grid; gap: 3px; padding: 11px 12px; border-radius: 14px; background: var(--s2); text-align: left; box-shadow: 0 0 0 1px var(--line) inset; transition: transform var(--d-press) var(--ease-out); }
+.dev-card b { font-size: 0.875rem; }
+.dev-card small { color: var(--muted); font-size: 0.6875rem; line-height: 1.35; }
+.dev-card.is-on { box-shadow: 0 0 0 1.5px var(--accent) inset; background: var(--accent-tint); }
+.dev-card.is-pressed { transform: scale(0.97); }
+.dev-sub { margin-top: 10px; padding: 12px; border-radius: 14px; background: var(--s1); display: grid; gap: 8px; }
+.dev-seg { margin-top: 2px; }
+.dev-l { margin: 12px 0 6px; }
+.dev-check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: var(--t-sm); color: var(--text); cursor: pointer; }
+.dev-check input { width: 20px; height: 20px; accent-color: var(--brand-deep); }
+.dev-nb { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dev-nb li { padding: 8px 10px; border-radius: 10px; background: var(--s1); }
+.dev-nb b { display: block; font-size: 0.8125rem; }
+.dev-nb small { color: var(--muted); font-size: 0.72rem; }
+.dev-reset { margin-top: 24px; }
+.dev-seg button.is-on { color: var(--text); background: var(--s4); box-shadow: var(--sh-2); }
+.dev-seg .seg-thumb { display: none; }
+.perf-hud {
+  position: absolute; top: calc(var(--safe-top) + 4px); left: 50%; transform: translateX(-50%); z-index: var(--z-hud);
+  display: flex; gap: 8px; padding: 5px 10px; border-radius: var(--r-pill); background: rgba(0, 0, 0, 0.78);
+  color: #c7f5d9; font: 600 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; white-space: nowrap;
+}
+.perf-hud .is-bad { color: #ff8a7f; }
+.dev-classic { margin-top: 20px; }

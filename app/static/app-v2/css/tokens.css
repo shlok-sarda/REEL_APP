@@ -1,0 +1,123 @@
+/* ClipNest app v2: design tokens. See DESIGN.md section 2 and 3.
+   Port note: no backslashes anywhere in this file (it will live inside a
+   non-raw Python string in clipnest_v1.py). */
+:root {
+  color-scheme: dark;
+
+  /* ---------- surfaces: base, elevated, floating ---------- */
+  --s0: #0a0a0b;
+  --s1: #141417;
+  --s2: #1c1c20;
+  --s3: #18181c;
+  --s4: #222227;
+  --line: #232327;
+  --line-strong: #2e2e34;
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --scrim: rgba(4, 4, 5, 0.62);
+
+  /* ---------- text ---------- */
+  --text: #f4f4f5;
+  --muted: #9a9aa2;
+  --faint: #7a7a82;
+
+  /* ---------- brand ---------- */
+  --accent: #f2a866;
+  --brand-hi: #f9a660;
+  --brand-deep: #ee7f2f;
+  --brand-grad: linear-gradient(135deg, #f9a660 0%, #ee7f2f 100%);
+  --accent-ink: #1b1206;
+  --accent-tint: rgba(242, 168, 102, 0.14);
+  --accent-tint-strong: rgba(242, 168, 102, 0.22);
+  --accent-line: rgba(242, 168, 102, 0.34);
+  --danger: #ff5b4d;
+  --danger-tint: rgba(255, 91, 77, 0.12);
+  --ok: #5fd39a;
+
+  /* ---------- type ---------- */
+  --serif: ui-serif, "New York", Georgia, "Noto Serif", "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --t-display: 2.125rem;
+  --t-title: 1.625rem;
+  --t-head: 1.25rem;
+  --t-body: 1rem;
+  --t-sm: 0.875rem;
+  --t-xs: 0.8125rem;
+  --t-2xs: 0.75rem;
+  --t-eyebrow: 0.6875rem;
+
+  /* ---------- space, radius ---------- */
+  --gut: 16px;
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* ---------- shadows: layered, low opacity, warm where it matters ---------- */
+  --sh-1:
+    0 1px 0 rgba(255, 255, 255, 0.035) inset,
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 8px 18px -10px rgba(0, 0, 0, 0.7);
+  --sh-2:
+    0 1px 0 rgba(255, 255, 255, 0.045) inset,
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 16px 36px -16px rgba(0, 0, 0, 0.8);
+  --sh-3:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 12px 32px -12px rgba(0, 0, 0, 0.75),
+    0 32px 64px -28px rgba(0, 0, 0, 0.85);
+  --sh-accent:
+    0 1px 0 rgba(255, 255, 255, 0.28) inset,
+    0 2px 6px -1px rgba(238, 127, 47, 0.35),
+    0 12px 26px -12px rgba(242, 168, 102, 0.75);
+  --sh-glow:
+    0 0 0 1px rgba(242, 168, 102, 0.4),
+    0 0 26px 2px rgba(242, 168, 102, 0.32),
+    0 0 64px 8px rgba(238, 127, 47, 0.16);
+
+  /* ---------- z-index ---------- */
+  --z-sticky: 10;
+  --z-tabbar: 20;
+  --z-player: 40;
+  --z-scrim: 50;
+  --z-sheet: 60;
+  --z-toast: 70;
+  --z-dev: 90;
+  --z-hud: 95;
+
+  /* ---------- motion ---------- */
+  --motion-scale: 1;
+  --d-press: calc(90ms * var(--motion-scale));
+  --d-fast: calc(150ms * var(--motion-scale));
+  --d-base: calc(220ms * var(--motion-scale));
+  --d-push: calc(380ms * var(--motion-scale));
+  --d-morph: calc(460ms * var(--motion-scale));
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Springs, precomputed (k=420 c=34 / k=260 c=28 / k=300 c=18). */
+  --spring-snap: linear(0, 0.0187, 0.0669, 0.1343, 0.213, 0.2969, 0.3816, 0.4638, 0.5413, 0.6128, 0.6774, 0.7348, 0.7851, 0.8285, 0.8655, 0.8966, 0.9224, 0.9435, 0.9606, 0.9741, 0.9846, 0.9927, 0.9987, 1.003, 1.006, 1.0078, 1.0089, 1.0094, 1.0094, 1.009, 1.0084, 1.0077, 1.007, 1.0062, 1.0054, 1.0046, 1.0039, 1.0033, 1.0027, 1.0022, 1);
+  --spring-soft: linear(0, 0.0181, 0.0644, 0.1289, 0.2042, 0.2844, 0.3654, 0.4441, 0.5186, 0.5876, 0.6502, 0.7063, 0.7559, 0.7992, 0.8365, 0.8684, 0.8954, 0.918, 0.9367, 0.9521, 0.9645, 0.9745, 0.9824, 0.9886, 0.9933, 0.9969, 0.9995, 1.0014, 1.0027, 1.0035, 1.0039, 1.0041, 1.0041, 1.0039, 1.0037, 1.0034, 1.0031, 1.0027, 1.0024, 1.0021, 1);
+  --spring-pop: linear(0, 0.0412, 0.1462, 0.2896, 0.4499, 0.6098, 0.7571, 0.8835, 0.9849, 1.0601, 1.1103, 1.1383, 1.1479, 1.1433, 1.1288, 1.1081, 1.0846, 1.0608, 1.0386, 1.0195, 1.004, 0.9923, 0.9845, 0.9799, 0.9782, 0.9786, 0.9806, 0.9836, 0.987, 0.9906, 0.9939, 0.9968, 0.9991, 1.0009, 1.0022, 1.0029, 1.0032, 1.0032, 1.0029, 1.0025, 1);
+
+  /* ---------- device ---------- */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --tabbar-h: 58px;
+  --dock-h: 58px;
+  --dock-bottom: max(14px, calc(var(--safe-bottom) - 4px));
+}
+
+/* Browsers without linear() get the landing page ease instead of a spring. */
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-snap: cubic-bezier(0.16, 1, 0.3, 1);
+    --spring-soft: cubic-bezier(0.16, 1, 0.3, 1);
+    --spring-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+}
+
+/* Slow-mo review mode (dev panel) multiplies every CSS duration. */
+html[data-motion="slow"] { --motion-scale: 5; }

@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.config import settings
 from app.services.auth import create_login_csrf, current_user, public_demo_ready
@@ -3828,12 +3828,37 @@ def demo_ui_review():
     return HTMLResponse(build_demo_library_review_html())
 
 
+V2_UI_SESSION_KEY = "ui_pref"
+
+
 @router.get("/app", response_class=HTMLResponse)
-def my_app(request: Request):
+def my_app(request: Request, ui: str = ""):
     user = current_user(request)
     if not user:
         return RedirectResponse(url="/", status_code=303)
+    from app.ui_ux.app_v2 import app_v2_enabled, build_app_v2_html
+
+    # ?ui=classic / ?ui=v2 flips the choice and remembers it for this session,
+    # so the new UI can always be escaped without a deploy.
+    if ui in ("classic", "v2"):
+        request.session[V2_UI_SESSION_KEY] = ui
+    if app_v2_enabled(user) and request.session.get(V2_UI_SESSION_KEY) != "classic":
+        return app_shell(build_app_v2_html(user))
     return app_shell(build_web_app_html(user["id"]))
+
+
+@router.get("/v2/{build}/{asset_path:path}")
+def app_v2_asset(build: str, asset_path: str):
+    """Static files for the new UI. The build id in the path changes every
+    deploy, so files can be cached forever without ever going stale."""
+    from app.ui_ux.app_v2 import asset_path as resolve_asset, build_id
+
+    target = resolve_asset(asset_path)
+    if not target:
+        raise HTTPException(status_code=404, detail="Not found")
+    media = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}.get(target.suffix)
+    cache = "no-store" if build_id() == "dev" or build != build_id() else "public, max-age=31536000, immutable"
+    return FileResponse(target, media_type=media, headers={"Cache-Control": cache})
 
 
 @router.get("/folders-app", response_class=HTMLResponse)

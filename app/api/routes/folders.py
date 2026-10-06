@@ -103,6 +103,27 @@ def detail(request: Request, folder_id: int, user_id: str = ""):
     return data
 
 
+@router.patch("/{folder_id}")
+def update(request: Request, folder_id: int, payload: dict = Body(...)):
+    block_public_demo_writes(request, "edit folders")
+    resolved = _gate(request, str(payload.get("user_id", "")))
+    data = folders_service.update_folder(resolved, folder_id, str(payload.get("name", "")),
+                                         str(payload.get("description", "")))
+    if not data:
+        raise HTTPException(status_code=404, detail="folder not found")
+    return data
+
+
+@router.post("/{folder_id}/undo")
+def undo(request: Request, folder_id: int, payload: dict = Body(...)):
+    block_public_demo_writes(request, "change suggestions")
+    resolved = _gate(request, str(payload.get("user_id", "")))
+    reel_id = str(payload.get("reel_id", ""))
+    if not reel_id:
+        raise HTTPException(status_code=400, detail="reel_id required")
+    return folders_service.undo_decision(resolved, folder_id, reel_id)
+
+
 @router.post("/{folder_id}/rescan")
 def rescan(request: Request, folder_id: int, payload: dict = Body(default={})):
     # Re-routes the whole library through gpt-4.1-mini. Never demo-triggerable.

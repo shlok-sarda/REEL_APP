@@ -108,12 +108,14 @@ def search_report_stream(request: Request, payload: dict = Body(...)):
 
 
 @router.get("/api/recipes")
-def recipes(request: Request, user_id: str = Query(default="")):
+def recipes(request: Request, user_id: str = Query(default=""), extract: int = Query(default=1)):
     """All extracted recipe cards + per-ingredient shopping data + city matrix,
-    for the Recipes overlay inside the app."""
+    for the Recipes overlay inside the app. extract=0 serves cached cards only
+    (the new UI's Home widget loads this on every open and must never spend
+    OpenAI credit doing so; extraction stays tied to opening Recipes)."""
     if user_id and is_demo_user(user_id):
         return {"recipes": []}
     resolved = ensure_user_access(request, user_id)
     if not recipes_enabled(resolved):
         raise HTTPException(status_code=404, detail="Recipes is not enabled for this account")
-    return build_recipes(resolved, allow_extraction=not is_demo_link_session(request))
+    return build_recipes(resolved, allow_extraction=bool(extract) and not is_demo_link_session(request))

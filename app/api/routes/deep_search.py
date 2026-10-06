@@ -33,6 +33,46 @@ def deep_search_documents(
     }
 
 
+def _card(document: dict) -> dict:
+    """The slice of a search document the app UI shows (creator, places named
+    in the reel, on-screen text) without transcripts or match context."""
+    def head(value, n):
+        return list(value or [])[:n] if isinstance(value, list) else []
+
+    items = []
+    for item in head(document.get("items"), 30):
+        if not isinstance(item, dict):
+            continue
+        items.append({
+            "item_name": item.get("item_name") or item.get("name") or "",
+            "summary": str(item.get("summary") or item.get("item_summary") or "")[:220],
+            "item_type": item.get("item_type") or "",
+            "location": item.get("canonical_location") or item.get("location") or "",
+        })
+    return {
+        "reel_id": document.get("reel_id"),
+        "creator": document.get("creator") or "",
+        "main_subject": document.get("main_subject") or "",
+        "primary_category": document.get("primary_category") or "",
+        "secondary_category": document.get("secondary_category") or "",
+        "locations": head(document.get("locations"), 6),
+        "item_names": head(document.get("item_names"), 30),
+        "visible_text": head(document.get("visible_text"), 10),
+        "visual_entities": head(document.get("visual_entities"), 10),
+        "visual_summary": str(document.get("visual_summary") or "")[:400],
+        "caption": str(document.get("caption") or "")[:300],
+        "transcript_excerpt": str(document.get("transcript") or "")[:300],
+        "items": items,
+    }
+
+
+@router.get("/cards")
+def deep_search_cards(request: Request, user_id: str = Query(default="")):
+    resolved_user_id = ensure_user_access(request, user_id)
+    documents = load_deep_search_documents(resolved_user_id)
+    return {"user_id": resolved_user_id, "documents": [_card(d) for d in documents if d.get("reel_id")]}
+
+
 @router.get("")
 def deep_search(
     request: Request,

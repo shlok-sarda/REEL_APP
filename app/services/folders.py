@@ -830,6 +830,45 @@ def set_membership_status(user_id: str, folder_id: int, reel_id: str, status: st
     return {"ok": True, "folder_id": folder_id, "reel_id": reel_id, "status": status}
 
 
+def update_folder(user_id: str, folder_id: int, name: str = "", description: str = "") -> dict | None:
+    """Rename a folder or rewrite its rule. The description is what routing
+    judges against, and adjudication verdicts are cached per description
+    hash, so a new rule naturally gets fresh verdicts from here on."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_folders WHERE id=? AND user_id=? AND is_active=1", (folder_id, user_id)
+        ).fetchone()
+        if not row:
+            return None
+        new_name = (name or "").strip() or row["name"]
+        new_desc = (description or "").strip() or row["description"]
+        conn.execute(
+            "UPDATE user_folders SET name=?, description=?, updated_at=? WHERE id=?",
+            (new_name, new_desc, _now(), folder_id),
+        )
+        _refresh_profile(conn, user_id, folder_id)
+    return folder_detail(user_id, folder_id)
+
+
+def undo_decision(user_id: str, folder_id: int, reel_id: str) -> dict:
+    """Put an accepted or skipped suggestion back in the Suggested tray (the
+    Undo on the Add / Skip toast). Clears any skip reason so an undone Skip
+    stops counting as a negative example."""
+    with get_connection() as conn:
+        prev = conn.execute(
+            "SELECT status FROM folder_memberships WHERE folder_id=? AND reel_id=? AND user_id=?",
+            (folder_id, reel_id, user_id),
+        ).fetchone()
+        conn.execute(
+            "UPDATE folder_memberships SET status='suggested', reject_reason='', updated_at=? "
+            "WHERE folder_id=? AND reel_id=? AND user_id=? AND status IN ('member','rejected')",
+            (_now(), folder_id, reel_id, user_id),
+        )
+        if prev and prev["status"] == "member":
+            _refresh_profile(conn, user_id, folder_id)
+    return {"ok": True, "folder_id": folder_id, "reel_id": reel_id, "status": "suggested"}
+
+
 def delete_folder(user_id: str, folder_id: int) -> None:
     with get_connection() as conn:
         conn.execute("UPDATE user_folders SET is_active=0, updated_at=? WHERE id=? AND user_id=?",
