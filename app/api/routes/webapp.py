@@ -2064,7 +2064,6 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         .map((id) => document.getElementById(id))
         .filter((el) => el !== null);
       if (targets.length && IN_INSTAGRAM) {
-        const browser = /Android/i.test(navigator.userAgent || '') ? 'Chrome' : 'Safari';
         targets.forEach((el) => {
           if (el.dataset.mounted === '1') return;
           el.dataset.mounted = '1';
@@ -2074,10 +2073,10 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           a.className = 'cta cta-escape';
           a.href = escapeHref();
           a.setAttribute('data-escape-cta', '');
-          a.textContent = 'Open in ' + browser + ' to sign in';
+          a.textContent = 'Continue in browser to sign in';
           const hint = document.createElement('p');
           hint.className = 'escape-hint';
-          hint.textContent = 'Google does not allow signing in inside Instagram. If the button does nothing, tap the ··· at the top, then Open in external browser.';
+          hint.textContent = 'Google sign-in isn’t available inside Instagram. If nothing happens, tap ··· at the top right and choose Open in external browser.';
           wrap.appendChild(a);
           wrap.appendChild(hint);
           el.appendChild(wrap);
@@ -3960,7 +3959,7 @@ def demo_link_login(token: str, request: Request):
 
 
 @router.get("/g/{token}")
-def library_link_login(token: str, request: Request):
+def library_link_login(token: str, request: Request, preview: str = ""):
     """Personal library link: opens one account straight into the app.
 
     This is the entry point for someone who has never signed in - the link
@@ -4016,13 +4015,36 @@ def library_link_login(token: str, request: Request):
             claim_stage = "signin"
         elif n >= nudge.HOME_SCREEN_AT:
             claim_stage = "home"
+    # ?preview=home|signin|locked shows a card stage without saving the reels
+    # to reach it. Test accounts only (GUEST_TEST_SENDERS), so a real user's
+    # link cannot be made to show a wall they have not reached.
+    if preview in ("home", "signin", "locked") and not (user.get("google_sub") or "").strip():
+        if nudge.sender_allowed(user.get("instagram_user_id") or "", user.get("instagram_username") or ""):
+            claim_stage = preview
+
+    wants_signin = claim_stage in ("signin", "locked")
+    login_csrf = create_login_csrf(request) if wants_signin else ""
+    google_client_id = settings.google_client_id if wants_signin else ""
+
+    from app.ui_ux.app_v2 import app_v2_enabled, build_app_v2_html
+
+    if app_v2_enabled(user) and request.session.get(V2_UI_SESSION_KEY) != "classic":
+        return app_shell(
+            build_app_v2_html(
+                user,
+                library_token=token,
+                claim_stage=claim_stage,
+                login_csrf=login_csrf,
+                google_client_id=google_client_id,
+            )
+        )
     return app_shell(
         build_clipnest_v1_html(
             user["id"],
             library_token=token,
             claim_stage=claim_stage,
-            login_csrf=create_login_csrf(request) if claim_stage in ("signin", "locked") else "",
-            google_client_id=settings.google_client_id if claim_stage in ("signin", "locked") else "",
+            login_csrf=login_csrf,
+            google_client_id=google_client_id,
         )
     )
 

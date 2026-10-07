@@ -3952,32 +3952,32 @@ def build_clipnest_v1_html(
         a.href = escapeHref();
         a.textContent = label;
         action.appendChild(a);
-        hint.textContent = 'Nothing happened? Tap the ··· at the top, then Open in external browser.';
+        hint.textContent = 'If nothing happens, tap ··· at the top right and choose Open in external browser.';
         hint.hidden = false;
       }
-      const browserName = isAndroid ? 'Chrome' : 'Safari';
 
       if (STAGE === 'home') {
-        title.textContent = 'Add ClipNest to your home screen';
-        sub.textContent = 'One tap back to your library, instead of digging through DMs for the link.';
+        title.textContent = 'Add ClipNest to your Home Screen';
+        sub.textContent = 'It works just like an app. Open your library in one tap, without going through Instagram.';
         if (inInstagram) {
-          escapeButton('Open in ' + browserName);
+          escapeButton('Continue in browser');
+          hint.textContent = 'Adding to your Home Screen works from your browser. ' + hint.textContent;
         } else if (isIOS) {
-          sub.textContent += ' Tap the Share button, then Add to Home Screen.';
+          sub.textContent += ' Tap Share, then Add to Home Screen.';
         } else if (isAndroid) {
-          sub.textContent += ' Tap the menu, then Add to Home screen.';
+          sub.textContent += ' Tap ⋮, then Add to Home screen.';
         } else {
           return;
         }
       } else {
-        title.textContent = STAGE === 'locked' ? 'You have saved 20 reels' : 'Keep your library safe';
+        title.textContent = STAGE === 'locked' ? 'You’ve reached 20 saved reels' : 'Secure your library';
         sub.textContent = STAGE === 'locked'
-          ? 'Sign in with Google to keep saving. Everything stays exactly where it is, and anything you sent since will save straight away.'
-          : 'Sign in with Google so this library is yours for good. Everything you saved stays right here.';
+          ? 'Sign in with Google to continue saving. Your library stays exactly as it is, and any reels you’ve sent since will be added automatically.'
+          : 'Sign in with Google to keep your saved reels safe and accessible on any device.';
         if (STAGE === 'locked') card.classList.add('locked');
         if (inInstagram) {
-          escapeButton('Open in ' + browserName + ' to sign in');
-          hint.textContent = 'Google does not allow signing in inside Instagram. ' + hint.textContent;
+          escapeButton('Continue in browser to sign in');
+          hint.textContent = 'Google sign-in isn’t available inside Instagram. ' + hint.textContent;
         } else if (GOOGLE_CLIENT_ID && LOGIN_CSRF) {
           const slot = document.createElement('div');
           action.appendChild(slot);
