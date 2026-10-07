@@ -12,7 +12,7 @@ import json
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.services.auth import block_link_session_writes, ensure_user_access, is_demo_link_session
+from app.services.auth import block_link_session_writes, ensure_user_access, is_demo_link_session, require_admin
 from app.services.discover import (
     build_map_pins,
     build_recipes,
@@ -21,7 +21,14 @@ from app.services.discover import (
     reel_recipe_status,
 )
 from app.services.library import is_demo_user
-from app.services.search_report import ReportError, build_search_report, report_events, search_report_enabled
+from app.services.search_report import (
+    ReportError,
+    build_search_report,
+    record_report_event,
+    report_event_summary,
+    report_events,
+    search_report_enabled,
+)
 
 router = APIRouter(tags=["discover"])
 
@@ -105,6 +112,26 @@ def search_report_stream(request: Request, payload: dict = Body(...)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/api/search-report/event")
+def search_report_event(request: Request, payload: dict = Body(default={})):
+    """Fire-and-forget usage beacon from the report screen. Always 200: a
+    dropped counter must never surface as an error in the app."""
+    try:
+        user_id = ensure_user_access(request, str(payload.get("user_id", "")))
+        if search_report_enabled(user_id) and not is_demo_link_session(request):
+            record_report_event(user_id, str(payload.get("event", "")),
+                                str(payload.get("detail", "")), str(payload.get("query", "")))
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.get("/api/search-report/events/summary")
+def search_report_event_summary(request: Request, days: int = Query(default=30, ge=1, le=365)):
+    require_admin(request)
+    return report_event_summary(days)
 
 
 @router.get("/api/recipes")

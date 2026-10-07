@@ -46,7 +46,7 @@ from typing import Any, Iterator
 from app.db.database import get_connection
 
 REPORT_MODEL = "gpt-4.1-mini"
-PROMPT_VERSION = "v14"
+PROMPT_VERSION = "v16"
 MIN_CANDIDATES = 24   # gate results topped up to this many for recall
 MAX_CANDIDATES = 32   # hard ceiling, admitted results included
 DAILY_GENERATIONS = 20
@@ -208,6 +208,11 @@ def _writer_prompt(query: str, looking_for: str, blocks: list[str]) -> str:
         "place (a dish at a restaurant, a product at a shop) goes inside that place's "
         "card, not in a card of its own. Fields:\n"
         "  name: what it's called.\n"
+        "  key: the ONE most useful concrete fact about it that the reels state, under "
+        "6 words: a price, a time, a place, a number, or how to book (\"₹250 a plate\", "
+        "\"Open till 2 AM\", \"Book on the app\"). It shows next to the name in a one-line list, so "
+        "make it the reason to pick this one. Empty if the reels give no such fact; "
+        "never a vague phrase like \"scenic views\".\n"
         "  kind: place (somewhere you can go: restaurant, cafe, stall, shop, attraction, "
         "beach), activity (a tour, show, class or experience at a place), stay, dish "
         "(a food or recipe), website, app, product, title (movie, show, book, song), "
@@ -230,8 +235,16 @@ def _writer_prompt(query: str, looking_for: str, blocks: list[str]) -> str:
         '- "tips": advice, warnings, money and time savers, one per item.\n\n'
         "Use as few blocks as the content needs (a list of places can be one cards "
         "block; three different methods are three steps blocks). Never restate a "
-        "card as a step or a tip.\n\n"
-        "Rules: use every reel. Every card and item cites the reel(s) it came from in "
+        "card as a step or a tip. Give every block a label: one or two words for a "
+        "tab that jumps to it (\"Food\", \"Stays\", \"Tools\", \"Steps\").\n\n"
+        "Then pick the highlights: the 2 or 3 things the person should see first if "
+        "they read nothing else, each one line under 16 words that names the pick "
+        "and the fact that makes it worth it (\"Lake Louise: go before 8 AM or parking "
+        "is full\"). Highlights may repeat facts from the cards; "
+        "they are the summary at the top.\n\n"
+        "Rules: use every reel. Each reel below must appear in at least one card or "
+        "item, even one that only names things: a reel listing nine places gives nine "
+        "cards with an empty key. Every card and item cites the reel(s) it came from in "
         "refs, like [\"R3\"]; never write reel labels inside the text. Never state "
         "anything the reels don't say. No filler or generic advice (\"try it for a "
         "complete experience\"). Never repeat a fact. Speech-to-text can be garbled "
@@ -239,13 +252,13 @@ def _writer_prompt(query: str, looking_for: str, blocks: list[str]) -> str:
         "keep it tight.\n\n"
         "Return JSON:\n"
         '{"title": "<short title for this report>", '
-        '"intro": "<one or two sentences with the most useful takeaway, said '
-        'directly; never describe the report itself (no \\"this report compiles\\")>", '
-        '"blocks": [{"type": "cards", "heading": "<heading>", "items": [{"name": "", '
-        '"kind": "", "what": "", "details": [["Price", "₹400/kg"]], "location": "", '
-        '"url": "", "search": "", "refs": ["R2"]}]}, '
-        '{"type": "steps", "heading": "<heading>", "items": [{"text": "", "refs": ["R1"]}]}, '
-        '{"type": "tips", "heading": "<heading>", "items": [{"text": "", "refs": ["R4"]}]}], '
+        '"highlights": [{"text": "", "refs": ["R2"]}], '
+        '"blocks": [{"type": "cards", "label": "<1-2 words>", "heading": "<heading>", '
+        '"items": [{"name": "", "key": "", "kind": "", "what": "", '
+        '"details": [["Price", "₹250 a plate"]], "location": "", "url": "", "search": "", '
+        '"refs": ["R2"]}]}, '
+        '{"type": "steps", "label": "", "heading": "<heading>", "items": [{"text": "", "refs": ["R1"]}]}, '
+        '{"type": "tips", "label": "", "heading": "<heading>", "items": [{"text": "", "refs": ["R4"]}]}], '
         '"gaps": "<one sentence on what this person would want that these reels do '
         'not cover, or empty>"}\n\n'
         "REELS:\n\n" + "\n\n".join(blocks)
@@ -482,21 +495,89 @@ def _clean_blocks(raw: dict, labels: dict[str, str], helpful: set[str], docs: di
                     value = _words(_text(pair[1]))
                     if value and len(value & said) / len(value) < 0.8:
                         details.append([_text(pair[0]), _text(pair[1])])
+            details = details[:3]
+            # The one fact shown beside the name in the compact row. A model
+            # key that only restates the name is no fact; then the first
+            # stated detail stands in.
+            key = _text(item.get("key"))[:48]
+            if key and _words(key) <= _words(name):
+                key = ""
+            if not key and details:
+                key = details[0][1]
             card = {
                 "name": name,
                 "kind": kind,
+                "key": key,
                 "what": what,
-                "details": details[:3],
+                "details": details,
                 "location": location,
                 "reel_ids": refs,
+                # No fact at all (measured: 46% of cards) - the UI folds
+                # these into one "Also mentioned" line instead of a full row.
+                "thin": not key and not details,
             }
             source = " ".join(_reel_text(docs[rid]) for rid in refs if rid in docs)
             card["actions"] = _actions(card, _verified_url(_norm(item.get("url")), source), _text(item.get("search")))
             seen_cards[name.lower()] = card
             items.append(card)
+        if btype == "steps" and len(items) == 1:
+            # A one-step "method" is a tip, not a process to expand.
+            btype = "tips"
         if items:
-            blocks.append({"type": btype, "heading": _text(block.get("heading") or block.get("title")), "items": items})
+            heading = _text(block.get("heading") or block.get("title"))
+            if btype == "cards":
+                # Cards that carry a fact first; stable, so the writer's order
+                # holds within each group.
+                items.sort(key=lambda c: c["thin"])
+            blocks.append({
+                "type": btype,
+                "label": _label(_text(block.get("label")), heading, btype),
+                "heading": heading,
+                "items": items,
+            })
     return _drop_restated(blocks)
+
+
+_LABEL_FILLER = frozenset(
+    "top best must the a an of for in to and with your my practical recommended popular "
+    "key quick essential guide ideas options how what where".split()
+)
+
+
+def _label(label: str, heading: str, btype: str) -> str:
+    """One or two words for the section's jump tab."""
+    if label and len(label) <= 18:
+        return label
+    words = label.split()[:2]
+    while words and words[-1].lower() in _LABEL_FILLER:
+        words.pop()
+    if words:
+        return " ".join(words)[:18]
+    if btype != "cards":
+        return "Steps" if btype == "steps" else "Tips"
+    useful = [w for w in re.findall(r"[A-Za-z0-9&'-]+", heading) if w.lower() not in _LABEL_FILLER]
+    return (useful[0][:1].upper() + useful[0][1:]) if useful else "Picks"
+
+
+def _clean_highlights(raw: dict, labels: dict[str, str], helpful: set[str]) -> list[dict]:
+    """The Quick take: up to 3 lines, each citing an approved reel."""
+    out = []
+    for item in raw.get("highlights") or []:
+        text = _text(item.get("text") if isinstance(item, dict) else item)
+        refs_value = item.get("refs") if isinstance(item, dict) else None
+        if isinstance(refs_value, (str, int)):
+            refs_value = re.findall(r"\d+", str(refs_value))
+        refs = []
+        for ref in refs_value or []:
+            ref = _norm(ref).upper()
+            rid = labels.get(ref if ref.startswith("R") else "R" + ref)
+            if rid in helpful and rid not in refs:
+                refs.append(rid)
+        if text and refs:
+            out.append({"text": text, "reel_ids": refs})
+        if len(out) == 3:
+            break
+    return out
 
 
 _STOP = frozenset(
@@ -574,13 +655,13 @@ def _drop_restated(blocks: list[dict]) -> list[dict]:
     return kept
 
 
-def _number(blocks: list[dict], used: list[str]) -> list[dict]:
+def _number(blocks: list[dict], used: list[str], highlights: list[dict] | None = None) -> list[dict]:
     """Reel numbers follow the judge's approved list (search-rank order), so
     they're fixed before writing starts and never shift while streaming."""
     number = {rid: i + 1 for i, rid in enumerate(used)}
-    for block in blocks:
-        for item in block["items"]:
-            item["refs"] = sorted(number[rid] for rid in item["reel_ids"] if rid in number)
+    items = [item for block in blocks for item in block["items"]] + list(highlights or [])
+    for item in items:
+        item["refs"] = sorted(number[rid] for rid in item["reel_ids"] if rid in number)
     return blocks
 
 
@@ -603,7 +684,8 @@ def _reel_thumb(doc: dict) -> dict:
 
 def _payload(report: dict, docs: dict, query: str, excluded: list[str], cached: bool, usage: dict) -> dict:
     used = [rid for rid in report["used"] if rid in docs]
-    blocks = _number(report["blocks"], used)
+    highlights = report.get("highlights") or []
+    blocks = _number(report["blocks"], used, highlights)
     has_content = bool(blocks)
     skipped = [
         _reel_payload(docs[rid], report["skipped_why"].get(rid) or "Not about this search")
@@ -617,6 +699,7 @@ def _payload(report: dict, docs: dict, query: str, excluded: list[str], cached: 
         # With nothing usable, the model's intro/gaps describe the rejected
         # reels ("potentially useful for…") and contradict the empty state.
         "intro": report["intro"] if has_content else "",
+        "highlights": highlights if has_content else [],
         "gaps": report["gaps"] if has_content else "",
         "blocks": blocks,
         "used": [_reel_payload(docs[rid]) for rid in used] if has_content else [],
@@ -716,7 +799,7 @@ def report_events(
 
     if not candidates:
         yield {"event": "done", "report": {
-            "status": "empty", "query": query, "title": query, "looking_for": "", "intro": "",
+            "status": "empty", "query": query, "title": query, "looking_for": "", "intro": "", "highlights": [],
             "gaps": "", "blocks": [], "used": [], "skipped": [], "cached": False, "usage": {}}}
         return
 
@@ -742,7 +825,7 @@ def report_events(
     report = {
         "candidates": candidates, "used": used, "looking_for": looking_for,
         "skipped_why": {rid: why for rid, why in rejected.items() if rid not in helpful},
-        "title": "", "intro": "", "gaps": "", "blocks": [],
+        "title": "", "intro": "", "highlights": [], "gaps": "", "blocks": [],
     }
     yield {"event": "judged", "looking_for": looking_for, "used": [_reel_thumb(docs[rid]) for rid in used],
            "skipped_count": len(candidates) - len(used)}
@@ -764,11 +847,12 @@ def report_events(
                 if not partial:
                     continue
                 blocks = _clean_blocks(partial, write_labels, set(used), docs)
-                if blocks:
+                highlights = _clean_highlights(partial, write_labels, set(used))
+                if blocks or highlights:
                     last_emit, last_len = time.time(), len(text)
                     yield {"event": "partial", "report": {
                         "title": _text(partial.get("title")), "intro": _text(partial.get("intro")),
-                        "blocks": _number(blocks, used)}}
+                        "highlights": highlights, "blocks": _number(blocks, used, highlights)}}
         except Exception:
             raw = {}
         blocks = _clean_blocks(raw, write_labels, set(used), docs)
@@ -789,12 +873,56 @@ def report_events(
         report.update({
             "title": _text(raw.get("title")),
             "intro": _text(raw.get("intro")),
+            "highlights": _clean_highlights(raw, write_labels, set(used)),
             "gaps": _text(raw.get("gaps")),
             "blocks": blocks,
         })
     usage["seconds"] = round(time.time() - started, 1)
     _save(user_id, query, key, report, model, usage)
     yield {"event": "done", "report": _payload(report, docs, query, excluded, False, usage)}
+
+
+# ------------------------------------------------------------- usage ---
+
+# What the report screen reports back: which parts get used, so the next
+# layout change rests on behaviour, not on one person's reaction. Names and
+# short labels only (an action's label, a card's kind), never card text.
+REPORT_EVENTS = frozenset({
+    "view", "expand", "action", "watch", "jump", "more", "steps",
+    "expand_all", "share", "edit", "update",
+})
+DAILY_EVENTS = 400
+
+
+def record_report_event(user_id: str, event: str, detail: str = "", query: str = "") -> bool:
+    if event not in REPORT_EVENTS or not user_id:
+        return False
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM report_events WHERE user_id = ? AND created_at >= ?",
+            (user_id, time.strftime("%Y-%m-%d") + " 00:00:00"),
+        ).fetchone()
+        if int(row["n"] or 0) >= DAILY_EVENTS:
+            return False
+        conn.execute(
+            "INSERT INTO report_events (user_id, event, detail, query, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, event, _norm(detail)[:40], _norm(query)[:120], _now()),
+        )
+    return True
+
+
+def report_event_summary(days: int = 30) -> dict:
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - max(1, days) * 86400))
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT event, detail, COUNT(*) AS n, COUNT(DISTINCT user_id) AS users
+            FROM report_events WHERE created_at >= ?
+            GROUP BY event, detail ORDER BY n DESC
+            """,
+            (since,),
+        ).fetchall()
+    return {"days": days, "events": [dict(r) for r in rows]}
 
 
 def build_search_report(

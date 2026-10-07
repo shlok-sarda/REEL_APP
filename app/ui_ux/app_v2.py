@@ -31,6 +31,7 @@ SHELL = """<!DOCTYPE html>
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/components.css" />
   <link rel="stylesheet" href="css/screens.css" />
+  <link rel="stylesheet" href="css/report.css" />
   <link rel="stylesheet" href="css/player.css" />
   <link rel="stylesheet" href="css/sheets.css" />
   <link rel="stylesheet" href="css/dev.css" />

@@ -105,6 +105,17 @@ export async function checkInstagram() { return getSession(); }
 export async function extractRecipe(rid) { return post('/api/reel-recipe/extract', { user_id: CFG.userId, reel_id: rid }); }
 export async function logout() { return post('/auth/logout'); }
 
+/* ---------- search report usage beacon: fire and forget, never throws ---------- */
+export function reportEvent(event, detail, query) {
+  try {
+    fetch('/api/search-report/event', {
+      method: 'POST', credentials: 'same-origin', keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: CFG.userId, event, detail: detail || '', query: query || '' }),
+    }).catch(() => {});
+  } catch (e) { /* a counter must never break the screen */ }
+}
+
 /* ---------- search report: server-sent events read off a POST ---------- */
 export async function searchReportStream({ query, include, exclude, signal, onEvent }) {
   const res = await call('POST', '/api/search-report/stream', { user_id: CFG.userId, query, include: include || [], exclude: exclude || [] }, { raw: true, signal });
