@@ -13,6 +13,7 @@ import { animate, isReduced, rise } from './motion.js';
 import { setOffline } from './ui.js';
 import { openPlayer } from './player.js';
 import { openNewList } from './newlist.js';
+import { libraryQueries } from './queries.js';
 
 let layer = null;
 let panel = null;
@@ -49,6 +50,8 @@ export function openSearch(prefill) {
       panel = null;
       setDockMode('idle');
       setDockLoading(false);
+      runServer.cancel();
+      if (inflight) { inflight.abort(); inflight = null; }
       if (document.activeElement === inp) inp.blur();
       setDockValue('');
       state = { q: '', shown: [], serverFor: '', reqId: state.reqId + 1, error: null };
@@ -77,7 +80,9 @@ function rememberQuery(q) {
 
 /* ---------- suggestions from the library itself ---------- */
 function suggestions() {
-  const out = [];
+  // Real phrases from this library first ("veg food in bali"), then single
+  // words if the library is too small to make phrases from.
+  const out = libraryQueries(7);
   S.places.slice(0, 2).forEach((p) => out.push(p.place));
   S.collections.slice(0, 3).forEach((c) => { const w = c.title.split(' & ')[0]; if (w.length < 22) out.push(w.toLowerCase()); });
   const counts = {};
@@ -114,7 +119,7 @@ function onQuery(v) {
   const q = String(v || '').trim();
   if (!panel) openSearch();
   state.q = q;
-  if (!q) { runServer.cancel(); setDockLoading(false); state.shown = []; renderIdle(); return; }
+  if (!q) { runServer.cancel(); if (inflight) { inflight.abort(); inflight = null; } state.reqId += 1; setDockLoading(false); state.shown = []; renderIdle(); return; }
   panel.classList.add('has-query');
   panel.querySelector('[data-idle]').innerHTML = '';
   const local = localSearch(q, 30).map((h) => ({ id: h.id, evidence: h.evidence, src: 'local' }));
@@ -122,14 +127,23 @@ function onQuery(v) {
   state.shown = local;
   state.serverFor = '';
   renderResults(true);
-  setDockLoading(true);
+  // The bar only moves while the screen is empty. Once local matches are
+  // showing, smart results append quietly, so search never looks unfinished.
+  setDockLoading(!local.length);
   runServer(q);
 }
 
+let inflight = null;
+const SERVER_TIMEOUT_MS = 10000;
+
 async function serverSearch(q) {
   const id = ++state.reqId;
+  if (inflight) inflight.abort();
+  const ctl = new AbortController();
+  inflight = ctl;
+  const timer = setTimeout(() => ctl.abort(), SERVER_TIMEOUT_MS);
   try {
-    const res = await deepSearch(q);
+    const res = await deepSearch(q, { signal: ctl.signal });
     if (id !== state.reqId || state.q !== q) return;
     state.error = null;
     setOffline(false);
@@ -151,11 +165,15 @@ async function serverSearch(q) {
     renderResults(false, extra.map((x) => x.id));
   } catch (e) {
     if (id !== state.reqId) return;
-    state.error = e;
-    if (e.status === 0) setOffline(true);
+    // A timeout is not an outage: keep what is on screen, say nothing.
+    const timedOut = e && e.name === 'AbortError';
+    state.error = timedOut ? null : e;
+    if (!timedOut && e.status === 0) setOffline(true);
     state.serverFor = q;
     renderResults(false, []);
   } finally {
+    clearTimeout(timer);
+    if (inflight === ctl) inflight = null;
     if (id === state.reqId) setDockLoading(false);
   }
 }

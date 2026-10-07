@@ -74,10 +74,10 @@ export async function getRecipes(opts = {}) {
 }
 export async function getReelRecipe(rid) { return get(`/api/reel-recipe?reel_id=${encodeURIComponent(rid)}&user_id=${UID}`); }
 export async function getAdminUsers() { return get('/admin/users'); }
-export async function deepSearch(q) {
+export async function deepSearch(q, opts = {}) {
   const query = String(q || '').trim();
   if (!query) return { query, results: [] };
-  const res = await get(`/deep-search?q=${encodeURIComponent(query)}&user_id=${UID}&limit=30`);
+  const res = await get(`/deep-search?q=${encodeURIComponent(query)}&user_id=${UID}&limit=30`, { signal: opts.signal });
   const results = Array.isArray(res.results) ? res.results : (res.result && Array.isArray(res.result.hits) ? res.result.hits : []);
   return { query, backend: res.backend, results };
 }

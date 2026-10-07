@@ -3,7 +3,7 @@
 // without redesigning the screen.
 import { el, esc, plural, greetingWord, sleep, haptic, savedLabel } from '../util.js';
 import { icon } from '../icons.js';
-import { S, on, emit, displayName, isGuest, cityApps, appLabel, savePref, reelsFor, localSearch, refresh, listFromApi } from '../store.js';
+import { S, on, emit, displayName, isGuest, cityApps, appLabel, savePref, reelsFor, refresh, listFromApi } from '../store.js';
 import * as api from '../api.js';
 import { makeScreen, onLongPress, toast, apiToast, btnLoading, openSheet, copyText, errorMessage } from '../ui.js';
 import { listCover, wireFades, coverMode, skeletonCards } from '../cards.js';
@@ -13,6 +13,7 @@ import { openPlayer, warmPlayer } from '../player.js';
 import { openSearch } from '../search.js';
 import { openNewList } from '../newlist.js';
 import { openActivity } from '../sheets.js';
+import { libraryQueries } from '../queries.js';
 
 let devOpener = null;
 export function setDevOpener(fn) { devOpener = fn; }
@@ -22,8 +23,8 @@ export function createHome() {
   scroller.innerHTML = `
     <div class="ptr" aria-hidden="true"><span class="spinner-mark"></span></div>
     <header class="home-head">
-      <button class="brand pressable" type="button" data-brand aria-label="ClipNest"><img src="assets/icon-192.png" alt="" width="36" height="36"></button>
-      <div class="home-hello"><p class="eyebrow" data-greet></p><p class="home-name" data-name></p></div>
+      <button class="brand pressable" type="button" data-brand aria-label="ClipNest"><img src="assets/logo-tile.png" alt="" width="30" height="30"></button>
+      <p class="home-hello"><span class="home-greet" data-greet></span> <span class="home-name" data-name></span></p>
       <div class="home-head-end"><span data-status></span><button class="avatar pressable" type="button" data-you aria-label="You"></button></div>
     </header>
     <div class="home-cards" data-cards></div>
@@ -37,9 +38,9 @@ export function createHome() {
 
   /* ---------- header ---------- */
   function paintHead() {
-    $('[data-greet]').textContent = greetingWord();
     const name = displayName();
-    $('[data-name]').textContent = name || 'Your nest';
+    $('[data-greet]').textContent = name ? greetingWord() + ',' : greetingWord();
+    $('[data-name]').textContent = name || '';
     if (name) $('[data-you]').textContent = name.charAt(0).toUpperCase(); else $('[data-you]').innerHTML = icon('user');
     const st = $('[data-status]');
     const n = S.processing.length;
@@ -52,9 +53,18 @@ export function createHome() {
         if (!was && !isReduced()) animate(st.firstElementChild, [{ opacity: 0, transform: 'scale(0.8)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 360, easing: 'pop', clear: true });
       }
     } else if (was) {
-      animate(was, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).then(() => { st.innerHTML = ''; });
+      animate(was, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).then(() => { st.innerHTML = ''; fitHello(); });
     }
+    fitHello();
   }
+  // On a narrow phone the greeting gives way so the name is never cut off.
+  function fitHello() {
+    const h = $('.home-hello');
+    h.classList.remove('is-tight');
+    if (h.scrollWidth > h.clientWidth + 1) h.classList.add('is-tight');
+  }
+  window.addEventListener('resize', fitHello);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitHello);
   onLongPress($('[data-brand]'), () => devOpener && devOpener());
   $('[data-brand]').addEventListener('click', () => { scroller.scrollTo({ top: 0, behavior: isReduced() ? 'auto' : 'smooth' }); });
   $('[data-you]').addEventListener('click', () => import('./you.js').then((m) => m.openYou()));
@@ -70,7 +80,10 @@ export function createHome() {
     }
     const u = sess.user || {};
     if (S.loaded && !u.preferred_name && !S.prefs.nameSkip && !isGuest()) parts.push(['name', nameCard()]);
-    if (S.failed.length) parts.push(['failed', `<section class="hcard hcard-failed" data-k="failed"><span class="icon-tile is-danger">${icon('alert')}</span><div><p class="hcard-t">${plural(S.failed.length, 'reel')} could not be sorted</p><p class="xs muted">Usually a download hiccup. Trying again almost always works.</p></div><button class="btn btn-secondary btn-sm" type="button" data-retry-all>Try again</button></section>`]);
+    // Reels that could not be sorted wait in You > Activity with the retry
+    // button. Only a brand new library, where a failed first reel is the
+    // whole story, still says so here.
+    if (S.failed.length && !S.reels.length) parts.push(['failed', `<section class="hcard hcard-failed" data-k="failed"><span class="icon-tile is-danger">${icon('alert')}</span><div><p class="hcard-t">Your first ${S.failed.length === 1 ? 'reel' : 'reels'} could not be sorted</p><p class="xs muted">Usually a download hiccup. Trying again almost always works.</p></div><button class="btn btn-secondary btn-sm" type="button" data-retry-all>Try again</button></section>`]);
     const keys = parts.map((p) => p[0]).join('|');
     if (box.dataset.keys === keys) return;
     box.dataset.keys = keys;
@@ -156,7 +169,9 @@ export function createHome() {
   function widgets() {
     const out = [];
     const reels = S.reels;
-    if (S.processing.length) out.push(wProcessing());
+    // With a library already here, the header's "Sorting N" pill is enough;
+    // the big card is for the first reels, when it is the whole story.
+    if (S.processing.length && !reels.length) out.push(wProcessing());
     out.push(wLibrary());
     // Until places and recipes arrive, hold their exact boxes so nothing
     // below jumps when they land.
@@ -164,12 +179,12 @@ export function createHome() {
     if (reels.length) out.push(wLatest(!S.places.length && !placesPending));
     if (S.places.length) out.push(wPlaces());
     else if (placesPending) out.push({ key: 'places', cls: 'w-places w-pending', tag: 'div', html: '<span class="w-map" aria-hidden="true"></span><span class="w-foot"><span class="sk sk-line" style="width:60%"></span><span class="sk sk-line is-short"></span></span>' });
+    if (S.collections.length) out.push(wShelves());
     if (S.recipesEnabled && S.extrasLoaded) out.push(wRecipes());
     else if (S.recipesEnabled) out.push({ key: 'recipes', cls: 'w-recipes w-pending', tag: 'div', html: '<span class="w-foot"><span class="sk sk-line" style="width:60%"></span><span class="sk sk-line is-short"></span></span>' });
     out.push(wAsk(!(S.recipesEnabled)));
     out.push(wLists());
     if (reels.length) out.push(wRecent());
-    if (S.collections.length) out.push(wShelves());
     return out;
   }
 
@@ -261,9 +276,21 @@ export function createHome() {
 
   function wShelves() {
     const cols = S.collections;
-    return { key: 'shelves:' + cols.map((c) => c.key + c.ids.length).join(','), cls: 'w-shelves w-wide', tag: 'section', html: `
-      <div class="w-head"><b class="head">Sorted for you</b><span class="xs faint">${plural(cols.length, 'shelf', 'shelves')}</span></div>
-      <div class="w-shelf-grid">${cols.map((c) => `<button class="w-shelf pressable" type="button" data-col="${esc(c.key)}">${c.emoji ? `<span class="w-shelf-e">${c.emoji}</span>` : `<span class="w-shelf-e is-mono">${esc(c.title.charAt(0))}</span>`}<span class="w-shelf-t">${esc(c.title)}</span><span class="w-shelf-n">${c.ids.length}</span></button>`).join('')}</div>` };
+    const sorted = new Set(cols.flatMap((c) => c.ids)).size;
+    return { key: 'shelves:' + cols.map((c) => c.key + c.ids.length + (c.ids[0] || '')).join(','), cls: 'w-shelves w-wide', tag: 'section', html: `
+      <span class="w-glow is-soft" aria-hidden="true"></span>
+      <div class="w-head"><span class="w-head-t"><span class="eyebrow">Sorted for you</span><b class="head">${plural(sorted, 'reel')} on ${plural(cols.length, 'shelf', 'shelves')}</b></span><button class="link-btn" type="button" data-alllists>See all</button></div>
+      <div class="w-shelf-rail">${cols.map((c, i) => shelfCard(c, i)).join('')}</div>` };
+  }
+
+  function shelfCard(c, i) {
+    const rs = reelsFor(c.ids).slice(0, i === 0 ? 3 : 1);
+    const lead = rs[0];
+    const mark = c.emoji ? `<span class="w-sh-e">${c.emoji}</span>` : `<span class="w-sh-e is-mono">${esc(c.title.charAt(0))}</span>`;
+    const img = (r) => `<i style="--c:${r.color}">${r.lqip ? `<img class="lq" src="${r.lqip}" alt="">` : ''}${r.thumb ? `<img class="full" src="${esc(r.thumb)}" alt="" loading="lazy" decoding="async" data-fade>` : ''}</i>`;
+    return `<button class="w-sh pressable ${i === 0 ? 'is-lead' : ''}" type="button" data-col="${esc(c.key)}" aria-label="${esc(c.title)}, ${plural(c.ids.length, 'reel')}">
+      <span class="w-sh-cover n${rs.length}" style="--c:${lead ? lead.color : '#1c1c20'}">${rs.map(img).join('')}<span class="w-sh-shade" aria-hidden="true"></span>${mark}<span class="w-sh-n">${c.ids.length}</span></span>
+      <b class="clamp-2">${esc(c.title)}</b></button>`;
   }
 
   /* ---------- empty / onboarding / skeleton ---------- */
@@ -430,11 +457,13 @@ export function createHome() {
   function startTyping() {
     const target = bento.querySelector('[data-typed]');
     if (!target) return;
-    if (typing && typing.target === target) return;
+    const sig = libraryQueries(7).join('|');
+    if (typing && typing.target === target && typing.sig === sig) return;
     stopTyping();
-    const pool = ['veg food in bali', 'high protein recipe', 'tricep exercise', 'horror movie', 'sunset', 'mac app'].filter((q) => localSearch(q, 1).length);
+    // Phrases come from this library, so whatever it types has results here.
+    const pool = libraryQueries(7);
     const qs = pool.length ? pool : ['describe what you remember'];
-    typing = { target, i: 0, current: qs[0], timer: 0, alive: true };
+    typing = { target, sig, i: 0, current: qs[0], timer: 0, alive: true };
     if (isReduced()) { target.textContent = qs[0]; return; }
     const t = typing;
     const typeNext = () => {
@@ -509,7 +538,7 @@ export function createHome() {
   inst.onShow = () => { visible = true; };
   inst.onHide = () => { visible = false; };
   inst.scrollTop = () => scroller.scrollTo({ top: 0, behavior: isReduced() ? 'auto' : 'smooth' });
-  inst.destroy = () => { offs.forEach((f) => f()); stopTyping(); };
+  inst.destroy = () => { offs.forEach((f) => f()); stopTyping(); window.removeEventListener('resize', fitHello); };
   inst.repaint = () => { mode = ''; paint(); };
   paint();
   return inst;
