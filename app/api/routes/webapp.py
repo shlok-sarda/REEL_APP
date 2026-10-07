@@ -3958,6 +3958,11 @@ def demo_link_login(token: str, request: Request):
     return RedirectResponse(url="/app", status_code=303)
 
 
+# Guests see the home screen ask as a small widget from 5 reels and as a card
+# from this many, a step before the sign-in card at 17.
+HOME_SCREEN_CARD_AT = 15
+
+
 @router.get("/g/{token}")
 def library_link_login(token: str, request: Request, preview: str = ""):
     """Personal library link: opens one account straight into the app.
@@ -4006,6 +4011,7 @@ def library_link_login(token: str, request: Request, preview: str = ""):
     from app.services import nudge
 
     claim_stage = ""
+    n = 0
     if request.session.get(GUEST_LINK_SESSION_KEY) and not (user.get("google_sub") or "").strip():
         state = nudge.load_state(user["id"]) or {}
         n = int(state.get("reel_count") or 0)
@@ -4015,10 +4021,10 @@ def library_link_login(token: str, request: Request, preview: str = ""):
             claim_stage = "signin"
         elif n >= nudge.HOME_SCREEN_AT:
             claim_stage = "home"
-    # ?preview=home|signin|locked shows a card stage without saving the reels
-    # to reach it. Test accounts only (GUEST_TEST_SENDERS), so a real user's
-    # link cannot be made to show a wall they have not reached.
-    if preview in ("home", "signin", "locked") and not (user.get("google_sub") or "").strip():
+    # ?preview=tile|home|signin|locked shows a card stage without saving the
+    # reels to reach it. Test accounts only (GUEST_TEST_SENDERS), so a real
+    # user's link cannot be made to show a wall they have not reached.
+    if preview in ("tile", "home", "signin", "locked") and not (user.get("google_sub") or "").strip():
         if nudge.sender_allowed(user.get("instagram_user_id") or "", user.get("instagram_username") or ""):
             claim_stage = preview
 
@@ -4029,11 +4035,16 @@ def library_link_login(token: str, request: Request, preview: str = ""):
     from app.ui_ux.app_v2 import app_v2_enabled, build_app_v2_html
 
     if app_v2_enabled(user) and request.session.get(V2_UI_SESSION_KEY) != "classic":
+        # The new UI asks for the home screen quietly first: a widget on Home
+        # until 15 reels, then the card.
+        v2_stage = claim_stage
+        if claim_stage == "home" and n < HOME_SCREEN_CARD_AT and preview != "home":
+            v2_stage = "tile"
         return app_shell(
             build_app_v2_html(
                 user,
                 library_token=token,
-                claim_stage=claim_stage,
+                claim_stage=v2_stage,
                 login_csrf=login_csrf,
                 google_client_id=google_client_id,
             )
@@ -4042,7 +4053,7 @@ def library_link_login(token: str, request: Request, preview: str = ""):
         build_clipnest_v1_html(
             user["id"],
             library_token=token,
-            claim_stage=claim_stage,
+            claim_stage="home" if claim_stage == "tile" else claim_stage,
             login_csrf=login_csrf,
             google_client_id=google_client_id,
         )
@@ -4069,7 +4080,8 @@ def library_link_manifest(token: str):
             "name": "ClipNest",
             "short_name": "ClipNest",
             "description": "Your saved reels, organized and searchable.",
-            "start_url": f"/g/{token}",
+            # hs=1 tells the page it was opened from the icon (stop asking).
+            "start_url": f"/g/{token}?hs=1",
             "scope": "/",
             # Deliberately not standalone. A full-screen home screen app on
             # iPhone handles Google's sign-in popup badly, and sign-in is the

@@ -214,3 +214,9 @@
 .steps.how li { color: var(--muted); }
 
 .nl-error.is-note { background: var(--accent-tint); color: var(--accent); }
+
+/* Add to Home Screen */
+.hs-sheet .steps { margin-top: 16px; }
+.hs-sheet .hs-ic { width: 16px; height: 16px; vertical-align: -3px; color: var(--accent); }
+.hs-go { margin-top: 18px; }
+.hs-note { margin-top: 10px; }

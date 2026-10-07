@@ -119,14 +119,6 @@ def build_clipnest_v1_html(
     .icon-button svg, .back-button svg { width:22px; height:22px; }
     .icon-button.spinning svg { animation: cn-spin .7s linear infinite; }
     @keyframes cn-spin { to { transform: rotate(360deg); } }
-    .name-ask { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px; margin:0 0 14px; }
-    .name-ask-title { margin:0; font-family:var(--serif); font-size:1.05rem; font-weight:600; color:var(--text); }
-    .name-ask-sub { margin:2px 0 10px; font-size:.75rem; color:var(--muted); }
-    .name-ask-row { display:flex; gap:8px; }
-    .name-ask-row input { flex:1; min-width:0; background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:var(--text); font-size:.9rem; }
-    .name-ask-row input::placeholder { color:var(--faint); opacity:.6; }
-    .name-ask-row button { background:var(--accent); color:var(--bg); border:none; border-radius:10px; padding:0 16px; font-weight:700; }
-    .name-ask-skip { background:none; border:none; color:var(--muted); font-size:.75rem; margin-top:8px; padding:0; }
     /* Claim card: home screen at 5 reels, sign in from 17, the wall at 20.
        Sits outside #app because render() rewrites #app wholesale. */
     .claim-card { margin:calc(12px + var(--safe-top)) 18px -4px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px;
@@ -1933,7 +1925,6 @@ def build_clipnest_v1_html(
             </div>
           </div>
         </div>
-        ${renderNamePrompt()}
         <label class="search${SHOW_REPORT && !state.selecting ? ' has-report' : ''}"><span class="glyph">${SEARCH_SVG}</span><input id="deepSearchInput" type="search" value="${escapeHtml(state.magicQuery)}" placeholder="${SHOW_REPORT && !state.selecting ? 'Search anything...' : 'Search anything you saved...'}" autocomplete="off" />${SHOW_REPORT && !state.selecting ? `<button id="reportBtn" class="search-report" type="button" aria-label="Report on these search results">${REPORT_SVG}</button>` : ''}<button id="newListBtn" class="search-plus${state.selecting ? ' active' : ''}" type="button" aria-label="New list from search">+</button></label>
         <section id="homeResults" ${searching ? '' : 'hidden'}></section>
         <div id="homeBrowse" ${searching ? 'hidden' : ''}>
@@ -2003,14 +1994,6 @@ def build_clipnest_v1_html(
         });
       }
       document.getElementById('refreshButton')?.addEventListener('click', manualRefresh);
-      document.getElementById('nameSaveBtn')?.addEventListener('click', saveName);
-      document.getElementById('nameSkipBtn')?.addEventListener('click', () => {
-        try { localStorage.setItem('cn_name_skip', '1'); } catch (_) {}
-        render();
-      });
-      document.getElementById('nameAskInput')?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') saveName();
-      });
       bindChips();
       const recentsData = recentItems(24);
       app.querySelectorAll('[data-recent-item]').forEach((button) => {
@@ -3333,41 +3316,6 @@ def build_clipnest_v1_html(
       if (!user) return USER_ID;
       return user.preferred_name || user.display_name || user.email || USER_ID;
     }
-    function renderNamePrompt() {
-      const user = state.session && state.session.authenticated && state.session.user;
-      if (!user || user.preferred_name) return '';
-      let skipped = false;
-      try { skipped = localStorage.getItem('cn_name_skip') === '1'; } catch (_) {}
-      if (skipped) return '';
-      return '<section class="name-ask">'
-        + '<p class="name-ask-title">What should we call you?</p>'
-        + '<p class="name-ask-sub">Just your first name is fine.</p>'
-        + '<div class="name-ask-row"><input id="nameAskInput" type="text" maxlength="60" placeholder="Type your name…" autocomplete="name" />'
-        + '<button id="nameSaveBtn" type="button">Save</button></div>'
-        + '<button id="nameSkipBtn" type="button" class="name-ask-skip">Skip for now</button>'
-        + '</section>';
-    }
-    async function saveName() {
-      const input = document.getElementById('nameAskInput');
-      const name = (input && input.value ? input.value : '').trim();
-      if (!name) { if (input) input.focus(); return; }
-      const button = document.getElementById('nameSaveBtn');
-      if (button) { button.disabled = true; button.textContent = 'Saving…'; }
-      try {
-        const response = await fetch('/auth/profile-name', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name })
-        });
-        if (!response.ok) throw new Error('save failed');
-        state.session = await response.json();
-      } catch (_) {
-        if (button) { button.disabled = false; button.textContent = 'Save'; }
-        return;
-      }
-      render();
-    }
     function loginAgo(iso) {
       if (!iso) return 'never';
       const then = new Date(iso);
@@ -3831,7 +3779,7 @@ def build_clipnest_v1_html(
       // Background refreshes must never yank the UI out from under the user:
       // skip the re-render while they are typing, selecting, or in a sheet/player.
       const active = document.activeElement;
-      const typing = active && ((active.id === 'deepSearchInput' && state.magicQuery.trim()) || active.id === 'nameAskInput');
+      const typing = active && active.id === 'deepSearchInput' && state.magicQuery.trim();
       const busy = !force && !firstLoad && (state.selecting || typing
         || actionSheet.classList.contains('visible')
         || miniPlayer.classList.contains('visible'));

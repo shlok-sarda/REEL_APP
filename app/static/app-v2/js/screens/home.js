@@ -1,7 +1,7 @@
 // Home: a dashboard of widgets. Each widget only appears when the person has
 // that kind of data (places, recipes, lists), so new widgets slot in later
 // without redesigning the screen.
-import { el, esc, plural, greetingWord, sleep, haptic, savedLabel } from '../util.js';
+import { el, esc, plural, sleep, haptic, savedLabel } from '../util.js';
 import { icon } from '../icons.js';
 import { S, on, emit, displayName, isGuest, cityApps, appLabel, savePref, reelsFor, refresh, listFromApi } from '../store.js';
 import * as api from '../api.js';
@@ -24,7 +24,7 @@ export function createHome() {
     <div class="ptr" aria-hidden="true"><span class="spinner-mark"></span></div>
     <header class="home-head">
       <button class="brand pressable" type="button" data-brand aria-label="ClipNest"><img src="assets/logo-tile.png" alt="" width="30" height="30"></button>
-      <p class="home-hello"><span class="home-greet" data-greet></span> <span class="home-name" data-name></span></p>
+      <span class="home-hello" aria-hidden="true"></span>
       <div class="home-head-end"><span data-status></span><button class="avatar pressable" type="button" data-you aria-label="You"></button></div>
     </header>
     <div class="home-cards" data-cards></div>
@@ -39,8 +39,6 @@ export function createHome() {
   /* ---------- header ---------- */
   function paintHead() {
     const name = displayName();
-    $('[data-greet]').textContent = name ? greetingWord() + ',' : greetingWord();
-    $('[data-name]').textContent = name || '';
     if (name) $('[data-you]').textContent = name.charAt(0).toUpperCase(); else $('[data-you]').innerHTML = icon('user');
     const st = $('[data-status]');
     const n = S.processing.length;
@@ -53,33 +51,23 @@ export function createHome() {
         if (!was && !isReduced()) animate(st.firstElementChild, [{ opacity: 0, transform: 'scale(0.8)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 360, easing: 'pop', clear: true });
       }
     } else if (was) {
-      animate(was, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).then(() => { st.innerHTML = ''; fitHello(); });
+      animate(was, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).then(() => { st.innerHTML = ''; });
     }
-    fitHello();
   }
-  // On a narrow phone the greeting gives way so the name is never cut off.
-  function fitHello() {
-    const h = $('.home-hello');
-    h.classList.remove('is-tight');
-    if (h.scrollWidth > h.clientWidth + 1) h.classList.add('is-tight');
-  }
-  window.addEventListener('resize', fitHello);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitHello);
   onLongPress($('[data-brand]'), () => devOpener && devOpener());
   $('[data-brand]').addEventListener('click', () => { scroller.scrollTo({ top: 0, behavior: isReduced() ? 'auto' : 'smooth' }); });
   $('[data-you]').addEventListener('click', () => import('./you.js').then((m) => m.openYou()));
 
-  /* ---------- top cards: guest claim, Instagram, name, failed ---------- */
+  /* ---------- top cards: guest claim, failed ---------- */
   function paintCards() {
     const box = $('[data-cards]');
     const parts = [];
     const sess = S.session || {};
     if (isGuest()) {
       const stage = sess.claim_stage || 'signin';
-      if (stage === 'locked' || !S.prefs.claimSkip[stage]) parts.push(['claim-' + stage, claimCard(stage)]);
+      // The home screen ask is a small widget, not a card (homeScreenStage).
+      if (stage !== 'home' && (stage === 'locked' || !S.prefs.claimSkip[stage])) parts.push(['claim-' + stage, claimCard(stage)]);
     }
-    const u = sess.user || {};
-    if (S.loaded && !u.preferred_name && !S.prefs.nameSkip && !isGuest()) parts.push(['name', nameCard()]);
     // Reels that could not be sorted wait in You > Activity with the retry
     // button. Only a brand new library, where a failed first reel is the
     // whole story, still says so here.
@@ -115,12 +103,6 @@ export function createHome() {
     </section>`;
   }
 
-  function nameCard() {
-    return `<section class="hcard hcard-name" data-k="name"><p class="hcard-t">What should we call you?</p><p class="xs muted">Just your first name is fine.</p>
-      <form class="hcard-form" data-nameform><input class="field" name="n" type="text" maxlength="60" placeholder="Your name" autocomplete="given-name" aria-label="Your name" /><button class="btn btn-primary btn-sm" type="submit">Save</button></form>
-      <button class="link-btn is-muted" type="button" data-nameskip>Skip for now</button></section>`;
-  }
-
   function wireCards(box) {
     const q = (s) => box.querySelector(s);
     if (q('[data-skip]')) q('[data-skip]').addEventListener('click', () => {
@@ -130,28 +112,6 @@ export function createHome() {
     });
     if (q('[data-signin]')) q('[data-signin]').addEventListener('click', () => openSignIn());
     if (q('[data-escape]')) q('[data-escape]').addEventListener('click', (e) => { e.preventDefault(); toast({ msg: 'This opens the same library in your browser, signed in.', icon: 'ext' }); });
-    if (q('[data-nameform]')) q('[data-nameform]').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const input = e.currentTarget.querySelector('input');
-      const name = input.value.trim();
-      if (!name) { input.focus(); return; }
-      const btn = e.currentTarget.querySelector('button');
-      btnLoading(btn, true);
-      const prev = S.session.user.preferred_name;
-      S.session.user.preferred_name = name;
-      try {
-        await api.saveProfileName(name);
-        paintHead();
-        collapse(q('[data-k="name"]'), paintCards);
-        haptic(10);
-        toast({ msg: `Nice to meet you, ${name}` });
-      } catch (err) {
-        S.session.user.preferred_name = prev;
-        btnLoading(btn, false);
-        apiToast(err);
-      }
-    });
-    if (q('[data-nameskip]')) q('[data-nameskip]').addEventListener('click', () => { savePref('nameSkip', true); collapse(q('[data-k="name"]'), paintCards); });
     if (q('[data-retry-all]')) q('[data-retry-all]').addEventListener('click', async (e) => {
       btnLoading(e.currentTarget, true);
       try { const res = await api.retryFailed(); await refresh(); toast({ msg: `${plural(res.requeued_count, 'reel')} back in the queue` }); }
@@ -179,10 +139,15 @@ export function createHome() {
     if (reels.length) out.push(wLatest(!S.places.length && !placesPending));
     if (S.places.length) out.push(wPlaces());
     else if (placesPending) out.push({ key: 'places', cls: 'w-places w-pending', tag: 'div', html: '<span class="w-map" aria-hidden="true"></span><span class="w-foot"><span class="sk sk-line" style="width:60%"></span><span class="sk sk-line is-short"></span></span>' });
-    if (S.collections.length) out.push(wShelves());
+    // Search sits above the shelves. Recipes and the home screen ask are half
+    // tiles; search goes full width unless one of them needs a partner.
+    const hs = homeScreenStage();
+    const halves = (S.recipesEnabled ? 1 : 0) + (hs ? 1 : 0);
     if (S.recipesEnabled && S.extrasLoaded) out.push(wRecipes());
     else if (S.recipesEnabled) out.push({ key: 'recipes', cls: 'w-recipes w-pending', tag: 'div', html: '<span class="w-foot"><span class="sk sk-line" style="width:60%"></span><span class="sk sk-line is-short"></span></span>' });
-    out.push(wAsk(!(S.recipesEnabled)));
+    if (hs) out.push(wHomeScreen());
+    out.push(wAsk(halves !== 1));
+    if (S.collections.length) out.push(wShelves());
     out.push(wLists());
     if (reels.length) out.push(wRecent());
     return out;
@@ -245,6 +210,25 @@ export function createHome() {
     return { key: 'ask', cls: `w-ask ${wide ? 'w-wide' : ''}`, tag: 'button', label: 'Ask your library', html: `
       <span class="w-ask-ic">${icon('search')}</span>
       <span class="w-foot"><b>Ask your library</b><small class="w-typed"><span data-typed></span><i class="caret"></i></small></span>` };
+  }
+
+  // Guests opened by their DM link, 5 to 14 reels: a quiet widget. From 15 the
+  // page shell shows it as a card instead. Gone once they have added it.
+  function homeScreenStage() {
+    const cn = window.__CN__ || {};
+    const stage = cn.claimStage || (isGuest() && S.session && S.session.claim_stage === 'home' ? 'tile' : '');
+    if (stage !== 'tile' || !S.reels.length) return '';
+    let added = false;
+    try { added = localStorage.getItem('cn_hs_added') === '1'; } catch (e) { /* private mode */ }
+    if (added || navigator.standalone || window.matchMedia('(display-mode: standalone)').matches) return '';
+    const ua = navigator.userAgent || '';
+    return /Instagram/i.test(ua) || (S.dev && S.dev.inInsta) || /iPhone|iPad|iPod|Android/i.test(ua) ? stage : '';
+  }
+
+  function wHomeScreen() {
+    return { key: 'hs', cls: 'w-hs', tag: 'button', label: 'Add ClipNest to your Home Screen', html: `
+      <span class="w-ask-ic">${icon('home')}</span>
+      <span class="w-foot"><b>Add to Home Screen</b><small>Open your library like an app</small></span>` };
   }
 
   function wLists() {
@@ -404,6 +388,7 @@ export function createHome() {
     if (slot === 'recipes') n.addEventListener('click', () => import('./recipes.js').then((m) => m.openRecipes()));
     if (slot === 'ask') n.addEventListener('click', () => openSearch(typing && typing.current ? typing.current : undefined));
     if (slot === 'proc') n.addEventListener('click', openActivity);
+    if (slot === 'hs') n.addEventListener('click', openHomeScreenSheet);
     n.querySelectorAll('[data-newlist]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); openNewList({}); }));
     n.querySelectorAll('[data-alllists]').forEach((b) => b.addEventListener('click', () => import('../router.js').then((m) => m.switchTab('lists'))));
     n.querySelectorAll('[data-list]').forEach((b) => b.addEventListener('click', () => import('./listDetail.js').then((m) => m.openListDetail(Number(b.dataset.list), { origin: b.querySelector('.w-li-cover') }))));
@@ -538,7 +523,7 @@ export function createHome() {
   inst.onShow = () => { visible = true; };
   inst.onHide = () => { visible = false; };
   inst.scrollTop = () => scroller.scrollTo({ top: 0, behavior: isReduced() ? 'auto' : 'smooth' });
-  inst.destroy = () => { offs.forEach((f) => f()); stopTyping(); window.removeEventListener('resize', fitHello); };
+  inst.destroy = () => { offs.forEach((f) => f()); stopTyping(); };
   inst.repaint = () => { mode = ''; paint(); };
   paint();
   return inst;
@@ -561,4 +546,39 @@ export function openSignIn() {
     haptic(14);
     toast({ msg: 'Signed in. This library is yours for good.' });
   });
+}
+
+// Add to Home Screen, explained per browser. Instagram's own browser cannot do
+// it, so there the sheet hands the page to Safari or Chrome instead.
+function openHomeScreenSheet() {
+  const ua = navigator.userAgent || '';
+  const inInsta = /Instagram/i.test(ua) || !!(S.dev && S.dev.inInsta);
+  const android = /Android/i.test(ua);
+  const token = (window.__CN__ || {}).guestLink || '';
+  let html = '';
+  if (inInsta) {
+    const full = location.origin + '/g/' + token;
+    const href = android
+      ? 'intent://' + location.host + '/g/' + token + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(full) + ';end'
+      : 'instagram://extbrowser/?url=' + encodeURIComponent(full);
+    html = `<p class="sm muted">Instagram's browser cannot add pages to your Home Screen. Open your library in your browser, then add it from there.</p>
+      <a class="btn btn-primary btn-block hs-go" href="${esc(href)}">${icon('ext')}Continue in browser</a>
+      <p class="xs faint hs-note">If nothing happens, tap the three dots at the top right and choose Open in external browser.</p>`;
+  } else {
+    // A Home Screen icon opens whatever URL was on screen when it was added,
+    // so mark it. The page sees the mark on launch and stops asking.
+    if (location.pathname.indexOf('/g/') === 0) {
+      const q = new URLSearchParams(location.search);
+      if (q.get('hs') !== '1') {
+        q.set('hs', '1');
+        try { history.replaceState(history.state, '', location.pathname + '?' + q.toString() + location.hash); } catch (e) { /* sandboxed */ }
+      }
+    }
+    const steps = android
+      ? ['Tap <b>⋮</b> at the top right of Chrome.', 'Choose <b>Add to Home screen</b>.', 'Tap <b>Add</b>.']
+      : [`Tap <b>Share</b> ${icon('share', 'hs-ic')} in your browser.`, 'Scroll down and choose <b>Add to Home Screen</b>.', 'Tap <b>Add</b>.'];
+    html = `<p class="sm muted">Your library opens in one tap, just like an app. No need to go through Instagram.</p>
+      <ol class="steps">${steps.map((t) => `<li><span>${t}</span></li>`).join('')}</ol>`;
+  }
+  openSheet({ title: 'Add ClipNest to your Home Screen', body: `<div class="hs-sheet">${html}</div>`, className: 'sheet-hs' });
 }

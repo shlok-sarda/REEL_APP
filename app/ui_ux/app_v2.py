@@ -36,11 +36,41 @@ SHELL = """<!DOCTYPE html>
   <link rel="stylesheet" href="css/sheets.css" />
   <link rel="stylesheet" href="css/dev.css" />
   <script>window.__CN__ = __CONFIG__;</script>
+  <style>
+    #boot { position: absolute; inset: 0; z-index: 35; display: grid; place-items: center; background: var(--s0); transition: opacity 0.32s ease; }
+    #boot.is-out { opacity: 0; pointer-events: none; }
+    .boot-in { display: grid; justify-items: center; gap: 26px; opacity: 0; animation: bootIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.12s forwards; }
+    .boot-logo { position: relative; width: 64px; height: 64px; }
+    .boot-logo::before { content: ""; position: absolute; inset: -34px; border-radius: 50%; background: radial-gradient(circle, rgba(242, 168, 102, 0.26), transparent 64%); animation: bootGlow 2.4s ease-in-out infinite; }
+    .boot-logo img { position: relative; display: block; width: 64px; height: 64px; filter: drop-shadow(0 8px 20px rgba(238, 127, 47, 0.3)); animation: bootBreathe 2.4s ease-in-out infinite; }
+    .boot-reels { display: flex; gap: 8px; height: 32px; }
+    .boot-reels i { position: relative; width: 18px; height: 32px; border-radius: 5px; background: var(--s4); box-shadow: 0 0 0 1px var(--line-strong) inset; opacity: 0; animation: bootReel 1.8s cubic-bezier(0.3, 0.7, 0.2, 1) infinite; }
+    .boot-reels i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--brand-grad); opacity: 0; animation: bootLand 1.8s ease-out infinite; animation-delay: inherit; }
+    .boot-reels i:nth-child(2) { animation-delay: 0.2s; }
+    .boot-reels i:nth-child(3) { animation-delay: 0.4s; }
+    .boot-cap { margin: -10px 0 0; font-family: var(--sans); font-size: var(--t-2xs); color: var(--faint); opacity: 0; animation: bootIn 0.4s ease 1.4s forwards; }
+    @keyframes bootIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @keyframes bootBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+    @keyframes bootGlow { 0%, 100% { opacity: 0.5; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.06); } }
+    @keyframes bootReel { 0% { opacity: 0; transform: translateY(-18px) rotate(-12deg); } 24% { opacity: 1; transform: none; } 72% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(4px) scale(0.9); } }
+    @keyframes bootLand { 0%, 14% { opacity: 0; } 26% { opacity: 0.9; } 52%, 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .boot-in, .boot-cap, .boot-reels i { animation: none; opacity: 1; }
+      .boot-logo::before, .boot-logo img, .boot-reels i::after { animation: none; }
+    }
+  </style>
 __HEAD_EXTRA__
 </head>
 <body>
   <div id="device">
     <div id="stage"></div>
+    <div id="boot" role="status" aria-label="Loading your library">
+      <div class="boot-in">
+        <span class="boot-logo"><img src="assets/logo-tile.png" alt="" width="64" height="64" /></span>
+        <span class="boot-reels" aria-hidden="true"><i></i><i></i><i></i></span>
+        <p class="boot-cap">Opening your library</p>
+      </div>
+    </div>
     <div id="dock-scrim" aria-hidden="true"></div>
     <div id="dock-host"></div>
 __CLAIM_HTML__
@@ -56,8 +86,8 @@ __CLAIM_SCRIPT__
 """
 
 
-# Claim card for guests who arrived by a /g/ library link: home screen at 5
-# reels, Google sign-in from 17, impossible to dismiss at 20. It floats above
+# Claim card for guests who arrived by a /g/ library link: home screen at 15
+# reels (5 to 14 it is a widget on Home), Google sign-in from 17, impossible to dismiss at 20. It floats above
 # the dock inside #device, under the player (z 40) and sheets (z 60), and lives
 # here in the shell rather than in app-v2/js because sync_live.py replaces
 # those files wholesale. No backslashes anywhere below: non-raw Python string.
@@ -131,6 +161,13 @@ CLAIM_SCRIPT = """  <script>
         }
         return 'instagram://extbrowser/?url=' + encodeURIComponent(fullUrl);
       }
+      // A Home Screen icon opens the URL that was on screen when it was added.
+      function markHomeScreenUrl() {
+        const q = new URLSearchParams(location.search);
+        if (q.get('hs') === '1') return;
+        q.set('hs', '1');
+        try { history.replaceState(history.state, '', location.pathname + '?' + q.toString() + location.hash); } catch (e) {}
+      }
       function escapeButton(label, explain) {
         const a = document.createElement('a');
         a.className = 'cn-claim-btn';
@@ -142,6 +179,10 @@ CLAIM_SCRIPT = """  <script>
       }
 
       if (STAGE === 'home') {
+        let added = false;
+        try { added = localStorage.getItem('cn_hs_added') === '1'; } catch (e) {}
+        if (added || navigator.standalone || window.matchMedia('(display-mode: standalone)').matches) return;
+        if (!inInstagram) markHomeScreenUrl();
         title.textContent = 'Add ClipNest to your Home Screen';
         body.textContent = 'It works just like an app. Open your library in one tap, without going through Instagram.';
         if (inInstagram) {
@@ -223,6 +264,21 @@ CLAIM_SCRIPT = """  <script>
   </script>"""
 
 
+# Launched from a Home Screen icon: its URL carries hs=1 (marked when the
+# instructions were shown, and in the manifest's start_url), so stop asking.
+# A reload of a marked tab does not count.
+HOME_SCREEN_SEEN = """  <script>
+    (function () {
+      try {
+        const q = new URLSearchParams(location.search);
+        const nav = (performance.getEntriesByType('navigation')[0] || {}).type;
+        if (q.get('hs') === '1' && nav === 'navigate' && !/Instagram/i.test(navigator.userAgent)) localStorage.setItem('cn_hs_added', '1');
+      } catch (e) {}
+    })();
+  </script>
+"""
+
+
 def _token_safe(value: str) -> str:
     return "".join(c for c in (value or "") if c.isalnum() or c in "._-")
 
@@ -273,11 +329,16 @@ def build_app_v2_html(
             "showReport": search_report_enabled(user_id),
         },
     }
+    token = _token_safe(library_token)
+    # 5 to 14 reels: the home screen ask is a widget on Home, not a card.
+    stage = claim_stage if claim_stage in ("tile", "home", "signin", "locked") else ""
+    if token:
+        config["guestLink"] = token
+        config["claimStage"] = stage
     # "</" can never appear inside the inline JSON, so it cannot close the tag.
     payload = json.dumps(config).replace("</", "<\\/")
     html = SHELL.replace("__BUILD__", build).replace("__CONFIG__", payload)
 
-    token = _token_safe(library_token)
     head_extra, claim_html, claim_script = "", "", ""
     if token:
         # Opened by a /g/ link: iPhone builds the Home Screen icon from the
@@ -285,9 +346,8 @@ def build_app_v2_html(
         # Not full-screen: Google's sign-in popup misbehaves in iPhone
         # full-screen web apps, and sign-in is what the guest flow converts on.
         html = html.replace('  <meta name="apple-mobile-web-app-capable" content="yes" />\n', "")
-        head_extra = f'  <link rel="manifest" href="/g/{token}/manifest.webmanifest" />\n'
-    stage = claim_stage if claim_stage in ("home", "signin", "locked") else ""
-    if token and stage:
+        head_extra = f'  <link rel="manifest" href="/g/{token}/manifest.webmanifest" />\n' + HOME_SCREEN_SEEN
+    if token and stage and stage != "tile":
         head_extra += CLAIM_CSS
         claim_html = CLAIM_HTML
         claim_script = (

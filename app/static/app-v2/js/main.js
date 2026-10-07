@@ -22,6 +22,16 @@ function fitFrame() {
   document.documentElement.style.setProperty('--frame-scale', String(Math.max(0.5, s)));
 }
 
+// The page shell paints a loading mark before any module arrives; it leaves
+// as soon as the library has loaded or failed to.
+function hideBoot() {
+  const b = document.getElementById('boot');
+  if (!b || b.classList.contains('is-out')) return;
+  b.classList.add('is-out');
+  setTimeout(() => b.remove(), 420);
+}
+setTimeout(hideBoot, 15000);
+
 let pollTimer = 0;
 function schedulePoll() {
   clearTimeout(pollTimer);
@@ -51,6 +61,8 @@ async function start() {
   api.setScenario(cfg.scenario, scenarioOpts(cfg));
   initRouter(createHome());
   on('loaded', schedulePoll);
+  on('loaded', hideBoot);
+  on('loadError', hideBoot);
   loadAll();
   if (new URLSearchParams(location.search).get('dev') === '1') setTimeout(() => openDevPanel(restart), 900);
 }
@@ -68,5 +80,6 @@ export async function restart() {
 
 start().catch((e) => {
   console.error(e);
+  hideBoot();
   document.getElementById('stage').innerHTML = '<div class="boot-fail"><p class="head">Could not start the replica.</p><p class="sm muted">Run it from the app-v2 folder with a local server so the fixtures can load.</p></div>';
 });
