@@ -32,6 +32,7 @@ OPENAI_PAUSE_MINUTES = 15
 
 _QUOTA_ERROR_SIGNATURES = (
     "insufficient_quota",
+    "processing is paused",
     "ratelimiterror",
     "rate_limit",
     "rate limit",

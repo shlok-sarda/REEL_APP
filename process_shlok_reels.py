@@ -60,9 +60,8 @@ OPENAI_QUOTA_MARKERS = (
 )
 
 WAITING_FOR_CREDITS_MESSAGE = (
-    "Waiting for OpenAI credits — your OpenAI API quota ran out, so this reel "
-    "could not be processed. Top up your OpenAI billing, then press Retry on "
-    "this reel and it will process normally."
+    "Processing is paused for a little while (insufficient_quota). This reel "
+    "will be picked up again automatically."
 )
 
 
