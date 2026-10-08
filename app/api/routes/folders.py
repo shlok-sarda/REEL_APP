@@ -142,7 +142,10 @@ def accept(request: Request, folder_id: int, payload: dict = Body(...)):
     reel_id = str(payload.get("reel_id", ""))
     if not reel_id:
         raise HTTPException(status_code=400, detail="reel_id required")
-    return folders_service.set_membership_status(resolved, folder_id, reel_id, "member")
+    result = folders_service.set_membership_status(resolved, folder_id, reel_id, "member")
+    if result is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return result
 
 
 @router.post("/{folder_id}/reject")
@@ -155,8 +158,11 @@ def reject(request: Request, folder_id: int, payload: dict = Body(...)):
     # `reason` is the optional "why did you skip this" answer — it feeds the
     # folder's adjudicator as a negative example. Sent either with the skip
     # itself or as a follow-up call after the user answers the prompt.
-    return folders_service.set_membership_status(
+    result = folders_service.set_membership_status(
         resolved, folder_id, reel_id, "rejected", reason=str(payload.get("reason", "")))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return result
 
 
 @router.delete("/{folder_id}")

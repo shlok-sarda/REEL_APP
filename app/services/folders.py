@@ -584,7 +584,11 @@ def create_folder(user_id: str, name: str, description: str, query: str, reel_id
             (user_id, name.strip(), description.strip(), (query or "").strip(), _now(), _now()),
         )
         fid = cur.lastrowid
-        for rid in dict.fromkeys(reel_ids):
+        # Only the caller's own reels can be members. A foreign id here used
+        # to leak that reel's card through folder_detail.
+        owned = {r["id"] for r in conn.execute("SELECT id FROM reels WHERE user_id=?", (user_id,))}
+        reel_ids = [rid for rid in dict.fromkeys(reel_ids) if rid in owned]
+        for rid in reel_ids:
             conn.execute(
                 "INSERT OR IGNORE INTO folder_memberships (user_id,folder_id,reel_id,source,status,created_at,updated_at) "
                 "VALUES (?,?,?,?,?,?,?)",
@@ -603,7 +607,7 @@ def create_folder(user_id: str, name: str, description: str, query: str, reel_id
 
 
 def _refresh_profile(conn, user_id: str, folder_id: int) -> None:
-    frow = conn.execute("SELECT * FROM user_folders WHERE id=?", (folder_id,)).fetchone()
+    frow = conn.execute("SELECT * FROM user_folders WHERE id=? AND user_id=?", (folder_id, user_id)).fetchone()
     if not frow:
         return
     folder = {"name": frow["name"], "description": frow["description"], "query": frow["query"],
@@ -751,13 +755,15 @@ def folder_detail(user_id: str, folder_id: int) -> dict | None:
             return None
         members = [dict(_reel_card(conn, m["reel_id"]), source=m["source"]) for m in conn.execute(
             "SELECT fm.reel_id, fm.source FROM folder_memberships fm "
-            "LEFT JOIN reels r ON r.id = fm.reel_id "
+            "JOIN reels r ON r.id = fm.reel_id AND r.user_id = ? "
             "WHERE fm.folder_id=? AND fm.status='member' "
             "ORDER BY r.received_at DESC",
-            (folder_id,))]
+            (user_id, folder_id))]
         suggestions = [_reel_card(conn, m["reel_id"]) for m in conn.execute(
-            "SELECT reel_id FROM folder_memberships WHERE folder_id=? AND status='suggested' "
-            "ORDER BY score DESC", (folder_id,))]
+            "SELECT fm.reel_id FROM folder_memberships fm "
+            "JOIN reels r ON r.id = fm.reel_id AND r.user_id = ? "
+            "WHERE fm.folder_id=? AND fm.status='suggested' "
+            "ORDER BY fm.score DESC", (user_id, folder_id))]
         return {"id": f["id"], "name": f["name"], "description": f["description"],
                 "query": f["query"], "members": members, "suggestions": suggestions}
 
@@ -819,6 +825,12 @@ def set_membership_status(user_id: str, folder_id: int, reel_id: str, status: st
     optional "why I skipped this" — it becomes a negative example in future
     adjudications, so every explained Skip tightens the folder."""
     with get_connection() as conn:
+        owned = conn.execute(
+            "SELECT id FROM user_folders WHERE id=? AND user_id=? AND is_active=1",
+            (folder_id, user_id),
+        ).fetchone()
+        if not owned:
+            return None
         conn.execute(
             "UPDATE folder_memberships SET status=?, source='manual', reject_reason=?, updated_at=? "
             "WHERE folder_id=? AND reel_id=? AND user_id=?",
