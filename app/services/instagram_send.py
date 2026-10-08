@@ -24,6 +24,7 @@ from __future__ import annotations
 import requests
 
 from app.config import settings
+from app.services import instagram_token
 
 GRAPH_HOST = "https://graph.instagram.com"
 # Meta's send endpoint has repeatedly taken longer than 8s from Render, and
@@ -62,13 +63,14 @@ def send_text(igsid: str, text: str) -> dict:
     try:
         response = requests.post(
             url,
-            headers={"Authorization": f"Bearer {settings.instagram_access_token}"},
+            headers={"Authorization": f"Bearer {instagram_token.current_token()}"},
             json={"recipient": {"id": igsid}, "message": {"text": _clip(text)}},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         return {"ok": False, "detail": f"request_failed: {exc}"}
 
+    instagram_token.note_result(response.status_code, response.text)
     if response.status_code != 200:
         return {"ok": False, "detail": f"http_{response.status_code}: {response.text[:200]}"}
     return {"ok": True, "detail": response.text[:200]}

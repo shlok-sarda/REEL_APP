@@ -272,13 +272,34 @@ def claim_next_job() -> dict | None:
         row = connection.execute(
             """
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
-            FROM processing_jobs
+            FROM processing_jobs AS job
             WHERE status = 'pending'
             ORDER BY
                 CASE
                     WHEN job_type = 'process_reel' THEN 0
                     WHEN job_type = 'rebuild_library' THEN 1
                     ELSE 2
+                END ASC,
+                -- A newcomer's first reel goes ahead of everyone's backlog:
+                -- they were just told "a couple of minutes" and have nothing
+                -- to look at yet. Only one reel per newcomer jumps (their
+                -- oldest pending, and none already running), so a stranger's
+                -- bulk save cannot starve the queue.
+                CASE
+                    WHEN job_type = 'process_reel'
+                     AND NOT EXISTS (
+                        SELECT 1 FROM reels
+                        WHERE reels.user_id = job.user_id AND reels.status = 'completed'
+                     )
+                     AND NOT EXISTS (
+                        SELECT 1 FROM processing_jobs AS other
+                        WHERE other.user_id = job.user_id
+                          AND other.job_type = 'process_reel'
+                          AND (other.status = 'running'
+                               OR (other.status = 'pending' AND other.id < job.id))
+                     )
+                    THEN 0
+                    ELSE 1
                 END ASC,
                 id ASC
             LIMIT 1

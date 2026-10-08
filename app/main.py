@@ -82,6 +82,14 @@ def _queue_janitor_loop():
             run_last_call_sweep()
         except Exception as exc:
             print(f"[janitor] last-call sweep failed: {exc}")
+        # The Instagram token dies silently after 60 days; this keeps
+        # renewing it weekly. One row read on every other tick.
+        try:
+            from app.services.instagram_token import maybe_refresh
+
+            maybe_refresh()
+        except Exception as exc:
+            print(f"[janitor] instagram token refresh failed: {exc}", flush=True)
 
         time.sleep(150)
 

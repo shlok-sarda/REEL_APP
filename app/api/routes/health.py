@@ -245,6 +245,14 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     import os as _os
 
     out: dict = {"sending_enabled": bool(settings.instagram_access_token)}
+    # Expiry, last refresh and whether Meta has rejected the token. "ok": false
+    # here means DMs are failing or about to.
+    try:
+        from app.services.instagram_token import status as _token_status
+
+        out["token"] = _token_status()
+    except Exception as exc:
+        out["token"] = {"ok": False, "reason": f"status_failed: {exc}"[:200]}
     out["outbound_dm_test"] = settings.outbound_dm_test
     out["graph_version"] = settings.instagram_graph_version
     # A library link is only useful if it is absolute. An unset PUBLIC_BASE_URL

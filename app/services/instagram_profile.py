@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from app.config import settings
+from app.services import instagram_token
 from app.db.database import get_connection
 
 GRAPH_HOST = "https://graph.instagram.com"
@@ -113,12 +114,13 @@ def fetch_instagram_profile(igsid: str) -> dict:
     try:
         response = requests.get(
             url,
-            params={"fields": "username,name", "access_token": settings.instagram_access_token},
+            params={"fields": "username,name", "access_token": instagram_token.current_token()},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         _write_cache(igsid, "", "", f"request_failed: {exc}")
         return {}
+    instagram_token.note_result(response.status_code, response.text)
     if response.status_code != 200:
         _write_cache(igsid, "", "", f"http_{response.status_code}: {response.text[:150]}")
         return {}

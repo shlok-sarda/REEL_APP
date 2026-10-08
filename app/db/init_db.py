@@ -301,6 +301,20 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS instagram_token_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        source_hash TEXT NOT NULL DEFAULT '',
+        token TEXT NOT NULL DEFAULT '',
+        refreshed_at TEXT NOT NULL DEFAULT '',
+        expires_at TEXT NOT NULL DEFAULT '',
+        refresh_attempted_at TEXT NOT NULL DEFAULT '',
+        refresh_error TEXT NOT NULL DEFAULT '',
+        auth_failed_at TEXT NOT NULL DEFAULT '',
+        auth_error TEXT NOT NULL DEFAULT '',
+        last_ok_at TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS instagram_webhook_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         received_at TEXT NOT NULL,
