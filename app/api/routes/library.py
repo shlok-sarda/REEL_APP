@@ -17,9 +17,13 @@ router = APIRouter(prefix="/library", tags=["library"])
 
 
 @router.get("", response_model=LibraryResponse)
-def get_library(request: Request, user_id: str = Query(default="")):
+def get_library(
+    request: Request,
+    user_id: str = Query(default=""),
+    recents_limit: int = Query(default=120, ge=1, le=2000),
+):
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=True)
-    return LibraryResponse(**load_library_payload(resolved_user_id))
+    return LibraryResponse(**load_library_payload(resolved_user_id, recents_limit=recents_limit))
 
 
 @router.get("/status")

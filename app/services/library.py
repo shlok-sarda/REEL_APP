@@ -1042,7 +1042,11 @@ def _autostart_first_rebuild(user_id: str, item_count: int) -> None:
         print(f"[collections] autostart skipped for {user_id}: {exc}")
 
 
-def load_library_payload(user_id: str) -> dict:
+def load_library_payload(user_id: str, recents_limit: int = 120) -> dict:
+    # recents_limit: the classic UI shows a short "recently saved" rail and gets
+    # its full library from the collections, so 120 is plenty there. The new UI
+    # builds the whole library (count, search, map pins) from `recents` and asks
+    # for more; capped at 120 it silently lost every older reel.
     collections_on = collections_enabled(user_id)
     is_demo_showcase = collections_on and _is_demo_showcase_account(user_id)
 
@@ -1068,7 +1072,7 @@ def load_library_payload(user_id: str) -> dict:
             "user_id": user_id,
             "standard": [] if personalized else load_standard_collections(user_id),
             "personalized": personalized,
-            "recents": load_recent_reels(user_id),
+            "recents": load_recent_reels(user_id, recents_limit),
         }
 
     personalized = load_personalized_collections(user_id)
@@ -1094,7 +1098,7 @@ def load_library_payload(user_id: str) -> dict:
         "user_id": user_id,
         "standard": standard,
         "personalized": personalized,
-        "recents": load_recent_reels(user_id),
+        "recents": load_recent_reels(user_id, recents_limit),
     }
 
 

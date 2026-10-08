@@ -52,7 +52,9 @@ export async function restoreReel() {}
 
 /* ---------- reads ---------- */
 export async function getLibrary() {
-  const lib = await get(`/library?user_id=${UID}`);
+  // `recents` is this UI's whole library. The server's default is the classic
+  // UI's 120-reel rail, which hid every older reel (and its map pin).
+  const lib = await get(`/library?user_id=${UID}&recents_limit=1000`);
   const personalized = Array.isArray(lib.personalized) && lib.personalized.length ? lib.personalized : (lib.standard || []);
   return { user_id: lib.user_id, standard: [], personalized, recents: Array.isArray(lib.recents) ? lib.recents : [] };
 }

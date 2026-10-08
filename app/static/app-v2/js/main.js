@@ -2,7 +2,7 @@
 // frame already respects reduced motion and the chosen network profile.
 import * as api from './api.js';
 import { S, loadAll, refresh, resetState, on } from './store.js';
-import { initPress, setOffline } from './ui.js';
+import { initPress, setOffline, toast } from './ui.js';
 import { initRouter, registerListsTab, resetRouter } from './router.js';
 import { initDock, setDevOpener } from './dock.js';
 import { initSearch } from './search.js';
@@ -53,6 +53,16 @@ async function start() {
   if (lan) lan.textContent = LAN_URL || location.origin;
   window.addEventListener('offline', () => setOffline(true));
   window.addEventListener('online', () => setOffline(false));
+  // Screens load on first use. Offline, that load fails and the tap did
+  // nothing at all; say why instead. (The three wordings are Chrome, Safari
+  // and Firefox.)
+  window.addEventListener('unhandledrejection', (e) => {
+    const m = String((e.reason && e.reason.message) || '');
+    if (/dynamically imported module|Importing a module script failed/i.test(m)) {
+      e.preventDefault();
+      toast({ msg: 'You are offline. Try again when you are back online.', tone: 'error' });
+    }
+  });
 
   initDock(initSearch());
   registerListsTab(createLists);

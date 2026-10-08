@@ -46,6 +46,9 @@ function createPlaces(focus) {
   let selected = null;
 
   root.querySelector('[data-back]').addEventListener('click', () => back());
+  // The screen itself must never scroll (CSS clips it; this covers browsers
+  // without overflow: clip, where focusing a link below the fold would).
+  root.addEventListener('scroll', () => { if (root.scrollTop || root.scrollLeft) root.scrollTo(0, 0); });
 
   function paintList() {
     const ps = S.places;
@@ -94,15 +97,29 @@ function createPlaces(focus) {
     });
     Object.keys(markers).forEach((k) => markers[k].getElement() && markers[k].getElement().classList.toggle('is-on', k === selected));
     const p = S.places.find((x) => x.place === selected);
+    // Detent first: where the pin should land depends on how much map the
+    // sheet leaves showing.
+    if (selected && detent === 'peek') setDetent('half');
     if (p && map) {
-      map.flyTo([p.lat, p.lng], p.reels.length > 1 || p.named.length > 3 ? 9 : 8, { duration: isReduced() ? 0 : 0.9 });
+      const zoom = p.reels.length > 1 || p.named.length > 3 ? 9 : 8;
+      const centre = centreFor(p.lat, p.lng, zoom);
+      // Leaflet reads duration 0 as "use the default", so reduced motion has
+      // to ask for no animation outright.
+      if (isReduced()) map.setView(centre, zoom, { animate: false });
+      else map.flyTo(centre, zoom, { duration: 0.9 });
       haptic(6);
     }
-    if (selected && detent === 'peek') setDetent('half');
     if (!selected && was && map) fitAll();
     if (selected) {
       const node = root.querySelector(`[data-place="${CSS.escape ? CSS.escape(selected) : selected}"]`);
-      if (node) setTimeout(() => node.scrollIntoView({ block: 'nearest', behavior: isReduced() ? 'auto' : 'smooth' }), 260);
+      const list = $('[data-list]');
+      // Scroll the list and nothing else. scrollIntoView also scrolls every
+      // ancestor it can, and the screen itself is one: with the sheet hanging
+      // below the fold, the map and the Back button slid off the top.
+      if (node) setTimeout(() => {
+        const top = node.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+        list.scrollTo({ top: Math.max(0, top), behavior: isReduced() ? 'auto' : 'smooth' });
+      }, 260);
     }
   }
 
@@ -115,6 +132,15 @@ function createPlaces(focus) {
     if (d === 'full') return 0;
     if (d === 'half') return Math.max(0, h - H * 0.56);
     return Math.max(0, h - Math.min(310, H * 0.4));
+  }
+  // The map runs full height behind the sheet, so its own centre is covered
+  // once the sheet is at half. These two say where the visible part is.
+  function sheetTop() {
+    return root.clientHeight - sheet.offsetHeight + detentY(detent === 'full' ? 'half' : detent);
+  }
+  function centreFor(lat, lng, zoom) {
+    const dy = root.clientHeight / 2 - (64 + sheetTop()) / 2;
+    return map.unproject(map.project([lat, lng], zoom).add([0, dy]), zoom);
   }
   function setDetent(d, instant) {
     detent = d;
@@ -130,6 +156,9 @@ function createPlaces(focus) {
     const inList = e.target.closest('[data-list]');
     if (e.target.closest('a, button') && !onHandle) return;
     if (!onHandle && !(inList && (detent !== 'full' || list.scrollTop <= 0))) return;
+    // A mouse has no implicit capture: a quick pull on the handle left the
+    // sheet before the first move event and the drag never started.
+    if (onHandle) { try { sheet.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } }
     freeze(sheet);
     const m = getComputedStyle(sheet).transform;
     const cur = m && m !== 'none' ? new DOMMatrix(m).m42 : detentY(detent);
@@ -166,9 +195,9 @@ function createPlaces(focus) {
   function fitAll() {
     const ps = S.places;
     if (!map || !ps.length) return;
-    const pad = Math.min(310, root.clientHeight * 0.4);
-    if (ps.length === 1) map.setView([ps[0].lat, ps[0].lng], 9);
-    else map.fitBounds(ps.map((p) => [p.lat, p.lng]), { paddingTopLeft: [48, 90], paddingBottomRight: [48, pad + 24], maxZoom: 9 });
+    const still = isReduced() ? { animate: false } : {};
+    if (ps.length === 1) map.setView(centreFor(ps[0].lat, ps[0].lng, 9), 9, still);
+    else map.fitBounds(ps.map((p) => [p.lat, p.lng]), { paddingTopLeft: [48, 90], paddingBottomRight: [48, root.clientHeight - sheetTop() + 24], maxZoom: 9, ...still });
   }
 
   async function initMap() {
@@ -179,7 +208,9 @@ function createPlaces(focus) {
       const L = await loadLeaflet();
       if (!root.isConnected) return;
       box.innerHTML = '<div class="pm-leaflet"></div>';
-      map = L.map(box.firstElementChild, { zoomControl: false, attributionControl: true, worldCopyJump: true, minZoom: 2 });
+      // minZoom 1: at zoom 2 a phone fits about 100 degrees of longitude
+      // between the side paddings, so Bali and New York could not both show.
+      map = L.map(box.firstElementChild, { zoomControl: false, attributionControl: true, worldCopyJump: true, minZoom: 1 });
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 18,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
@@ -188,6 +219,8 @@ function createPlaces(focus) {
         const icn = L.divIcon({ className: 'pm-pin-wrap', html: `<span class="pm-pin" style="--i:${i}"><b>${p.reels.length}</b></span>`, iconSize: [44, 44], iconAnchor: [22, 22] });
         const mk = L.marker([p.lat, p.lng], { icon: icn, keyboard: true, title: p.place }).addTo(map);
         mk.on('click', () => select(p.place, false));
+        // The pin is announced as a button and takes focus, so Enter and Space must work too.
+        mk.on('keypress', (e) => { const k = e.originalEvent && e.originalEvent.key; if (k === 'Enter' || k === ' ') select(p.place, false); });
         markers[p.place] = mk;
       });
       fitAll();
