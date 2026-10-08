@@ -2219,6 +2219,21 @@ def build_clipnest_v1_html(
         list_title: (result.collection_titles || [])[0] || (result.parent_titles || [])[0] || 'Deep Search',
       };
     }
+    // A search result was opened: fire and forget, never throws.
+    function logSearchClick(q, item, position) {
+      try {
+        if (!q || !item || !item.reel_id) return;
+        fetch('/deep-search/click', {
+          method: 'POST', credentials: 'same-origin', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: USER_ID,
+            query_id: state.deepSearch.query === q ? (state.deepSearch.queryId || null) : null,
+            query: q, reel_id: item.reel_id, position,
+          }),
+        }).catch(() => {});
+      } catch (e) {}
+    }
     function scheduleDeepSearch() {
       clearTimeout(state.deepSearchTimer);
       const q = state.magicQuery.trim();
@@ -2243,6 +2258,7 @@ def build_clipnest_v1_html(
           loading: false,
           error: '',
           results: normalizeDeepSearchPayload(payload),
+          queryId: payload.query_id || null,
         };
       } catch (error) {
         if (requestId !== state.deepSearchRequestId) return;
@@ -2278,6 +2294,7 @@ def build_clipnest_v1_html(
             toggleSelect(button.closest('.m-card')?.dataset.reel || '');
             return;
           }
+          logSearchClick(q, results[Number(button.dataset.openItem)], Number(button.dataset.openItem));
           openActionSheet(results[Number(button.dataset.openItem)], Number(button.dataset.openItem), results);
         });
       });

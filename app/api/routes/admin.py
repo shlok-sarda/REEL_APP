@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, Request
 
 from app.services.auth import list_users_admin, require_admin
+from app.services.search_log import llm_usage_summary
 from app.services.instagram_profile import (
     backfill_usernames,
     backfill_webhook_event_usernames,
@@ -16,6 +17,13 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def admin_users(request: Request):
     require_admin(request)
     return {"users": list_users_admin()}
+
+
+@router.get("/llm-usage")
+def admin_llm_usage(request: Request, days: int = Query(default=7, ge=1, le=365)):
+    """OpenAI tokens and rupees by call site, from the llm_usage log."""
+    require_admin(request)
+    return llm_usage_summary(days)
 
 
 @router.get("/instagram/backfill")

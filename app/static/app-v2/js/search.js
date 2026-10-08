@@ -4,7 +4,7 @@
 import { el, esc, debounce, words, titleCase } from './util.js';
 import { icon } from './icons.js';
 import { S, localSearch, reel, savePref } from './store.js';
-import { deepSearch } from './api.js';
+import { deepSearch, searchClick } from './api.js';
 import { evidenceFromServer } from './searchcore.js';
 import { thumb, wireFades } from './cards.js';
 import { pushLayer, closeLayer, isOpen } from './router.js';
@@ -162,6 +162,8 @@ async function serverSearch(q) {
     });
     state.shown = state.shown.concat(extra);
     state.serverFor = q;
+    state.queryId = res.queryId || null;
+    state.queryIdFor = q;
     renderResults(false, extra.map((x) => x.id));
   } catch (e) {
     if (id !== state.reqId) return;
@@ -260,6 +262,7 @@ function renderResults(typing, appended = []) {
     b.addEventListener('click', () => {
       rememberQuery(q);
       const ids = state.shown.map((x) => x.id).filter((id) => reel(id));
+      searchClick(state.queryIdFor === q ? state.queryId : null, q, b.dataset.rid, ids.indexOf(b.dataset.rid));
       openPlayer(ids, ids.indexOf(b.dataset.rid), b.querySelector('.rc-thumb'));
     });
   });

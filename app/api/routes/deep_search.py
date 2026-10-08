@@ -1,8 +1,9 @@
+import time
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, HTTPException, Query, Request, status
 
-from app.services.auth import ensure_user_access, require_user
+from app.services.auth import ensure_user_access, is_demo_link_session, require_admin, require_user
 from app.services.deep_search import (
     backfill_reel_visual_search,
     build_search_collection_candidates,
@@ -13,6 +14,7 @@ from app.services.deep_search import (
     rebuild_deep_search_documents,
     search_user_documents,
 )
+from app.services.search_log import log_click, log_search, recent_searches
 
 
 router = APIRouter(prefix="/deep-search", tags=["deep-search"])
@@ -91,10 +93,41 @@ def deep_search(
             "results": [],
         }
 
+    started = time.monotonic()
     try:
-        return search_user_documents(resolved_user_id, query, limit=limit, backend=backend)
+        payload = search_user_documents(resolved_user_id, query, limit=limit, backend=backend)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    try:
+        if isinstance(payload, dict) and not is_demo_link_session(request):
+            latency_ms = int((time.monotonic() - started) * 1000)
+            payload["query_id"] = log_search(resolved_user_id, query, payload, latency_ms)
+    except Exception:
+        pass
+    return payload
+
+
+@router.post("/click")
+def deep_search_click(request: Request, payload: dict = Body(default={})):
+    """Fire-and-forget beacon: a search result was opened. Always 200."""
+    try:
+        user_id = ensure_user_access(request, str(payload.get("user_id", "")))
+        if not is_demo_link_session(request):
+            log_click(user_id, payload.get("query_id"), str(payload.get("query", "")),
+                      str(payload.get("reel_id", "")), payload.get("position"))
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.get("/log")
+def deep_search_log(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    require_admin(request)
+    return recent_searches(days, limit)
 
 
 @router.get("/evaluate")

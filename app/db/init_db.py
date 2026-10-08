@@ -287,6 +287,20 @@ SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS instagram_token_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        source_hash TEXT NOT NULL DEFAULT '',
+        token TEXT NOT NULL DEFAULT '',
+        refreshed_at TEXT NOT NULL DEFAULT '',
+        expires_at TEXT NOT NULL DEFAULT '',
+        refresh_attempted_at TEXT NOT NULL DEFAULT '',
+        refresh_error TEXT NOT NULL DEFAULT '',
+        auth_failed_at TEXT NOT NULL DEFAULT '',
+        auth_error TEXT NOT NULL DEFAULT '',
+        last_ok_at TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS instagram_webhook_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         received_at TEXT NOT NULL,
@@ -435,6 +449,62 @@ SCHEMA_STATEMENTS = [
     """
     CREATE INDEX IF NOT EXISTS idx_landing_events_event
         ON landing_events(event, created_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS search_queries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        query TEXT NOT NULL,
+        backend TEXT NOT NULL DEFAULT '',
+        result_count INTEGER NOT NULL DEFAULT 0,
+        result_reel_ids TEXT NOT NULL DEFAULT '[]',
+        latency_ms INTEGER NOT NULL DEFAULT 0,
+        keystrokes INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_search_queries_user
+        ON search_queries(user_id, updated_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS search_clicks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_id INTEGER,
+        user_id TEXT NOT NULL,
+        query TEXT NOT NULL DEFAULT '',
+        reel_id TEXT NOT NULL,
+        shown_position INTEGER NOT NULL DEFAULT -1,
+        server_position INTEGER NOT NULL DEFAULT -1,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_search_clicks_query
+        ON search_clicks(query_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS llm_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '',
+        reel TEXT NOT NULL DEFAULT '',
+        script TEXT NOT NULL DEFAULT '',
+        caller TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        audio_tokens INTEGER NOT NULL DEFAULT 0,
+        audio_seconds REAL NOT NULL DEFAULT 0,
+        usage_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_created
+        ON llm_usage(created_at)
     """,
 ]
 

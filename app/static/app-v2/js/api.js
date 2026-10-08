@@ -79,7 +79,17 @@ export async function deepSearch(q, opts = {}) {
   if (!query) return { query, results: [] };
   const res = await get(`/deep-search?q=${encodeURIComponent(query)}&user_id=${UID}&limit=30`, { signal: opts.signal });
   const results = Array.isArray(res.results) ? res.results : (res.result && Array.isArray(res.result.hits) ? res.result.hits : []);
-  return { query, backend: res.backend, results };
+  return { query, backend: res.backend, results, queryId: res.query_id || null };
+}
+/* A search result was opened: fire and forget, never throws. */
+export function searchClick(queryId, query, rid, position) {
+  try {
+    fetch('/deep-search/click', {
+      method: 'POST', credentials: 'same-origin', keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: CFG.userId, query_id: queryId, query: query || '', reel_id: rid, position }),
+    }).catch(() => {});
+  } catch (e) { /* a counter must never break the screen */ }
 }
 
 /* ---------- writes ---------- */

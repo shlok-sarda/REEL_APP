@@ -182,6 +182,12 @@ def finalize_output(branch: str, payload: dict) -> dict:
 
 def run_pipeline(url: str) -> dict:
     print("🚀 Processing reel with Pipeline B...")
+    try:
+        from llm_usage import set_context
+
+        set_context(reel=url)
+    except Exception:
+        pass
     result = process_reel(url)
 
     visual_data = {}

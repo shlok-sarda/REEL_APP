@@ -354,6 +354,13 @@ def sync_live_library_state(user_id: str, source_csv: Path) -> None:
 
 
 def main(user_id="default", only_urls=None):
+    try:
+        # Tags every OpenAI call in this run, child scripts included.
+        from llm_usage import set_context
+
+        set_context(user_id=user_id, inherit=True)
+    except Exception:
+        pass
     sync_csv_from_db()
     paths = build_paths(user_storage_dir(user_id))
     sync_user_url_csv(user_id, paths)
