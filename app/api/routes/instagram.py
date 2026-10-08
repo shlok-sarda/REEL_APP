@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.db.database import get_connection
-from app.services.auth import complete_instagram_link, create_guest_user, current_user, get_user_by_instagram_user_id, iso_now
+from app.services.auth import complete_instagram_link, create_guest_user, get_user_by_instagram_user_id, iso_now, require_admin
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
 from app.services.instagram_profile import resolve_instagram_username
 from app.services.instagram_send import send_text
@@ -322,6 +322,9 @@ async def instagram_webhook(
             or nudge.sender_allowed(sender_id, sender_username)
         ):
             user = create_guest_user(sender_id, sender_username)
+            # The stamp above ran before this row existed, so the reply window
+            # would stay shut and the first reel would get no acknowledgement.
+            nudge.record_inbound(sender_id)
             _log_webhook_event(
                 "guest", sender_id=sender_id, sender_username=sender_username,
                 outcome="created" if user else "create_failed",
@@ -404,7 +407,9 @@ async def instagram_webhook(
     # decision in one place.
 
     if linked_accounts or reels_saved:
-        ensure_background_progress()
+        # After the 200 goes out: this recovers orphans, rewrites the CSV and
+        # may spawn the worker, none of which Meta should wait on.
+        background.add_task(ensure_background_progress)
 
     return JSONResponse(
         {
@@ -425,8 +430,7 @@ def instagram_debug_events(request: Request, limit: int = Query(default=40, ge=1
     plus the current config gates so we can tell whether Instagram is even
     reaching the server.
     """
-    if not current_user(request):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    require_admin(request)
     with get_connection() as connection:
         rows = connection.execute(
             """
