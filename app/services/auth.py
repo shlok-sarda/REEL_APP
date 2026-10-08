@@ -167,7 +167,10 @@ def verify_google_credential(credential: str) -> dict[str, Any]:
             settings.google_client_id,
         )
     except Exception as exc:  # pragma: no cover - network/runtime dependent
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Google login failed: {exc}") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google could not confirm that sign-in. Please try again.",
+        ) from exc
 
     issuer = normalize(payload.get("iss"))
     if issuer not in {"accounts.google.com", "https://accounts.google.com"}:

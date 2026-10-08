@@ -1173,7 +1173,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
   <meta property="og:description" content="Share a reel to ClipNest and it files itself. Search what you remember, find it in a second." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="__CANONICAL_URL__" />
-  <meta property="og:image" content="/static/icon-512.png" />
+  <meta property="og:image" content="__CANONICAL_URL__static/icon-512.png" />
   <meta name="twitter:card" content="summary" />
   <script type="application/ld+json">
   {
