@@ -17,7 +17,9 @@ outcomes are cached in reel_recipes so a reel is never paid for twice.
 from __future__ import annotations
 
 import json
+import math
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -28,6 +30,18 @@ RECIPE_MODEL = "gpt-4.1-mini"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "ClipNest/1.0 (personal reel map)"
 MAX_NEW_GEOCODES_PER_CALL = 25   # first call warms slowly; later calls are instant
+NOMINATIM_TIMEOUT_SECONDS = 8
+NOMINATIM_MIN_GAP_SECONDS = 1.1  # Nominatim fair use: about one request a second
+NOMINATIM_COOLDOWN_SECONDS = 60  # after a failed request, leave it alone this long
+
+# One request to Nominatim at a time for the whole process. The gap used to be
+# kept by accident: every lookup sat inside one long SQLite write transaction,
+# so a second user's map simply queued behind the first one's lock (and so did
+# the reel worker and the Instagram webhook). The lookups now run with no
+# transaction open, which makes this gate the thing that keeps the pace.
+_nominatim_gate = threading.Lock()
+_nominatim_last_call = 0.0
+_nominatim_down_until = 0.0
 MAX_NEW_RECIPES_PER_CALL = 40
 
 ALIASES = {
@@ -110,31 +124,84 @@ def _extract_place(name: str, spec: str, transcript: str) -> tuple[str, bool] | 
     return None
 
 
-def _geocode(conn, place: str, trusted: bool) -> dict | None:
-    cached = conn.execute(
+def _usable_geo(value) -> dict | None:
+    """A geocode result is only a pin if it has real coordinates."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        lat = float(value["lat"])
+        lng = float(value["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lng)) or abs(lat) > 90 or abs(lng) > 180:
+        return None
+    return {"lat": lat, "lng": lng, "display": str(value.get("display") or "")}
+
+
+def _cached_geo(conn, place: str) -> tuple[bool, dict | None]:
+    """(is_cached, result). An empty or unreadable row is a cached 'not a place'."""
+    row = conn.execute(
         "SELECT result_json FROM geocode_cache WHERE place=?", (place,)
     ).fetchone()
-    if cached:
-        return json.loads(cached["result_json"]) if cached["result_json"] else None
-    params = urllib.parse.urlencode({"q": place, "format": "json", "limit": 1})
-    req = urllib.request.Request(f"{NOMINATIM}?{params}", headers={"User-Agent": USER_AGENT})
-    result = None
+    if not row:
+        return False, None
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            rows = json.loads(resp.read().decode())
-        if rows:
-            r = rows[0]
-            if trusted or r.get("class") in PLACE_CLASSES:
-                result = {"lat": float(r["lat"]), "lng": float(r["lon"]),
-                          "display": r.get("display_name", place)}
-    except Exception:
-        return None  # network hiccup: don't cache, retry next call
-    conn.execute(
-        "INSERT OR REPLACE INTO geocode_cache (place, result_json, created_at) VALUES (?,?,?)",
-        (place, json.dumps(result) if result else "", _now()),
-    )
-    time.sleep(1.1)  # Nominatim fair-use: ~1 req/sec
-    return result
+        return True, _usable_geo(json.loads(row["result_json"])) if row["result_json"] else None
+    except ValueError:
+        return True, None
+
+
+def _lookup_place(place: str, trusted: bool) -> tuple[bool, dict | None]:
+    """Ask Nominatim about one place and remember the answer.
+
+    Returns (answered, result). answered=False means the service could not be
+    reached: nothing is cached, and it is left alone for a minute so an outage
+    costs one timeout instead of one per reel per person opening the app.
+
+    No database transaction is open while this waits on the network. Each
+    answer is written in its own short transaction, so nothing else that
+    writes to the database ever queues behind a map.
+    """
+    global _nominatim_last_call, _nominatim_down_until
+    with _nominatim_gate:
+        # Someone else's map may have looked this place up while we queued.
+        with get_connection() as conn:
+            cached, result = _cached_geo(conn, place)
+        if cached:
+            return True, result
+        if time.monotonic() < _nominatim_down_until:
+            return False, None
+        wait = NOMINATIM_MIN_GAP_SECONDS - (time.monotonic() - _nominatim_last_call)
+        if wait > 0:
+            time.sleep(wait)
+        params = urllib.parse.urlencode({"q": place, "format": "json", "limit": 1})
+        req = urllib.request.Request(f"{NOMINATIM}?{params}", headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=NOMINATIM_TIMEOUT_SECONDS) as resp:
+                body = resp.read().decode("utf-8", "replace")
+        except Exception:
+            # Timeout, DNS, refused, 429, 5xx, a cut connection: don't cache,
+            # retry on a later call.
+            _nominatim_down_until = time.monotonic() + NOMINATIM_COOLDOWN_SECONDS
+            return False, None
+        finally:
+            _nominatim_last_call = time.monotonic()
+        result = None
+        try:
+            rows = json.loads(body)
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                top = rows[0]
+                if trusted or top.get("class") in PLACE_CLASSES:
+                    result = _usable_geo({"lat": top.get("lat"), "lng": top.get("lon"),
+                                          "display": top.get("display_name") or place})
+        except ValueError:
+            result = None  # answered, but not with anything we can pin
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO geocode_cache (place, result_json, created_at) VALUES (?,?,?)",
+                (place, json.dumps(result) if result else "", _now()),
+            )
+        return True, result
 
 
 def _discover_rows(conn, user_id: str) -> list[dict]:
@@ -165,36 +232,58 @@ def _transcript_of(row: dict) -> str:
 
 def build_map_pins(user_id: str) -> dict:
     """Extract + geocode place pins for every reel that doesn't have one yet.
-    Returns all pins plus how many places are still waiting on geocoding."""
+    Returns all pins plus how many reels are still waiting on geocoding.
+
+    Three steps, and only the middle one is slow: read what needs a pin, look
+    up the places nobody has geocoded yet (network, no transaction open), then
+    write the new pins in one short transaction.
+    """
     with get_connection() as conn:
         have = {r["reel_id"] for r in conn.execute(
             "SELECT reel_id FROM reel_locations WHERE user_id=?", (user_id,))}
-        new_geocodes = 0
-        pending = 0
+        wanted: list[tuple[str, str, bool]] = []
         for row in _discover_rows(conn, user_id):
             if row["reel_id"] in have:
                 continue
             hit = _extract_place(_norm(row["item_name"]), _norm(row["specific_category"]),
                                  _transcript_of(row))
-            if not hit:
-                continue
-            place, trusted = hit
-            cached = conn.execute(
-                "SELECT 1 FROM geocode_cache WHERE place=?", (place,)).fetchone()
-            if not cached and new_geocodes >= MAX_NEW_GEOCODES_PER_CALL:
-                pending += 1
-                continue
-            if not cached:
-                new_geocodes += 1
-            geo = _geocode(conn, place, trusted)
+            if hit:
+                wanted.append((row["reel_id"], hit[0], hit[1]))
+        known: dict[str, dict | None] = {}
+        for _, place, _ in wanted:
+            if place not in known:
+                cached, result = _cached_geo(conn, place)
+                if cached:
+                    known[place] = result
+
+    new_geocodes = 0
+    unreachable = False
+    pending = 0
+    for _, place, trusted in wanted:
+        if place in known:
+            continue
+        if unreachable or new_geocodes >= MAX_NEW_GEOCODES_PER_CALL:
+            pending += 1
+            continue
+        new_geocodes += 1
+        answered, result = _lookup_place(place, trusted)
+        if not answered:
+            unreachable = True
+            pending += 1
+            continue
+        known[place] = result
+
+    with get_connection() as conn:
+        for reel_id, place, _ in wanted:
+            geo = known.get(place)
             if not geo:
                 continue
             conn.execute(
                 "INSERT OR IGNORE INTO reel_locations "
                 "(user_id, reel_id, place, lat, lng, display, created_at) "
                 "VALUES (?,?,?,?,?,?,?)",
-                (user_id, row["reel_id"], place, geo["lat"], geo["lng"],
-                 geo.get("display", place), _now()),
+                (user_id, reel_id, place, geo["lat"], geo["lng"],
+                 geo.get("display") or place, _now()),
             )
         pins = [dict(r) for r in conn.execute(
             """
