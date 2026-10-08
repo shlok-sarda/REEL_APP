@@ -1139,7 +1139,7 @@ def build_clipnest_v1_html(
     /* ---------- reel map overlay (ClipNest dark) ---------- */
     .map-overlay { position:fixed; inset:0; z-index:80; display:none; background:var(--bg); }
     .map-overlay.show { display:block; }
-    #reelMap { position:absolute; inset:0; }
+    #reelMap { position:absolute; inset:0; background:var(--bg); }
     /* Dark cartography: invert OSM's light tiles into the app's night palette.
        Tuned for tile.openstreetmap.org, which runs hotter than the old CARTO
        basemap: heavier desaturation and a lower brightness floor keep land near
@@ -1152,6 +1152,8 @@ def build_clipnest_v1_html(
     .map-close { position:absolute; z-index:600; top:calc(14px + var(--safe-top)); right:14px; width:44px; height:44px;
       background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:50%;
       font-size:18px; cursor:pointer; }
+    .map-close:hover { background:var(--soft); }
+    .map-close:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .map-close:active { background:var(--soft); }
     .map-doodle { display:none; }
     .map-empty { position:absolute; z-index:600; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -2846,7 +2848,9 @@ def build_clipnest_v1_html(
         document.head.appendChild(css);
         const s = document.createElement('script');
         s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        s.onload = resolve; s.onerror = reject;
+        // A failed download is forgotten, so the next tap on the map tries again.
+        s.onload = resolve;
+        s.onerror = () => { leafletPromise = null; css.remove(); s.remove(); reject(new Error('leaflet')); };
         document.head.appendChild(s);
       });
       return leafletPromise;
@@ -2880,7 +2884,9 @@ def build_clipnest_v1_html(
         document.getElementById('mapStat').textContent = 'map could not load 😢 — check internet'; return;
       }
       if (state.reelMap) { setTimeout(() => state.reelMap.invalidateSize(), 120); return; }
-      const map = L.map('reelMap', { zoomControl: false, minZoom: 3, worldCopyJump: true }).setView([21, 78], 4);
+      // minZoom 1: at zoom 3 a phone shows about 66 degrees of longitude, so a
+      // library with pins on two continents opened on an empty stretch between them.
+      const map = L.map('reelMap', { zoomControl: false, minZoom: 1, worldCopyJump: true }).setView([21, 78], 4);
       state.reelMap = map;
       // CARTO key-gated its raster basemaps: keyless requests still return 200 OK,
       // but every tile is an "API KEY REQUIRED" placeholder, so nothing errors and
@@ -2892,6 +2898,7 @@ def build_clipnest_v1_html(
       }).addTo(map);
       try {
         const res = await fetch('/api/map-data?user_id=' + encodeURIComponent(USER_ID), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('map-data ' + res.status);
         const data = await res.json();
         const pins = data.pins || [];
         const groups = {};
@@ -2924,16 +2931,22 @@ def build_clipnest_v1_html(
           marker.addTo(map).bindPopup(
             '<div class="map-pop-place">' + escapeHtml(g.place) + '</div>'
             + '<div class="map-pop-sub">you saved ' + g.reels.length + ' reel' + (g.reels.length > 1 ? 's' : '') + ' here! 🎒</div>' + list,
-            { maxWidth: 250 });
+            // A long list scrolls inside the popup, and the popup opens clear of the title card.
+            { maxWidth: 250, maxHeight: Math.max(180, Math.round(window.innerHeight * 0.5)),
+              autoPanPaddingTopLeft: [12, 104], autoPanPaddingBottomRight: [12, 28] });
           setTimeout(() => marker.setOpacity(1), delay += 110);
         }
         if (routePts.length > 1) {
           L.polyline(routePts, { color: '#ef476f', weight: 4, dashArray: '2 12', lineCap: 'round', opacity: .85 }).addTo(map);
         }
-        map.fitBounds(bounds, { padding: [70, 70], maxZoom: 6, minZoom: 3 });
+        // Top padding clears the title card and the close button.
+        map.fitBounds(bounds, { paddingTopLeft: [36, 104], paddingBottomRight: [36, 48], maxZoom: 6 });
         setTimeout(() => map.invalidateSize(), 150);
       } catch (e) {
         document.getElementById('mapStat').textContent = 'could not load your places 😢';
+        // Drop the half-built map so the next tap on the map loads it again.
+        try { map.remove(); } catch (err) { /* already gone */ }
+        state.reelMap = null;
       }
     }
 
