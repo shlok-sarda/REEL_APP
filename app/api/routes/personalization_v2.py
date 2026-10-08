@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Request
 
-from app.services.auth import ensure_user_access
+from app.services.auth import block_link_session_writes, ensure_user_access
 from app.services.personalization_v2.engine import PersonalizationV2Engine
 from app.services.personalization_v2.repository import PersonalizationV2Repository
 
@@ -17,6 +17,7 @@ def get_personalization_v2_debug(request: Request, user_id: str = Query(default=
 
 @router.post("/rebuild")
 def rebuild_personalization_v2(request: Request, user_id: str = Query(default="")):
+    block_link_session_writes(request, "rebuild the library")
     resolved_user_id = ensure_user_access(request, user_id, allow_demo=False)
     engine = PersonalizationV2Engine()
     snapshot = engine.backfill_user(resolved_user_id, use_llm=False, use_remote_embeddings=False)

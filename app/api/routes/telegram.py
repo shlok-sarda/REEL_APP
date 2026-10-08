@@ -12,7 +12,7 @@ router = APIRouter(tags=["telegram"])
 
 @router.post("/telegram-ingest", response_model=TelegramIngestResponse)
 def telegram_ingest(payload: TelegramIngestRequest, x_ingest_token: str = Header(default="")):
-    if settings.telegram_ingest_secret and x_ingest_token.strip() != settings.telegram_ingest_secret:
+    if not settings.telegram_ingest_secret or x_ingest_token.strip() != settings.telegram_ingest_secret:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid ingest token",

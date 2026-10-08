@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.db.database import get_connection
-from app.services.auth import current_user, ensure_user_access
+from app.services.auth import ensure_user_access, require_admin
 
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
@@ -21,8 +21,7 @@ def openai_health(request: Request):
     - auth_check: does OpenAI accept the key at all (free call)?
     - billing_check: does OpenAI accept a paid call (1-token embedding)?
     """
-    if not current_user(request):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please sign in first")
+    require_admin(request)
 
     key = os.getenv("OPENAI_API_KEY", "").strip()
     info: dict[str, Any] = {

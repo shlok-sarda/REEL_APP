@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, status
 
-from app.services.auth import ensure_user_access, is_demo_link_session, require_admin, require_user
+from app.services.auth import block_link_session_writes, ensure_user_access, is_demo_link_session, require_admin, require_user
 from app.services.deep_search import (
     backfill_reel_visual_search,
     build_search_collection_candidates,
@@ -187,6 +187,7 @@ def rebuild_deep_search(
     user_id: str = Query(default=""),
 ):
     require_user(request)
+    block_link_session_writes(request, "rebuild the library")
     resolved_user_id = ensure_user_access(request, user_id)
     return rebuild_deep_search_documents(resolved_user_id)
 
