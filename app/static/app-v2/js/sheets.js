@@ -1,7 +1,7 @@
 // Sheets: reel details, add to list, activity, city picker.
 import { el, esc, savedLabel, haptic, plural } from './util.js';
 import { icon } from './icons.js';
-import { S, reel, recipeFor, emit, on, savePref, refresh, listById, cityApps, appLabel, isGuest, refreshRecipes } from './store.js';
+import { S, reel, recipeFor, emit, on, savePref, refresh, listById, cityApps, appLabel, isGuest, isDemo, isLinkSession, refreshRecipes } from './store.js';
 import * as api from './api.js';
 import { openSheet, toast, apiToast, confirmSheet, shareOrCopy, copyText, errorMessage, btnLoading } from './ui.js';
 import { thumb, listCover, wireFades, coverMode } from './cards.js';
@@ -117,6 +117,14 @@ async function extractRecipe(rid, btn, sheet) {
 export async function deleteReelFlow(rid, sheet) {
   const r = reel(rid);
   if (!r) return;
+  // A link session cannot delete. Say so now, not after the reel has
+  // vanished and come back.
+  if (isDemo()) { toast({ msg: 'This is the demo library, so reels cannot be deleted.' }); return; }
+  if (isGuest()) {
+    const go = await confirmSheet({ title: 'Sign in to delete reels', body: 'Deleting needs a Google sign in, so nobody else holding your link can remove your reels. Everything you saved stays right here.', confirm: 'Sign in with Google' });
+    if (go) import('./screens/home.js').then((m) => m.openSignIn());
+    return;
+  }
   const ok = await confirmSheet({ title: 'Delete this reel?', body: 'It disappears from your library, your lists and search. You can undo for a few seconds.', confirm: 'Delete reel', danger: true });
   if (!ok) return;
   if (sheet) await sheet.close();
@@ -221,7 +229,7 @@ export function openActivity() {
       ${!proc.length && !failed.length ? `<div class="act-idle"><span class="icon-tile">${icon('check')}</span><p class="head">All caught up.</p><p class="sm muted">${plural(S.reels.length, 'reel')} sorted. New ones show up here while they are being sorted.</p></div>` : ''}
       ${proc.length ? `<h3 class="eyebrow is-quiet act-h">Sorting now</h3>${proc.map((p) => `<div class="act-row"><span class="act-spin"><span class="pulse-dot"></span></span><span><b>New reel</b><small>${esc(steps[p.status === 'queued' ? 0 : p.step] || 'Starting')}</small></span><span class="act-steps">${[1, 2, 3].map((i) => `<i class="${i < p.step ? 'is-done' : i === p.step ? 'is-now' : ''}"></i>`).join('')}</span></div>`).join('')}` : ''}
       ${failed.length ? `<h3 class="eyebrow is-quiet act-h">Needs a retry</h3>${failed.map((f) => `<div class="act-row is-failed"><span class="icon-tile is-danger">${icon('alert')}</span><span><b>Could not sort this one</b><small>${esc(f.why)}</small></span></div>`).join('')}
-      <button class="btn btn-primary btn-block act-retry" type="button" data-retry>Try again</button>` : ''}`;
+      ${isLinkSession() ? '<p class="sm muted">Send the reel again in the DM and it should go through.</p>' : '<button class="btn btn-primary btn-block act-retry" type="button" data-retry>Try again</button>'}` : ''}`;
     const rb = body.querySelector('[data-retry]');
     if (rb) rb.addEventListener('click', async () => {
       btnLoading(rb, true);

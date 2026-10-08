@@ -39,6 +39,10 @@ class SessionResponse(BaseModel):
     user: Optional[UserProfile] = None
     telegram_connected: bool = False
     instagram_connected: bool = False
+    # Opened by a personal library link (guest) or the shared demo link:
+    # browsing and saving work, destructive calls answer 403.
+    guest: bool = False
+    demo: bool = False
 
 
 class ProfileNameRequest(BaseModel):

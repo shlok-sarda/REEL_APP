@@ -2,7 +2,7 @@
 // dominant colour + tiny blurred preview, then fade the real image in.
 import { esc, fmtDuration, el } from './util.js';
 import { icon } from './icons.js';
-import { S, reelsFor, monogram } from './store.js';
+import { S, reelsFor, monogram, isLinkSession } from './store.js';
 
 export function thumb(r, cls = 'rc-thumb', opts = {}) {
   const lq = r.lqip ? `<img class="lq" src="${r.lqip}" alt="" aria-hidden="true">` : '';
@@ -43,7 +43,7 @@ export function processingCard(p) {
 export function failedCard(f) {
   return `<article class="rc is-failed" data-failed="${esc(f.rid)}">
     <span class="rc-thumb"><span class="rc-state"><span class="ico">${icon('alert')}</span><p><b>Could not read this one</b>${esc(f.why || 'Something went wrong while processing.')}</p>
-    <span class="rc-actions"><button class="btn btn-secondary" type="button" data-retry="${esc(f.rid)}">Try again</button></span></span></span>
+    ${isLinkSession() ? '' : `<span class="rc-actions"><button class="btn btn-secondary" type="button" data-retry="${esc(f.rid)}">Try again</button></span>`}</span></span>
     <div class="rc-meta"><h3 class="rc-title clamp-2">Reel not sorted yet</h3><p class="rc-sub">${esc(f.shortcode ? 'instagram.com/reel/' + f.shortcode : '')}</p></div>
   </article>`;
 }

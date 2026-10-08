@@ -19,6 +19,8 @@ from app.services.auth import (
     current_user,
     get_user_by_google_sub,
     get_user_by_id,
+    is_demo_link_session,
+    is_guest_link_session,
     login_or_create_google_user,
     normalize,
     set_preferred_name,
@@ -50,6 +52,8 @@ def _session_payload(request: Request) -> SessionResponse:
         ),
         telegram_connected=bool(user["telegram_user_id"]),
         instagram_connected=bool(user["instagram_user_id"]),
+        guest=is_guest_link_session(request),
+        demo=is_demo_link_session(request),
     )
 
 

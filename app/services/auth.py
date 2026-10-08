@@ -291,7 +291,7 @@ def block_link_session_writes(request: Request, action: str) -> None:
     if is_demo_link_session(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"This shared demo account can't {action}. Browsing, search, and folders are all open — explore away.",
+            detail=f"This shared demo account can't {action}. Browsing, search, and folders are all open, so explore away.",
         )
     if is_guest_link_session(request):
         raise HTTPException(

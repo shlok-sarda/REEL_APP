@@ -1,15 +1,20 @@
 // Floating glass dock: Home, the search pill (a real input so the keyboard
-// opens on the first tap, even on iPhone), Lists. In search mode the side
+// opens on the first tap, even on iPhone), Lists, You. In search mode the side
 // buttons tuck away and the pill grows to full width, transform-only (FLIP).
 import { el } from './util.js';
 import { icon } from './icons.js';
 import { onNav, switchTab } from './router.js';
 import { animate, isReduced } from './motion.js';
+import { S, on, displayName } from './store.js';
+import { onLongPress } from './ui.js';
 
 let dock = null;
 let input = null;
 let mode = 'idle';
 const handlers = { focus: null, input: null, submit: null, clear: null };
+let devOpener = null;
+// Long-press on You opens Display settings.
+export function setDevOpener(fn) { devOpener = fn; }
 
 export function initDock(h) {
   Object.assign(handlers, h);
@@ -19,16 +24,31 @@ export function initDock(h) {
       <span class="dock-pill-bg" aria-hidden="true"></span>
       <span class="dock-pill-inner">
         ${icon('search', 'dock-search-ic')}
-        <input type="search" name="q" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Search your reels" aria-label="Search your reels" />
+        <input type="search" name="q" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Search reels" aria-label="Search your reels" />
         <button class="dock-clear" type="button" aria-label="Close search">${icon('x')}</button>
       </span>
       <span class="dock-progress" aria-hidden="true"></span>
     </form>
     <button class="dock-btn" type="button" data-tab="lists" aria-label="Lists">${icon('stack')}<i class="dock-dot"></i></button>
+    <button class="dock-btn dock-you" type="button" data-you aria-label="You"><span class="dock-av"></span><i class="dock-busy" aria-hidden="true"></i></button>
   </nav>`);
   document.getElementById('dock-host').appendChild(dock);
   input = dock.querySelector('input');
   dock.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  // You lives here, not in a header: the library gets the whole top of Home.
+  const you = dock.querySelector('[data-you]');
+  const paintYou = () => {
+    const name = displayName();
+    const av = you.querySelector('.dock-av');
+    if (name) av.textContent = name.charAt(0).toUpperCase(); else av.innerHTML = icon('user');
+    // A reel being sorted shows as a dot; the detail is in You > Activity.
+    you.classList.toggle('is-busy', S.processing.length > 0);
+  };
+  paintYou();
+  on('library', paintYou);
+  on('session', paintYou);
+  onLongPress(you, () => devOpener && devOpener());
+  you.addEventListener('click', () => import('./screens/you.js').then((m) => m.openYou()));
   input.addEventListener('focus', () => { if (handlers.focus) handlers.focus(); });
   input.addEventListener('input', () => { if (handlers.input) handlers.input(input.value); });
   dock.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); if (handlers.submit) handlers.submit(input.value); input.blur(); });

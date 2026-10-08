@@ -335,6 +335,9 @@ export function displayName() {
 }
 
 export function isGuest() { return !!(S.session && S.session.guest); }
+export function isDemo() { return !!(S.session && S.session.demo); }
+// Opened by a link, not a sign-in: the server refuses deletes and retries.
+export function isLinkSession() { return isGuest() || isDemo(); }
 
 export function resetState() {
   Object.assign(S, {

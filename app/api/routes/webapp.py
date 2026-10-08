@@ -3887,6 +3887,9 @@ def dev_login(request: Request, user_id: str = "default"):
         return RedirectResponse(url="/", status_code=303)
     if not get_user_by_id(user_id):
         return RedirectResponse(url="/", status_code=303)
+    # A fresh login, not a patch: a link-session flag left over from a /g/
+    # visit would otherwise make this session refuse deletes.
+    request.session.clear()
     request.session[SESSION_USER_KEY] = user_id
     return RedirectResponse(url="/app", status_code=303)
 
@@ -3964,7 +3967,7 @@ HOME_SCREEN_CARD_AT = 15
 
 
 @router.get("/g/{token}")
-def library_link_login(token: str, request: Request, preview: str = ""):
+def library_link_login(token: str, request: Request, preview: str = "", signin: str = ""):
     """Personal library link: opens one account straight into the app.
 
     This is the entry point for someone who has never signed in - the link
@@ -4027,6 +4030,11 @@ def library_link_login(token: str, request: Request, preview: str = ""):
     if preview in ("tile", "home", "signin", "locked") and not (user.get("google_sub") or "").strip():
         if nudge.sender_allowed(user.get("instagram_user_id") or "", user.get("instagram_username") or ""):
             claim_stage = preview
+
+    # ?signin=1: a guest asked to sign in (the You page, or a refused delete)
+    # before reaching the reel count that would offer it.
+    if signin == "1" and claim_stage in ("", "home") and request.session.get(GUEST_LINK_SESSION_KEY) and not (user.get("google_sub") or "").strip():
+        claim_stage = "signin"
 
     wants_signin = claim_stage in ("signin", "locked")
     login_csrf = create_login_csrf(request) if wants_signin else ""

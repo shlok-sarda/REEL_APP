@@ -43,6 +43,20 @@ img.lq { filter: blur(8px); transform: scale(1.12); }
   color: rgba(244, 244, 245, 0.72); transition: transform var(--d-press) var(--ease-out);
 }
 .dock-btn svg { width: 23px; height: 23px; }
+/* Four things share the bar on a phone, so the round ones give the search room. */
+@media (max-width: 430px) { .dock { gap: 8px; } .dock-btn { width: 50px; height: 50px; } }
+.dock-av {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent-tint); color: var(--accent); font-family: var(--serif); font-size: 0.9375rem; font-weight: 600;
+  box-shadow: 0 0 0 1px var(--accent-line) inset;
+}
+.dock-av svg { width: 16px; height: 16px; }
+.dock-busy {
+  position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 2px #1e1e22; opacity: 0; transform: scale(0.4);
+  transition: opacity var(--d-fast) var(--ease-out), transform var(--d-base) var(--spring-pop);
+}
+.dock-you.is-busy .dock-busy { opacity: 1; transform: scale(1); }
 .dock-btn.is-active { color: var(--accent); }
 .dock-dot { position: absolute; bottom: 8px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--accent); opacity: 0; transform: scale(0.4); transition: opacity var(--d-fast) var(--ease-out), transform var(--d-base) var(--spring-pop); }
 .dock-btn.is-active .dock-dot { opacity: 1; transform: scale(1); }
@@ -74,29 +88,9 @@ img.lq { filter: blur(8px); transform: scale(1.12); }
 .is-solid-dock .dock-btn, .is-solid-dock .dock-pill-bg { -webkit-backdrop-filter: none; backdrop-filter: none; background: #1e1e22; }
 
 /* ---------- home ---------- */
-.home .screen { padding-top: calc(var(--safe-top) + 6px); }
+.home .screen { padding-top: calc(var(--safe-top) + 12px); }
 .ptr { position: absolute; top: calc(var(--safe-top) + 4px); left: 50%; margin-left: -11px; z-index: 3; opacity: 0; pointer-events: none; }
 .ptr.is-loading .spinner-mark { animation-duration: calc(700ms * var(--motion-scale)); }
-/* One compact row: the library is the hero, not the greeting. */
-.home-head { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 40px; }
-.brand { position: relative; width: 30px; height: 30px; border-radius: 8px; flex: none; transition: transform var(--d-press) var(--ease-out); }
-.brand::after, .avatar::after { content: ""; position: absolute; inset: -7px; }
-.brand img { display: block; width: 30px; height: 30px; filter: drop-shadow(0 4px 10px rgba(238, 127, 47, 0.22)); }
-.brand.is-pressed { transform: scale(0.9); }
-.home-hello { flex: 1; min-width: 0; font-family: var(--serif); font-size: 1.125rem; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.home-greet { color: var(--muted); font-weight: 500; }
-.home-hello.is-tight .home-greet { display: none; }
-.home-name { color: var(--text); }
-.home-head-end { display: flex; align-items: center; gap: 8px; }
-.home-head .pill-status { min-height: 30px; padding: 0 11px 0 10px; gap: 7px; }
-.home-head .pill-status .pulse-dot { width: 7px; height: 7px; }
-.avatar {
-  position: relative; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--accent-tint); color: var(--accent); font-family: var(--serif); font-size: 0.9375rem; font-weight: 600;
-  box-shadow: 0 0 0 1px var(--accent-line) inset; transition: transform var(--d-press) var(--ease-out);
-}
-.avatar svg { width: 16px; height: 16px; }
-.avatar.is-pressed { transform: scale(0.9); }
 .home-cards:empty { display: none; }
 .hcard { position: relative; margin-top: 14px; padding: 16px; border-radius: var(--r-lg); background: var(--s1); box-shadow: 0 0 0 1px var(--line) inset, var(--sh-1); }
 .hcard-t { display: flex; align-items: center; gap: 6px; font-family: var(--serif); font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }

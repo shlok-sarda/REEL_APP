@@ -304,9 +304,12 @@ export function openNewList(seed = {}) {
     try { res = await api.suggestFolder({ query, reel_ids: st.matches.filter((id) => st.selected.has(id)) }); }
     catch (e) {
       res = { name: query ? query.charAt(0).toUpperCase() + query.slice(1) : '', description: query ? `Reels about ${query}.` : '' };
-      if (e.status === 403) errEl.textContent = 'This is the demo library, so lists cannot be saved. You can still try the flow.';
-      else errEl.textContent = 'Could not draft a name just now, so we added starter text. Edit it freely.';
-      errEl.hidden = false;
+      // A link session gets no drafted name (403) but can still save the
+      // list, so the starter text needs no apology.
+      if (e.status !== 403) {
+        errEl.textContent = 'Could not draft a name just now, so we added starter text. Edit it freely.';
+        errEl.hidden = false;
+      }
     }
     if (closed) return;
     d.hidden = true;

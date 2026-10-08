@@ -3,7 +3,7 @@
 // without redesigning the screen.
 import { el, esc, plural, sleep, haptic, savedLabel } from '../util.js';
 import { icon } from '../icons.js';
-import { S, on, emit, displayName, isGuest, cityApps, appLabel, savePref, reelsFor, refresh, listFromApi } from '../store.js';
+import { S, on, emit, displayName, isGuest, isLinkSession, cityApps, appLabel, savePref, reelsFor, refresh, listFromApi } from '../store.js';
 import * as api from '../api.js';
 import { makeScreen, onLongPress, toast, apiToast, btnLoading, openSheet, copyText, errorMessage } from '../ui.js';
 import { listCover, wireFades, coverMode, skeletonCards } from '../cards.js';
@@ -15,18 +15,10 @@ import { openNewList } from '../newlist.js';
 import { openActivity } from '../sheets.js';
 import { libraryQueries } from '../queries.js';
 
-let devOpener = null;
-export function setDevOpener(fn) { devOpener = fn; }
-
 export function createHome() {
   const { el: root, scroller } = makeScreen('home');
   scroller.innerHTML = `
     <div class="ptr" aria-hidden="true"><span class="spinner-mark"></span></div>
-    <header class="home-head">
-      <button class="brand pressable" type="button" data-brand aria-label="ClipNest"><img src="assets/logo-tile.png" alt="" width="30" height="30"></button>
-      <span class="home-hello" aria-hidden="true"></span>
-      <div class="home-head-end"><span data-status></span><button class="avatar pressable" type="button" data-you aria-label="You"></button></div>
-    </header>
     <div class="home-cards" data-cards></div>
     <div class="bento" data-bento></div>
     <p class="home-foot xs faint" data-foot></p>`;
@@ -36,34 +28,13 @@ export function createHome() {
   let typing = null;
   let visible = true;
 
-  /* ---------- header ---------- */
-  function paintHead() {
-    const name = displayName();
-    if (name) $('[data-you]').textContent = name.charAt(0).toUpperCase(); else $('[data-you]').innerHTML = icon('user');
-    const st = $('[data-status]');
-    const n = S.processing.length;
-    const was = st.querySelector('.pill-status');
-    if (n) {
-      const html = `<button class="pill-status" type="button" data-act><span class="pulse-dot"></span>Sorting ${n}</button>`;
-      if (!was || was.textContent.trim() !== `Sorting ${n}`) {
-        st.innerHTML = html;
-        st.querySelector('[data-act]').addEventListener('click', openActivity);
-        if (!was && !isReduced()) animate(st.firstElementChild, [{ opacity: 0, transform: 'scale(0.8)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 360, easing: 'pop', clear: true });
-      }
-    } else if (was) {
-      animate(was, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 }).then(() => { st.innerHTML = ''; });
-    }
-  }
-  onLongPress($('[data-brand]'), () => devOpener && devOpener());
-  $('[data-brand]').addEventListener('click', () => { scroller.scrollTo({ top: 0, behavior: isReduced() ? 'auto' : 'smooth' }); });
-  $('[data-you]').addEventListener('click', () => import('./you.js').then((m) => m.openYou()));
-
   /* ---------- top cards: guest claim, failed ---------- */
   function paintCards() {
     const box = $('[data-cards]');
     const parts = [];
     const sess = S.session || {};
-    if (isGuest()) {
+    // Live, the page shell shows the claim card (it carries the sign-in key).
+    if (isGuest() && !api.LIVE) {
       const stage = sess.claim_stage || 'signin';
       // The home screen ask is a small widget, not a card (homeScreenStage).
       if (stage !== 'home' && (stage === 'locked' || !S.prefs.claimSkip[stage])) parts.push(['claim-' + stage, claimCard(stage)]);
@@ -71,7 +42,7 @@ export function createHome() {
     // Reels that could not be sorted wait in You > Activity with the retry
     // button. Only a brand new library, where a failed first reel is the
     // whole story, still says so here.
-    if (S.failed.length && !S.reels.length) parts.push(['failed', `<section class="hcard hcard-failed" data-k="failed"><span class="icon-tile is-danger">${icon('alert')}</span><div><p class="hcard-t">Your first ${S.failed.length === 1 ? 'reel' : 'reels'} could not be sorted</p><p class="xs muted">Usually a download hiccup. Trying again almost always works.</p></div><button class="btn btn-secondary btn-sm" type="button" data-retry-all>Try again</button></section>`]);
+    if (S.failed.length && !S.reels.length) parts.push(['failed', `<section class="hcard hcard-failed" data-k="failed"><span class="icon-tile is-danger">${icon('alert')}</span><div><p class="hcard-t">Your first ${S.failed.length === 1 ? 'reel' : 'reels'} could not be sorted</p><p class="xs muted">${isLinkSession() ? 'Usually a download hiccup. Send it again in the DM and it should go through.' : 'Usually a download hiccup. Trying again almost always works.'}</p></div>${isLinkSession() ? '' : '<button class="btn btn-secondary btn-sm" type="button" data-retry-all>Try again</button>'}</section>`]);
     const keys = parts.map((p) => p[0]).join('|');
     if (box.dataset.keys === keys) return;
     box.dataset.keys = keys;
@@ -321,7 +292,6 @@ export function createHome() {
   /* ---------- paint: keyed, never rebuilds what has not changed ---------- */
   let mode = '';
   function paint(opts = {}) {
-    paintHead();
     paintCards();
     let next;
     if (S.loadError && !S.loaded) next = 'error';
@@ -529,8 +499,16 @@ export function createHome() {
   return inst;
 }
 
-/* ---------- simulated Google sign-in for guest libraries ---------- */
+/* ---------- Google sign-in for guest libraries ---------- */
+// Live: the library link page carries the real Google button, so go there.
+// The replica simulates it.
 export function openSignIn() {
+  if (api.LIVE) {
+    const token = (window.__CN__ || {}).guestLink || '';
+    if (token) window.location.href = '/g/' + token + '?signin=1';
+    else toast({ msg: 'Open your library link from the Instagram DM to sign in.' });
+    return;
+  }
   const body = el(`<div class="signin"><div class="signin-ic"><img src="assets/icon-192.png" alt="" width="56" height="56"></div>
     <p class="sm muted">Your reels, lists and Instagram link stay exactly where they are. You just will not lose them.</p>
     <button class="btn btn-primary btn-block" type="button" data-go>${icon('user')}Continue with Google</button>

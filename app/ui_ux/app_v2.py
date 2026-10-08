@@ -146,7 +146,9 @@ CLAIM_SCRIPT = """  <script>
       const card = $('cn-claim'), title = $('cn-claim-title'), body = $('cn-claim-body'), steps = $('cn-claim-steps');
       const action = $('cn-claim-action'), note = $('cn-claim-note'), err = $('cn-claim-err'), skip = $('cn-claim-skip');
       const skipKey = 'cn_claim_skip_' + STAGE;
-      try { if (STAGE !== 'locked' && localStorage.getItem(skipKey)) return; } catch (e) {}
+      // Asked for by the person (?signin=1), so an old Not now does not hide it.
+      const asked = location.search.indexOf('signin=1') >= 0;
+      try { if (STAGE !== 'locked' && !asked && localStorage.getItem(skipKey)) return; } catch (e) {}
       const fullUrl = location.origin + '/g/' + LIB_TOKEN;
       const MANUAL = 'If nothing happens, tap ··· at the top right and choose Open in external browser.';
 

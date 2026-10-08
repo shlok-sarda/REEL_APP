@@ -40,6 +40,7 @@ function createYou() {
         <div><b>${S.lists.length}</b><span>Lists</span></div>
         <div><b>${S.places.length}</b><span>Places</span></div>
       </div>
+      ${isGuest() ? `<section class="you-sec"><div class="group"><button class="row has-icon pressable" type="button" data-signin><span class="icon-tile">${icon('user')}</span><span><span class="row-title">Sign in with Google</span><span class="row-meta">Keeps this library yours on any device</span></span>${icon('chev')}</button></div></section>` : ''}
       <section class="you-sec"><h2 class="eyebrow is-quiet">Instagram</h2>
         <div class="group">
           ${linked ? `<div class="row has-icon"><span class="icon-tile">${icon('ig')}</span><span><span class="row-title">Linked</span><span class="row-meta">Reels you DM to @clipnest.in land here</span></span><span class="in-chip">${icon('check')}On</span></div>
@@ -94,6 +95,7 @@ function createYou() {
     const q = (s) => scroller.querySelector(s);
     if (q('[data-link]')) q('[data-link]').addEventListener('click', openLinkSheet);
     q('[data-activity]').addEventListener('click', openActivity);
+    if (q('[data-signin]')) q('[data-signin]').addEventListener('click', () => import('./home.js').then((m) => m.openSignIn()));
     if (q('[data-city]')) q('[data-city]').addEventListener('click', () => openCitySheet());
     q('[data-sound]').addEventListener('change', (e) => { savePref('soundOn', e.target.checked); haptic(6); });
     q('[data-how]').addEventListener('click', openHow);
