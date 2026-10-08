@@ -3185,6 +3185,8 @@ def build_clipnest_v1_html(
                 d.status = 'recipe'; d.card = out.card;
                 b.disabled = false; b.firstElementChild.textContent = '🍳 View Recipe';
                 showRecipeCard(out.card, item.url, item.reel_id, out);
+              } else if (out.error) {
+                b.disabled = false; b.firstElementChild.textContent = '🍳 Could not read it right now, tap to retry';
               } else {
                 b.firstElementChild.textContent = '🙅 No step-by-step recipe in this reel';
                 setTimeout(() => b.remove(), 2000);

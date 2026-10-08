@@ -66,6 +66,7 @@ function createRecipes() {
     try {
       const res = await api.extractRecipe(rid);
       if (res.status !== 'recipe') {
+        if (res.error) throw new api.ApiError(503, 'Could not read this reel right now. Try again in a bit.');
         row.querySelector('small').textContent = 'No step by step recipe in this one.';
         btn.remove();
         row.classList.remove('is-working');
@@ -82,7 +83,7 @@ function createRecipes() {
       btn.disabled = false;
       btn.innerHTML = `${icon('sparkle')}Get recipe`;
       row.classList.remove('is-working');
-      toast({ msg: e.status === 403 ? 'Recipes are switched off in the demo library.' : errorMessage(e), tone: 'error' });
+      toast({ msg: e.status === 403 ? 'Recipes are switched off in the demo library.' : (e.status === 503 ? e.detail : errorMessage(e)), tone: 'error' });
     }
   }
 

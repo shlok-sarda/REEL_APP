@@ -91,9 +91,14 @@ async function extractRecipe(rid, btn, sheet) {
   try {
     const res = await api.extractRecipe(rid);
     if (res.status !== 'recipe') {
+      btn.classList.remove('is-working');
+      if (res.error) {
+        label.textContent = 'Could not read this reel right now';
+        small.textContent = 'Nothing was saved. Tap to try again in a bit.';
+        return;
+      }
       label.textContent = 'No step by step recipe here';
       small.textContent = 'This reel shows food but not how to make it.';
-      btn.classList.remove('is-working');
       return;
     }
     await refreshRecipes();
