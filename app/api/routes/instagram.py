@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import hmac
 import json
@@ -12,13 +13,34 @@ from app.config import settings
 from app.db.database import get_connection
 from app.services.auth import complete_instagram_link, create_guest_user, get_user_by_instagram_user_id, iso_now, require_admin
 from app.services.jobs import enqueue_reel_job, ensure_background_progress
-from app.services.instagram_profile import resolve_instagram_username
+from app.services.instagram_profile import (
+    cached_instagram_username,
+    fill_username_for_sender,
+    resolve_instagram_username,
+)
 from app.services.instagram_send import send_text
 from app.services import nudge
 from app.services.reel_ingest import append_reel, is_valid_instagram_url
 
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
+
+# Replies go out on their own small pool, not the one that serves pages.
+# Meta's send endpoint can hang for its full 25 second timeout; as ordinary
+# background tasks, a burst of new senders during one of those spells took
+# every page thread and the whole site stopped answering until they expired.
+# Here a slow Meta only delays the replies behind it.
+_reply_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dm-reply")
+
+
+def _reply_later(func, *args) -> None:
+    def run():
+        try:
+            func(*args)
+        except Exception as exc:  # a failed reply must never surface anywhere
+            print(f"[instagram] reply task failed: {exc}", flush=True)
+
+    _reply_pool.submit(run)
 
 
 def _log_webhook_event(
@@ -74,7 +96,9 @@ def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
         raw_body,
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, (signature_header or "").strip())
+    # As bytes: compare_digest raises on non-ASCII text, and a forged header
+    # should get a 401, not a server error.
+    return hmac.compare_digest(expected.encode("utf-8"), (signature_header or "").strip().encode("utf-8", "replace"))
 
 
 def _iter_message_events(payload: Any):
@@ -195,10 +219,27 @@ def _extract_sender(message_event: dict) -> tuple[str, str]:
     username = str(sender.get("username") or "").strip().lstrip("@")
     if sender_id and not username:
         try:
-            username = resolve_instagram_username(sender_id)
+            if _handle_needed_now():
+                username = resolve_instagram_username(sender_id)
+            else:
+                # The lookup is a network call that can hang for 8 seconds.
+                # When nothing is decided by the handle, answer Instagram
+                # first and fill the name in afterwards.
+                username, known = cached_instagram_username(sender_id)
+                if not known:
+                    _reply_later(fill_username_for_sender, sender_id)
         except Exception:
             username = ""
     return sender_id, username
+
+
+def _handle_needed_now() -> bool:
+    """The handle decides something only while the test allowlist is what
+    lets a sender in or gets them a reply. With both launch switches on,
+    everyone is let in and it is only a display name."""
+    if not settings.guest_test_senders:
+        return False
+    return not (settings.guest_autocreate_for_everyone and settings.dm_reply_for_everyone)
 
 
 def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) -> int:
@@ -280,7 +321,14 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
         _log_webhook_event("delivery", outcome="rejected", detail="signature verification failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Instagram signature")
 
-    payload = json.loads(raw_body.decode("utf-8") or "{}")
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except (ValueError, RecursionError):
+        # Signed but unreadable. Nothing can be done with it and asking for it
+        # again would only fail again, so acknowledge and move on.
+        _log_webhook_event("delivery", outcome="rejected", detail="body is not valid JSON")
+        return JSONResponse({"ok": True, "ignored": "unreadable body"})
+    crashed_events = 0
     linked_accounts = 0
     reels_saved = 0
     ignored_events = 0
@@ -302,140 +350,162 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
     )
 
     for event in events:
-        sender_id, sender_username = _extract_sender(event)
-        if not sender_id:
-            ignored_events += 1
-            _log_webhook_event("event", outcome="ignored", detail="no sender id in event")
-            continue
-
-        if settings.outbound_dm_test and _is_ping(event):
-            background.add_task(_send_ping_reply, sender_id, sender_username)
-            continue
-
-        # The 24h window and the last-call timer both hang off this.
-        nudge.record_inbound(sender_id)
-
-        link_code = _extract_link_code(event)
-        if link_code:
-            try:
-                linked_user = complete_instagram_link(link_code, sender_id, instagram_username=sender_username)
-                linked_accounts += 1
-                _log_webhook_event(
-                    "link", sender_id=sender_id, sender_username=sender_username,
-                    link_code=link_code, outcome="linked",
-                )
-                if linked_user.get("id"):
-                    reels_saved += _drain_buffered_reels(sender_id, sender_username, linked_user["id"])
-            except HTTPException as exc:
+        try:
+            sender_id, sender_username = _extract_sender(event)
+            if not sender_id:
                 ignored_events += 1
-                _log_webhook_event(
-                    "link", sender_id=sender_id, sender_username=sender_username,
-                    link_code=link_code, outcome="link_failed", detail=str(exc.detail),
-                )
-            continue
+                _log_webhook_event("event", outcome="ignored", detail="no sender id in event")
+                continue
 
-        user = get_user_by_instagram_user_id(sender_id)
-        if not user and (
-            settings.guest_autocreate_for_everyone
-            or nudge.sender_allowed(sender_id, sender_username)
-        ):
-            user = create_guest_user(sender_id, sender_username)
-            # The stamp above ran before this row existed, so the reply window
-            # would stay shut and the first reel would get no acknowledgement.
+            if settings.outbound_dm_test and _is_ping(event):
+                _reply_later(_send_ping_reply, sender_id, sender_username)
+                continue
+
+            # The 24h window and the last-call timer both hang off this.
             nudge.record_inbound(sender_id)
-            _log_webhook_event(
-                "guest", sender_id=sender_id, sender_username=sender_username,
-                outcome="created" if user else "create_failed",
-                detail=(user or {}).get("id", ""),
-            )
-            # Anything they sent before the account existed is sitting in the
-            # buffer. Replay it now, or a reel shared while the allowlist was
-            # still wrong is silently lost. append_reel dedupes on
-            # (user_id, url), so replaying twice cannot duplicate anything.
-            if user and user.get("id"):
-                drained = _drain_buffered_reels(sender_id, sender_username, user["id"])
-                if drained:
-                    reels_saved += drained
-        if not user:
-            # Buffer instead of drop: keep each URL so it can be replayed when
-            # this sender's link code arrives (possibly later in this same
-            # webhook delivery — event order within a payload is arbitrary).
-            buffered_urls = _extract_candidate_urls(event)
-            for url in buffered_urls:
-                _log_webhook_event(
-                    "reel", sender_id=sender_id, sender_username=sender_username,
-                    outcome="buffered", detail=url,
-                )
-            if not buffered_urls:
-                _log_webhook_event(
-                    "reel", sender_id=sender_id, sender_username=sender_username,
-                    outcome="ignored", detail="sender id not linked to any account",
-                )
-            ignored_events += 1
-            continue
 
-        # The wall. Hold the reel rather than process it, and rather than
-        # reject it: signing in then saves everything waiting in one go.
-        if nudge.is_locked(user["id"]):
-            held = _extract_candidate_urls(event)
-            for url in held:
+            link_code = _extract_link_code(event)
+            if link_code:
+                try:
+                    linked_user = complete_instagram_link(link_code, sender_id, instagram_username=sender_username)
+                    linked_accounts += 1
+                    _log_webhook_event(
+                        "link", sender_id=sender_id, sender_username=sender_username,
+                        link_code=link_code, outcome="linked",
+                    )
+                    if linked_user.get("id"):
+                        reels_saved += _drain_buffered_reels(sender_id, sender_username, linked_user["id"])
+                except HTTPException as exc:
+                    ignored_events += 1
+                    _log_webhook_event(
+                        "link", sender_id=sender_id, sender_username=sender_username,
+                        link_code=link_code, outcome="link_failed", detail=str(exc.detail),
+                    )
+                continue
+
+            user = get_user_by_instagram_user_id(sender_id)
+            if not user and (
+                settings.guest_autocreate_for_everyone
+                or nudge.sender_allowed(sender_id, sender_username)
+            ):
+                user = create_guest_user(sender_id, sender_username)
+                # The stamp above ran before this row existed, so the reply window
+                # would stay shut and the first reel would get no acknowledgement.
+                nudge.record_inbound(sender_id)
                 _log_webhook_event(
-                    "reel", sender_id=sender_id, sender_username=sender_username,
-                    outcome="buffered", detail=url,
+                    "guest", sender_id=sender_id, sender_username=sender_username,
+                    outcome="created" if user else "create_failed",
+                    detail=(user or {}).get("id", ""),
                 )
-            if held:
-                background.add_task(nudge.fire, user["id"], "reel_held")
+                # Anything they sent before the account existed is sitting in the
+                # buffer. Replay it now, or a reel shared while the allowlist was
+                # still wrong is silently lost. append_reel dedupes on
+                # (user_id, url), so replaying twice cannot duplicate anything.
+                if user and user.get("id"):
+                    drained = _drain_buffered_reels(sender_id, sender_username, user["id"])
+                    if drained:
+                        reels_saved += drained
+            if not user:
+                # Buffer instead of drop: keep each URL so it can be replayed when
+                # this sender's link code arrives (possibly later in this same
+                # webhook delivery — event order within a payload is arbitrary).
+                buffered_urls = _extract_candidate_urls(event)
+                for url in buffered_urls:
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="buffered", detail=url,
+                    )
+                if not buffered_urls:
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="ignored", detail="sender id not linked to any account",
+                    )
                 ignored_events += 1
                 continue
 
-        urls = _extract_candidate_urls(event)
-        if not urls:
-            _log_webhook_event(
-                "reel", sender_id=sender_id, sender_username=sender_username,
-                outcome="ignored",
-                detail="no reel url found :: " + _describe_message(event),
-            )
-            # Recovery path: any message re-sends their link. The IGSID is
-            # permanent, so deleting the conversation must not cost someone
-            # their library. A share we could not read a reel out of (story
-            # mention, photo, a video with no permalink) is different: "here
-            # is your library" tells them it saved, so say that it did not.
-            if sender_id not in pending_replies:
-                trigger = "unreadable_share" if _has_attachment(event) else "plain_message"
-                background.add_task(nudge.fire, user["id"], trigger)
-        saved_here = 0
-        already_saved = 0
-        for url in urls:
-            reel = append_reel(url, user_id=user["id"], source="instagram")
-            if reel.get("status") == "completed":
-                # They sent a reel that is already in their library. Queueing
-                # it again would pay for a second full extraction of the same
-                # video and change nothing they can see.
-                already_saved += 1
+            # The wall. Hold the reel rather than process it, and rather than
+            # reject it: signing in then saves everything waiting in one go.
+            if nudge.is_locked(user["id"]):
+                held = _extract_candidate_urls(event)
+                for url in held:
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="buffered", detail=url,
+                    )
+                if held:
+                    _reply_later(nudge.fire, user["id"], "reel_held")
+                    ignored_events += 1
+                    continue
+
+            urls = _extract_candidate_urls(event)
+            if not urls:
                 _log_webhook_event(
                     "reel", sender_id=sender_id, sender_username=sender_username,
-                    outcome="already_saved", detail=url,
+                    outcome="ignored",
+                    detail="no reel url found :: " + _describe_message(event),
                 )
-                continue
-            job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
-            saved_reel_ids.append(reel["id"])
-            reels_saved += 1
-            saved_here += 1
-            _log_webhook_event(
-                "reel", sender_id=sender_id, sender_username=sender_username,
-                outcome="saved", detail=url,
-            )
-        if saved_here:
-            # Tracked so the recovery reply does not also fire for someone who
-            # just saved something.
-            pending_replies[sender_id] = {"user_id": user["id"], "saved": saved_here}
-            # Only the first-ever reel gets an immediate word. Five minutes of
-            # silence on a stranger's first message reads as broken, not as
-            # processing. Every later reel waits for its title.
-            background.add_task(nudge.fire, user["id"], "reel_saved")
-        elif already_saved and sender_id not in pending_replies:
-            # Nothing new to process, so the answer is their library link.
-            background.add_task(nudge.fire, user["id"], "plain_message")
+                # Recovery path: any message re-sends their link. The IGSID is
+                # permanent, so deleting the conversation must not cost someone
+                # their library. A share we could not read a reel out of (story
+                # mention, photo, a video with no permalink) is different: "here
+                # is your library" tells them it saved, so say that it did not.
+                if sender_id not in pending_replies:
+                    trigger = "unreadable_share" if _has_attachment(event) else "plain_message"
+                    _reply_later(nudge.fire, user["id"], trigger)
+            saved_here = 0
+            already_saved = 0
+            held_here = 0
+            for url in urls:
+                # Checked per reel, not only per message: one message can
+                # carry many links, and checking once let a single text with
+                # sixty links walk a guest straight through the wall.
+                if nudge.is_locked(user["id"]):
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="buffered", detail=url,
+                    )
+                    held_here += 1
+                    continue
+                reel = append_reel(url, user_id=user["id"], source="instagram")
+                if reel.get("status") == "completed":
+                    # They sent a reel that is already in their library. Queueing
+                    # it again would pay for a second full extraction of the same
+                    # video and change nothing they can see.
+                    already_saved += 1
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="already_saved", detail=url,
+                    )
+                    continue
+                job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+                saved_reel_ids.append(reel["id"])
+                reels_saved += 1
+                saved_here += 1
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="saved", detail=url,
+                )
+            if saved_here:
+                # Tracked so the recovery reply does not also fire for someone who
+                # just saved something.
+                pending_replies[sender_id] = {"user_id": user["id"], "saved": saved_here}
+                # Only the first-ever reel gets an immediate word. Five minutes of
+                # silence on a stranger's first message reads as broken, not as
+                # processing. Every later reel waits for its title.
+                _reply_later(nudge.fire, user["id"], "reel_saved")
+            if held_here:
+                _reply_later(nudge.fire, user["id"], "reel_held")
+            elif already_saved and not saved_here and sender_id not in pending_replies:
+                # Nothing new to process, so the answer is their library link.
+                _reply_later(nudge.fire, user["id"], "plain_message")
+        except Exception as exc:
+            # One message that cannot be handled must not cost the others in
+            # the same delivery. It is recorded, and the delivery is answered
+            # with an error at the end so Instagram sends it again: saving a
+            # reel twice is harmless, losing one is not.
+            crashed_events += 1
+            print(f"[instagram] event handling failed: {exc!r}", flush=True)
+            _log_webhook_event("event", outcome="crashed", detail=repr(exc))
 
     # Replies are decided in app/services/nudge, not here. This route's job
     # is to record what happened and say so; what the bot says about it is one
@@ -447,8 +517,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
         background.add_task(ensure_background_progress)
 
     return JSONResponse(
-        {
-            "ok": True,
+        status_code=500 if crashed_events else 200,
+        content={
+            "ok": not crashed_events,
             "linked_accounts": linked_accounts,
             "reels_saved": reels_saved,
             "ignored_events": ignored_events,

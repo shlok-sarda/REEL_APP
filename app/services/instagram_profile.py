@@ -151,6 +151,42 @@ def resolve_instagram_username(igsid: str, force: bool = False) -> str:
     return fetch_instagram_profile(igsid).get("username", "")
 
 
+def cached_instagram_username(igsid: str) -> tuple[str, bool]:
+    """(username, known) from the cache alone, never the network. `known` is
+    False when a lookup is still owed for this sender."""
+    igsid = (igsid or "").strip()
+    if not igsid or not profile_lookup_enabled():
+        return "", True
+    cached = _read_cache(igsid)
+    if cached and _cache_is_fresh(cached):
+        return cached.get("username", ""), True
+    return "", False
+
+
+def fill_username_for_sender(igsid: str) -> str:
+    """Look the handle up and put it on the account. Run off the request
+    path. Never raises."""
+    try:
+        username = resolve_instagram_username(igsid)
+        if not username:
+            return ""
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET instagram_username = ?,
+                    display_name = CASE WHEN display_name IN ('', 'Guest') THEN ? ELSE display_name END,
+                    updated_at = ?
+                WHERE instagram_user_id = ?
+                  AND (instagram_username IS NULL OR instagram_username = '')
+                """,
+                (username, username, _iso(_now()), (igsid or "").strip()),
+            )
+        return username
+    except Exception:
+        return ""
+
+
 def backfill_usernames(force: bool = False, limit: int = 200) -> dict:
     """Fill in `users.instagram_username` for accounts linked before this
     existed. The IGSID was always stored, so every past user is recoverable —
