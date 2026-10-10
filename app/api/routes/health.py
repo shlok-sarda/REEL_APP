@@ -270,6 +270,25 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
     out["guest_autocreate_for_everyone"] = settings.guest_autocreate_for_everyone
     out["guest_lock_enabled"] = settings.guest_lock_enabled
     out["dm_cooldown_minutes"] = settings.dm_cooldown_minutes
+    # Launch scoreboard. Guest accounts are the number the reels are judged
+    # on: a stranger's first DM made an account (created), and a Google
+    # sign-in kept it (signed_in). Timestamps are ISO text, so compare on a
+    # normalised "YYYY-MM-DD HH:MM:SS" prefix against SQLite's UTC clock.
+    try:
+        with get_connection() as connection:
+            g = connection.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN substr(replace(created_at, 'T', ' '), 1, 19) >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS last_24h,
+                       SUM(CASE WHEN substr(replace(created_at, 'T', ' '), 1, 19) >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS last_7d,
+                       SUM(CASE WHEN COALESCE(google_sub, '') <> '' THEN 1 ELSE 0 END) AS signed_in
+                FROM users
+                WHERE id LIKE 'user_ig_%'
+                """
+            ).fetchone()
+        out["guests"] = {k: int(g[k] or 0) for k in ("total", "last_24h", "last_7d", "signed_in")}
+    except Exception as exc:
+        out["guests_error"] = str(exc)[:200]
     out["env_names_seen"] = sorted(
         f"{k}(len={len(v.strip())})"
         for k, v in _os.environ.items()
