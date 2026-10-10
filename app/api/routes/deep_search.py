@@ -200,7 +200,9 @@ def backfill_visual_deep_search(
     url: str = Query(default=""),
     shortcode: str = Query(default=""),
 ):
-    require_user(request)
+    # Downloads the video and runs a paid vision pass on the request thread.
+    # No UI calls it; it is an operator tool, so it is admin only.
+    require_admin(request)
     resolved_user_id = ensure_user_access(request, user_id)
     payload = backfill_reel_visual_search(
         resolved_user_id,
