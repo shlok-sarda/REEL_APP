@@ -140,8 +140,11 @@ def _upload_media_to_r2(video_path: Path, thumbnail_path: Path | None) -> dict:
         }
 
 
-def ensure_reel_media(url: str) -> dict:
-    reel = get_reel_by_url(url)
+def ensure_reel_media(url: str, user_id: str | None = None) -> dict:
+    # Scoped to one person's copy when the caller knows whose it is: the same
+    # URL saved by two people is two rows, and "newest row for this URL" is
+    # somebody else's reel.
+    reel = get_reel_by_url(url, user_id)
     if not reel:
         return {"ok": False, "reason": "missing_reel"}
 
@@ -154,8 +157,8 @@ def ensure_reel_media(url: str) -> dict:
         if not existing_thumbnail or not existing_thumbnail.exists():
             thumbnail_path = _make_thumbnail(existing_video, reel_id)
             upload_status = _upload_media_to_r2(existing_video, thumbnail_path)
-            update_reel_media(url, "ready", str(existing_video), str(thumbnail_path or ""))
-            upsert_reel_processing_diagnostics(url, upload_status)
+            update_reel_media(url, "ready", str(existing_video), str(thumbnail_path or ""), user_id=user_id)
+            upsert_reel_processing_diagnostics(url, upload_status, user_id=user_id)
             return {
                 "ok": True,
                 "media_status": "ready",
@@ -163,7 +166,7 @@ def ensure_reel_media(url: str) -> dict:
                 "thumbnail_path": str(thumbnail_path or ""),
             }
         upload_status = _upload_media_to_r2(existing_video, existing_thumbnail)
-        upsert_reel_processing_diagnostics(url, upload_status)
+        upsert_reel_processing_diagnostics(url, upload_status, user_id=user_id)
         return {
             "ok": True,
             "media_status": "ready",
@@ -173,7 +176,7 @@ def ensure_reel_media(url: str) -> dict:
 
     settings.videos_dir.mkdir(parents=True, exist_ok=True)
     settings.thumbnails_dir.mkdir(parents=True, exist_ok=True)
-    update_reel_media(url, "downloading", "", "")
+    update_reel_media(url, "downloading", "", "", user_id=user_id)
     _cleanup_existing_files(reel_id)
 
     video_path = _download_via_apify(url, reel_id)
@@ -197,20 +200,20 @@ def ensure_reel_media(url: str) -> dict:
             ) as ydl:
                 ydl.download([url])
         except Exception:
-            update_reel_media(url, "failed", "", "")
-            upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_failed"})
+            update_reel_media(url, "failed", "", "", user_id=user_id)
+            upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_failed"}, user_id=user_id)
             return {"ok": False, "media_status": "failed", "local_video_path": "", "thumbnail_path": ""}
 
         video_path = _find_downloaded_video(reel_id)
     if not video_path or not video_path.exists():
-        update_reel_media(url, "failed", "", "")
-        upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_missing_output"})
+        update_reel_media(url, "failed", "", "", user_id=user_id)
+        upsert_reel_processing_diagnostics(url, {"media_upload_status": "download_missing_output"}, user_id=user_id)
         return {"ok": False, "media_status": "failed", "local_video_path": "", "thumbnail_path": ""}
 
     thumbnail_path = _make_thumbnail(video_path, reel_id)
     upload_status = _upload_media_to_r2(video_path, thumbnail_path)
-    update_reel_media(url, "ready", str(video_path), str(thumbnail_path or ""))
-    upsert_reel_processing_diagnostics(url, upload_status)
+    update_reel_media(url, "ready", str(video_path), str(thumbnail_path or ""), user_id=user_id)
+    upsert_reel_processing_diagnostics(url, upload_status, user_id=user_id)
     return {
         "ok": True,
         "media_status": "ready",

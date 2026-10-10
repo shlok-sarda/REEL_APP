@@ -283,6 +283,39 @@ def _delete_reel_children(connection, reel_ids: list[str]) -> None:
             continue
 
 
+def _unlink_unreferenced_media(path_values, excluding_reel_ids=()) -> int:
+    """Delete media files, skipping any that another reel row still points at.
+
+    Two people can save the same reel, and older rows of theirs can share one
+    video file. Deleting one person's reel must not take the other's video or
+    thumbnail with it. `excluding_reel_ids` are rows that are being reset
+    rather than deleted, so their own reference does not count.
+    """
+    removed = 0
+    excluded = [normalize(reel_id) for reel_id in excluding_reel_ids if normalize(reel_id)]
+    for path_value in path_values:
+        normalized_path = normalize(str(path_value or ""))
+        if not normalized_path:
+            continue
+        query = "SELECT 1 FROM reels WHERE (local_video_path = ? OR thumbnail_path = ?)"
+        params: list = [normalized_path, normalized_path]
+        if excluded:
+            query += f" AND id NOT IN ({','.join('?' for _ in excluded)})"
+            params.extend(excluded)
+        try:
+            with get_connection() as connection:
+                still_used = connection.execute(query + " LIMIT 1", params).fetchone()
+        except Exception:
+            still_used = True
+        if still_used:
+            continue
+        path = Path(normalized_path)
+        if path.exists() and path.is_file():
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def delete_reel(reel_id: str) -> bool:
     normalized_reel_id = normalize(reel_id)
     with get_connection() as connection:
@@ -317,13 +350,7 @@ def delete_reel(reel_id: str) -> bool:
         cursor = connection.execute("DELETE FROM reels WHERE id = ?", (normalized_reel_id,))
         deleted = cursor.rowcount > 0
     if deleted:
-        for path_value in (row["local_video_path"], row["thumbnail_path"]):
-            normalized_path = normalize(path_value)
-            if not normalized_path:
-                continue
-            path = Path(normalized_path)
-            if path.exists() and path.is_file():
-                path.unlink(missing_ok=True)
+        _unlink_unreferenced_media((row["local_video_path"], row["thumbnail_path"]))
         sync_csv_from_db()
     return deleted
 
@@ -373,14 +400,7 @@ def delete_failed_reels(user_id: str | None = None) -> dict:
 
     deleted_media_files = 0
     if deleted:
-        for path_value in media_paths:
-            normalized_path = normalize(path_value)
-            if not normalized_path:
-                continue
-            path = Path(normalized_path)
-            if path.exists() and path.is_file():
-                path.unlink(missing_ok=True)
-                deleted_media_files += 1
+        deleted_media_files = _unlink_unreferenced_media(media_paths)
         sync_csv_from_db()
     return {"deleted_reel_count": deleted, "deleted_media_files": deleted_media_files}
 
@@ -490,10 +510,7 @@ def reset_user_library(user_id: str) -> dict:
             (normalized_user,),
         )
 
-    for path in media_paths:
-        if path.exists() and path.is_file():
-            path.unlink(missing_ok=True)
-            deleted_media_files += 1
+    deleted_media_files = _unlink_unreferenced_media(media_paths)
 
     _clear_user_storage_outputs(normalized_user)
     sync_csv_from_db()
@@ -509,13 +526,10 @@ def reset_reel_for_retry(reel_id: str) -> dict | None:
     reel = get_reel_by_id(reel_id)
     if not reel:
         return None
-    for path_value in (reel.get("local_video_path"), reel.get("thumbnail_path")):
-        normalized_path = normalize(path_value)
-        if not normalized_path:
-            continue
-        path = Path(normalized_path)
-        if path.exists() and path.is_file():
-            path.unlink(missing_ok=True)
+    _unlink_unreferenced_media(
+        (reel.get("local_video_path"), reel.get("thumbnail_path")),
+        excluding_reel_ids=(reel["id"],),
+    )
 
     timestamp = datetime.now().isoformat(timespec="seconds")
     with get_connection() as connection:
@@ -532,51 +546,70 @@ def reset_reel_for_retry(reel_id: str) -> dict | None:
     return get_reel_by_id(reel_id)
 
 
-def update_reel_status(url: str, status: str) -> None:
+def _url_scope(url: str, user_id: str | None) -> tuple[str, list]:
+    """WHERE clause for "this reel". reels is UNIQUE(user_id, url), so the same
+    URL is a separate row per person who saved it; without the user, processing
+    one person's copy rewrote everyone else's status and video."""
+    clause, params = "url = ?", [url]
+    if user_id:
+        clause += " AND user_id = ?"
+        params.append(normalize(user_id))
+    return clause, params
+
+
+def update_reel_status(url: str, status: str, user_id: str | None = None) -> None:
     normalized_url = normalize(url)
     if not normalized_url:
         return
     timestamp = datetime.now().isoformat(timespec="seconds")
+    clause, scope = _url_scope(normalized_url, user_id)
     with get_connection() as connection:
         connection.execute(
-            """
+            f"""
             UPDATE reels
             SET status = ?, updated_at = ?
-            WHERE url = ?
+            WHERE {clause}
             """,
-            (normalize(status) or "pending", timestamp, normalized_url),
+            (normalize(status) or "pending", timestamp, *scope),
         )
     sync_csv_from_db()
 
 
-def update_reel_media(url: str, media_status: str, local_video_path: str = "", thumbnail_path: str = "") -> None:
+def update_reel_media(
+    url: str,
+    media_status: str,
+    local_video_path: str = "",
+    thumbnail_path: str = "",
+    user_id: str | None = None,
+) -> None:
     normalized_url = normalize(url)
     if not normalized_url:
         return
     timestamp = datetime.now().isoformat(timespec="seconds")
+    clause, scope = _url_scope(normalized_url, user_id)
     with get_connection() as connection:
         connection.execute(
-            """
+            f"""
             UPDATE reels
             SET media_status = ?, local_video_path = ?, thumbnail_path = ?, updated_at = ?
-            WHERE url = ?
+            WHERE {clause}
             """,
             (
                 normalize(media_status) or "not_downloaded",
                 normalize(local_video_path),
                 normalize(thumbnail_path),
                 timestamp,
-                normalized_url,
+                *scope,
             ),
         )
     sync_csv_from_db()
 
 
-def upsert_reel_processing_diagnostics(url: str, payload: dict | None) -> None:
+def upsert_reel_processing_diagnostics(url: str, payload: dict | None, user_id: str | None = None) -> None:
     normalized_url = normalize(url)
     if not normalized_url or not isinstance(payload, dict):
         return
-    reel = get_reel_by_url(normalized_url)
+    reel = get_reel_by_url(normalized_url, user_id)
     if not reel:
         return
     timestamp = datetime.now().isoformat(timespec="seconds")
@@ -816,6 +849,7 @@ def sync_reel_diagnostics_from_accumulated(user_id: str, accumulated_csv_path: s
                     "processing_version": row.get("Processing Version", ""),
                     "metadata": metadata_from_row(row),
                 },
+                user_id=normalized_user,
             )
 
 

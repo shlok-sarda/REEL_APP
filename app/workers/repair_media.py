@@ -160,7 +160,7 @@ def repair_reel(reel: dict, redownload_budget: int) -> tuple[str, int]:
         from app.services.media import ensure_reel_media
 
         try:
-            result = ensure_reel_media(reel["url"])
+            result = ensure_reel_media(reel["url"], user_id=reel["user_id"])
         except Exception as exc:
             print(f"[repair] full redownload failed for {reel_id}: {exc}", flush=True)
             return "redownload_failed", 1

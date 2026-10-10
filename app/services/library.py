@@ -509,7 +509,7 @@ def _ensure_v2_media_ready(user_id: str) -> None:
         if media_status == "ready" and video_ready and thumbnail_ready:
             continue
         try:
-            ensure_reel_media(url)
+            ensure_reel_media(url, user_id=user_id)
         except Exception:
             continue
 

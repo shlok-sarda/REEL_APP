@@ -288,12 +288,12 @@ def build_file_uri(path_value):
     return path.resolve().as_uri()
 
 
-def enrich_rows_with_media(rows):
+def enrich_rows_with_media(rows, user_id=None):
     enriched = []
     for row in rows:
         updated = dict(row)
         url = normalize(row.get("URL"))
-        reel = get_reel_by_url(url) if url else None
+        reel = get_reel_by_url(url, user_id) if url else None
         local_video_path = (reel or {}).get("local_video_path", "")
         thumbnail_path = (reel or {}).get("thumbnail_path", "")
         media_status = (reel or {}).get("media_status", "")
@@ -321,16 +321,16 @@ def summarize_status_by_url(rows):
     return summary
 
 
-def sync_existing_status_and_media(rows):
+def sync_existing_status_and_media(rows, user_id=None):
     status_by_url = summarize_status_by_url(rows)
     for url, status in status_by_url.items():
-        update_reel_status(url, status)
+        update_reel_status(url, status, user_id=user_id)
         if status == "completed":
-            reel = get_reel_by_url(url)
+            reel = get_reel_by_url(url, user_id)
             local_video_path = (reel or {}).get("local_video_path", "")
             media_status = normalize((reel or {}).get("media_status", ""))
             if media_status != "ready" or not local_video_path or not Path(local_video_path).exists():
-                ensure_reel_media(url)
+                ensure_reel_media(url, user_id=user_id)
 
 
 def build_standard_page(paths, app_title="Shlok Reels"):
@@ -399,7 +399,7 @@ def main(user_id="default", only_urls=None):
 
     if pending_urls:
         for url in pending_urls:
-            update_reel_status(url, "processing")
+            update_reel_status(url, "processing", user_id=user_id)
 
         pending_input = paths.storage_dir / "pending_urls.csv"
         pending_output = paths.storage_dir / "pending_output.csv"
@@ -467,21 +467,21 @@ def main(user_id="default", only_urls=None):
 
         status_by_url = summarize_status_by_url(pending_rows)
         for url in pending_urls:
-            update_reel_status(url, status_by_url.get(url, "failed"))
+            update_reel_status(url, status_by_url.get(url, "failed"), user_id=user_id)
             if status_by_url.get(url) == "completed":
-                ensure_reel_media(url)
+                ensure_reel_media(url, user_id=user_id)
 
         pending_set = {normalize(url) for url in pending_urls}
         kept_rows = [
             row for row in raw_rows
             if normalize(row.get("URL")) in active_url_set and normalize(row.get("URL")) not in pending_set
         ]
-        combined_rows = enrich_rows_with_media(kept_rows + pending_rows)
+        combined_rows = enrich_rows_with_media(kept_rows + pending_rows, user_id)
         write_raw_rows(combined_rows, paths)
         sync_live_library_state(user_id, paths.raw_output)
     elif raw_rows:
-        sync_existing_status_and_media(raw_rows)
-        write_raw_rows(enrich_rows_with_media(raw_rows), paths)
+        sync_existing_status_and_media(raw_rows, user_id)
+        write_raw_rows(enrich_rows_with_media(raw_rows, user_id), paths)
         sync_live_library_state(user_id, paths.raw_output)
         lightweight_rebuild = True
 

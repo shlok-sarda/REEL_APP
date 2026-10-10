@@ -733,6 +733,7 @@ def backfill_reel_visual_search(
             "processing_version": "deep_search_visual_backfill_v1",
             "metadata": merged_metadata,
         },
+        user_id=user_id,
     )
     rebuild = rebuild_deep_search_documents(user_id)
     indexed_task = None
