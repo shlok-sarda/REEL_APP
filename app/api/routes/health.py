@@ -1,6 +1,7 @@
 import secrets as _secrets
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from app.config import settings
 from app.schemas import HealthResponse
@@ -25,7 +26,6 @@ def _queue_snapshot() -> dict:
         return {}
 
 
-def _queue_debug(full: bool = False) -> dict:
 def _config_summary() -> dict:
     """Which switches are on, for checking the host's settings with one curl.
 
@@ -60,6 +60,7 @@ def _config_summary() -> dict:
     }
 
 
+def _queue_debug(full: bool = False) -> dict:
     """Read-only view of the recovery machinery's inputs, for remote triage.
 
     The default (public) view carries only operational vitals safe for an
@@ -104,7 +105,6 @@ def _config_summary() -> dict:
             info["openai_paused_until"] = pause
     except Exception:
         pass
-    if not full:
     info["config"] = _config_summary()
     try:
         from app.services.db_backup import last_backup_at
@@ -112,6 +112,7 @@ def _config_summary() -> dict:
         info["db_backup_last"] = last_backup_at()
     except Exception:
         info["db_backup_last"] = ""
+    if not full:
         return info
     try:
         from app.services.jobs import _pid_is_worker, _stale_cutoff_for
@@ -432,6 +433,42 @@ def _reset_test_guest(handle: str) -> dict:
         "deleted": deleted,
         "note": "account removed; the next DM recreates it and the funnel starts at message one",
     }
+
+
+@router.head("/health", include_in_schema=False)
+def health_head():
+    # Uptime checkers and the host's health check probe with HEAD.
+    return Response(status_code=200)
+
+
+@router.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    base = (settings.public_base_url or "https://clipnest.in").rstrip("/")
+    return PlainTextResponse(
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /g/\n"
+        "Disallow: /app\n"
+        "Disallow: /health\n"
+        "Disallow: /admin\n"
+        "Disallow: /api\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+
+
+@router.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml():
+    base = (settings.public_base_url or "https://clipnest.in").rstrip("/")
+    urls = "".join(f"<url><loc>{base}{path}</loc></url>" for path in ("/", "/privacy", "/terms", "/data-deletion"))
+    return Response(
+        f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+        media_type="application/xml",
+    )
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return RedirectResponse("/static/favicon.png", status_code=301)
 
 
 @router.get("/health", response_model=HealthResponse)

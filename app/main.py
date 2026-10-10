@@ -37,6 +37,18 @@ app = FastAPI(
     openapi_url=None,
 )
 
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    # Nothing in the app is meant to be framed by another site.
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    return response
+
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret,
@@ -96,6 +108,16 @@ def _queue_janitor_loop():
         except Exception as exc:
             print(f"[janitor] instagram token refresh failed: {exc}", flush=True)
 
+        # Database copy to object storage: once shortly after boot, then
+        # about every 6 hours (144 ticks of 150s).
+        if tick % 144 == 1:
+            try:
+                from app.services.db_backup import backup_database
+
+                print(f"[janitor] database backup: {backup_database()}", flush=True)
+            except Exception as exc:
+                print(f"[janitor] database backup failed: {exc}", flush=True)
+
         time.sleep(150)
 
 
@@ -112,16 +134,6 @@ def startup_event():
     try:
         from app.services.reel_ingest import purge_failed_reels_once
 
-
-        # Database copy to object storage: once shortly after boot, then
-        # about every 6 hours (144 ticks of 150s).
-        if tick % 144 == 1:
-            try:
-                from app.services.db_backup import backup_database
-
-                print(f"[janitor] database backup: {backup_database()}", flush=True)
-            except Exception as exc:
-                print(f"[janitor] database backup failed: {exc}", flush=True)
         result = purge_failed_reels_once()
         if result.get("ran"):
             print(f"[startup] purged failed reels: {result}")
