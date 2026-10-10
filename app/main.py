@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -47,6 +48,13 @@ async def security_headers(request, call_next):
     # Nothing in the app is meant to be framed by another site.
     response.headers.setdefault("X-Frame-Options", "DENY")
     return response
+
+
+@app.exception_handler(OverflowError)
+async def number_out_of_range(request, exc):
+    # An id in the URL too large for the database to hold (/folders/9999...).
+    # Nothing can have that id, so it is simply not found, not a server error.
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
 app.add_middleware(

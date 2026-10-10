@@ -272,7 +272,9 @@ def _debug_authorized(token: str) -> bool:
     # Reuses the ingest secret so no new env var is needed. Fails closed when
     # the secret is unset — the full debug view stays off rather than open.
     secret = settings.telegram_ingest_secret
-    return bool(secret) and _secrets.compare_digest(token.strip(), secret)
+    # Compared as bytes: compare_digest refuses text with non-ASCII characters,
+    # and a stray emoji in ?token= would turn the health check into a 500.
+    return bool(secret) and _secrets.compare_digest(token.strip().encode("utf-8"), secret.encode("utf-8"))
 
 
 def _instagram_webhook_debug(limit: int = 15) -> dict:

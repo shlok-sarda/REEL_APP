@@ -369,10 +369,12 @@ def build_app_v2_html(
 
 def asset_path(rel: str) -> Path | None:
     """Resolve a requested asset inside STATIC_DIR, refusing anything outside."""
+    # is_file() is inside the try too: a path longer than the filesystem
+    # allows raises there, not in resolve().
     try:
         target = (STATIC_DIR / rel).resolve()
+        if STATIC_DIR.resolve() not in target.parents or not target.is_file():
+            return None
     except (OSError, ValueError):
-        return None
-    if STATIC_DIR.resolve() not in target.parents or not target.is_file():
         return None
     return target
