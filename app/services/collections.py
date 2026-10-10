@@ -921,6 +921,8 @@ def _route_once(card: str, seed: int, system_prompt: str, vocab: dict[str, str])
     client = get_openai_client()
     response = client.chat.completions.create(
         model=ROUTE_MODEL,
+        # A vote is a few tokens. Anything slower than this is a stall.
+        timeout=30,
         temperature=ROUTE_TEMPERATURE,
         max_tokens=ROUTE_MAX_TOKENS,
         seed=seed,
@@ -1002,6 +1004,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
     routed_new = 0
     skipped_unroutable = 0
     quota_hit = False
+    failures_in_a_row = 0
 
     for row in rows:
         reel_id = str(row["reel_id"])
@@ -1033,10 +1036,16 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
             except Exception as exc:
                 message = str(exc)
                 print(f"[collections] route failed for {reel_id}: {message[:200]}")
-                if is_quota_failure(message) or is_rate_limited(message):
+                failures_in_a_row += 1
+                # Three failed calls running means OpenAI is unreachable or
+                # stalled, not that this reel is odd. Carrying on tried every
+                # remaining reel three times each, with retries, while the one
+                # worker (and everyone's reels behind it) waited.
+                if is_quota_failure(message) or is_rate_limited(message) or failures_in_a_row >= 3:
                     quota_hit = True
                     break
                 continue
+            failures_in_a_row = 0
             votes.append(vote)
 
         if len(votes) < len(ROUTE_SEEDS):

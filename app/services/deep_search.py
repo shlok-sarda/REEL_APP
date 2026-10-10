@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 import urllib.error
 import urllib.request
 from collections import defaultdict
@@ -1109,6 +1111,28 @@ def _try_hybrid(documents: list[dict[str, Any]], query: str, limit: int) -> list
         return None
 
 
+# A search with no results rebuilds the person's whole search index in case
+# it was stale. That is seconds of work under the database write lock, and it
+# used to run for every such search: each typo, each word that simply is not
+# in the library. The worker already rebuilds after every reel, so once in a
+# while per person is plenty.
+SELF_HEAL_INTERVAL_SECONDS = 600
+_last_self_heal: dict[str, float] = {}
+_self_heal_lock = threading.Lock()
+
+
+def _self_heal_due(user_id: str) -> bool:
+    now = time.monotonic()
+    with _self_heal_lock:
+        last = _last_self_heal.get(user_id)
+        if last is not None and now - last < SELF_HEAL_INTERVAL_SECONDS:
+            return False
+        if len(_last_self_heal) > 5000:
+            _last_self_heal.clear()
+        _last_self_heal[user_id] = now
+        return True
+
+
 def search_user_documents(user_id: str, query: str, limit: int = 20, backend: str = "auto") -> dict[str, Any]:
     documents = load_deep_search_documents(user_id)
     rebuilt_for_empty_results = None
@@ -1118,9 +1142,9 @@ def search_user_documents(user_id: str, query: str, limit: int = 20, backend: st
     # hybrid, which meant every no-lexical-hit query ("girls") paid a rebuild.
     if backend in ("auto", "hybrid"):
         hybrid_results = _try_hybrid(documents, query, limit)
-        if hybrid_results == [] and documents:
-            # Self-heal once: documents may be stale (reels processed since
-            # the last build). Rebuild refreshes docs + embeddings (cached by
+        if hybrid_results == [] and documents and _self_heal_due(user_id):
+            # Self-heal: documents may be stale (reels processed since the
+            # last build). Rebuild refreshes docs + embeddings (cached by
             # content hash — unchanged reels cost no API calls) and retries.
             rebuilt_for_empty_results = rebuild_deep_search_documents(user_id)
             documents = load_deep_search_documents(user_id)

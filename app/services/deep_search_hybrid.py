@@ -243,11 +243,15 @@ def embed_remote(text: str) -> list[float] | None:
     """OpenAI embedding for a single text (used for the query at search time).
     Returns None on any failure so callers degrade to lexical-only rather than
     mixing incompatible vectors."""
-    result = embed_remote_batch([text])
+    # Someone is waiting on a search box: give up quickly and let the caller
+    # fall back to plain word matching rather than hang the page.
+    result = embed_remote_batch([text], timeout=8, max_retries=1)
     return result[0] if result else None
 
 
-def embed_remote_batch(texts: list[str]) -> list[list[float] | None] | None:
+def embed_remote_batch(
+    texts: list[str], timeout: float | None = None, max_retries: int | None = None
+) -> list[list[float] | None] | None:
     """Batch OpenAI embedding, L2-normalized, preserving order. Empty strings
     map to None. Returns None entirely if the API call fails (caller degrades).
     Batching is essential at scale: one call embeds up to EMBED_BATCH_SIZE
@@ -261,6 +265,20 @@ def embed_remote_batch(texts: list[str]) -> list[list[float] | None] | None:
         from api_config import get_openai_client
 
         client = get_openai_client()
+        if timeout is not None or max_retries is not None:
+            options = {}
+            if timeout is not None:
+                options["timeout"] = timeout
+            if max_retries is not None:
+                options["max_retries"] = max_retries
+            client = client.with_options(**options)
+            try:
+                # with_options returns a copy, which would not be counted.
+                from llm_usage import instrument
+
+                instrument(client)
+            except Exception:
+                pass
         for start in range(0, len(non_empty), EMBED_BATCH_SIZE):
             chunk = non_empty[start:start + EMBED_BATCH_SIZE]
             response = client.embeddings.create(
