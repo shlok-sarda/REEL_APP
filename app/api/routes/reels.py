@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from app.schemas import ReelRecord
-from app.services.auth import block_link_session_writes, ensure_user_access, require_user
+from app.services.auth import block_link_session_writes, current_user, ensure_user_access, require_user, user_is_admin
 from app.services.jobs import enqueue_library_rebuild_job, enqueue_reel_job, ensure_background_progress
 from app.services.reel_ingest import (
     delete_reel,
@@ -24,6 +24,48 @@ from app.services.reel_ingest import (
 router = APIRouter(prefix="/reels", tags=["reels"])
 
 GENERIC_CATEGORY_LABELS = ("", "generic", "miscellaneous", "uncertain", "general", "unsorted")
+
+# Every re-run is a full paid extraction, and the job queue only dedupes while
+# a job is still pending or running, so without a ceiling a signed-in user
+# could loop the retry buttons all day.
+DAILY_RERUN_LIMIT = 30
+
+
+def _reruns_left_today(request: Request, user_id: str, job_type: str = "process_reel") -> int:
+    """How many more paid re-runs this account may start today.
+
+    A re-run is a job created today for something that already had a job
+    before it, so a reel's first processing never counts. Admins are exempt.
+    Raises a readable 429 once the day's allowance is spent.
+    """
+    if user_is_admin(current_user(request)):
+        return 10**6
+    from datetime import datetime
+
+    from app.db.database import get_connection
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    with get_connection() as connection:
+        used = connection.execute(
+            """
+            SELECT COUNT(*) FROM processing_jobs j
+            WHERE j.user_id = ? AND j.job_type = ? AND j.created_at >= ?
+              AND EXISTS (
+                SELECT 1 FROM processing_jobs p
+                WHERE p.reel_id = j.reel_id AND p.job_type = j.job_type AND p.id < j.id
+              )
+            """,
+            (user_id, job_type, today),
+        ).fetchone()[0]
+    left = DAILY_RERUN_LIMIT - int(used or 0)
+    if left <= 0:
+        detail = (
+            f"You have rebuilt your library {DAILY_RERUN_LIMIT} times today. More tomorrow."
+            if job_type == "rebuild_library"
+            else f"You have re-run {DAILY_RERUN_LIMIT} reels today. More tomorrow."
+        )
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
+    return left
 
 
 @router.post("/retry-unsorted")
@@ -80,6 +122,7 @@ def retry_unsorted_reels(
             "broken_count": len(rows),
             "reel_ids": [row["id"] for row in rows[:20]],
         }
+    rows = rows[: _reruns_left_today(request, resolved_user_id)]
     requeued = []
     errors = []
     for row in rows:
@@ -269,6 +312,7 @@ def rebuild_library(request: Request, user_id: Optional[str] = Query(default=Non
     block_link_session_writes(request, "rebuild the library")
     resolved_user_id = ensure_user_access(request, user_id or "")
     require_user(request)
+    _reruns_left_today(request, resolved_user_id, job_type="rebuild_library")
     invalidated = invalidate_user_library_outputs(resolved_user_id)
     job = enqueue_library_rebuild_job(resolved_user_id)
     ensure_background_progress()
@@ -290,6 +334,7 @@ def retry_reel(reel_id: str, request: Request):
     if not reel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reel not found")
     ensure_user_access(request, reel["user_id"])
+    _reruns_left_today(request, reel["user_id"])
     reset = reset_reel_for_retry(reel_id)
     job = enqueue_reel_job(reel_id, user_id=reel["user_id"])
     ensure_background_progress()
