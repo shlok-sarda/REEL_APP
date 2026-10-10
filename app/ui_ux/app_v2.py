@@ -298,6 +298,8 @@ def app_v2_enabled(user: dict | None) -> bool:
         return False
     if user_is_admin(user):
         return True
+    if settings.app_v2_for_everyone:
+        return True
     email = (user.get("email") or "").strip().lower()
     uid = (user.get("id") or "").strip().lower()
     if bool(email and email in settings.app_v2_accounts) or bool(uid and uid in settings.app_v2_accounts):
