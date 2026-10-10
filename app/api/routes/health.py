@@ -426,6 +426,15 @@ def _reset_test_guest(handle: str) -> dict:
         connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
         deleted["users"] = 1
 
+    # Rewrite the CSV mirror now that the reels are gone, so nothing can read
+    # the deleted rows back out of it.
+    try:
+        from app.services.reel_ingest import sync_csv_from_db
+
+        sync_csv_from_db()
+    except Exception as exc:
+        deleted["csv_sync_error"] = str(exc)[:80]
+
     return {
         "ok": True,
         "reset": wanted,

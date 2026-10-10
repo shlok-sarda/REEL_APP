@@ -689,8 +689,13 @@ def import_legacy_reel_csv(csv_path: Path | None = None):
         return
 
     with get_connection() as connection:
+        # The CSV is a mirror the database writes, and this import only exists
+        # to bootstrap an empty database from it. Running it against a live
+        # database re-inserted every reel that had been deleted without the
+        # mirror being rewritten, as 'pending' under the default account, and
+        # the queue then paid to process reels nobody owned.
         existing_count = connection.execute("SELECT COUNT(*) FROM reels").fetchone()[0]
-        if existing_count and csv_path.stat().st_size == 0:
+        if existing_count:
             return
 
         with csv_path.open(newline="", encoding="utf-8") as infile:
