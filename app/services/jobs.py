@@ -286,7 +286,7 @@ def enqueue_library_rebuild_job(user_id: str = "default") -> dict:
 
 
 def list_jobs(limit: int = 100, user_id: str | None = None) -> list[dict]:
-    ensure_background_progress(user_id=user_id)
+    ensure_background_progress(user_id=user_id, throttled=True)
     query = """
         SELECT
             processing_jobs.id,
@@ -316,7 +316,7 @@ def list_jobs(limit: int = 100, user_id: str | None = None) -> list[dict]:
 
 
 def job_counts(user_id: str | None = None) -> dict:
-    ensure_background_progress(user_id=user_id)
+    ensure_background_progress(user_id=user_id, throttled=True)
     query = """
         SELECT status, COUNT(*) AS count
         FROM processing_jobs
@@ -754,7 +754,23 @@ def enqueue_missing_reel_jobs(limit: int = JOB_BACKFILL_LIMIT) -> int:
     return created
 
 
-def ensure_background_progress(user_id: str | None = None) -> None:
+# Page polls (/jobs, /dashboard) run the janitor pass at most this often.
+PROGRESS_POLL_INTERVAL_SECONDS = 5
+_last_progress_pass = 0.0
+
+
+def ensure_background_progress(user_id: str | None = None, throttled: bool = False) -> None:
+    # `throttled` is for callers that are only reading (every open app polls
+    # /jobs and /dashboard every few seconds). The pass below takes the
+    # database write lock three times, so with fifty apps open every poll
+    # queued behind every other poll and behind incoming reels. One pass
+    # every few seconds does the same job. Reel ingest and the janitor
+    # thread call unthrottled and always run.
+    global _last_progress_pass
+    if throttled:
+        if time.monotonic() - _last_progress_pass < PROGRESS_POLL_INTERVAL_SECONDS:
+            return
+    _last_progress_pass = time.monotonic()
     # Janitor duties: recover orphans, backfill missing jobs, start the worker.
     # Each step is isolated — this runs inside /jobs and /dashboard requests,
     # so a broken janitor must degrade to a log line, never a 500.
