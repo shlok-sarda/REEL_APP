@@ -20,8 +20,9 @@ from app.db.database import get_connection
 # instagram_view: a landing view that happened inside Instagram's in-app
 # browser, where Google refuses sign-in outright. escape_click: tapped the
 # "Open in Safari" button that replaces Google there. Both are derived on the
-# client; no user agent is ever sent or stored.
-LANDING_EVENTS = frozenset({"landing_view", "demo_click", "signup", "instagram_view", "escape_click"})
+# client; no user agent is ever sent or stored. dm_click: tapped "Send a reel",
+# the button that opens the Instagram DM where every library starts.
+LANDING_EVENTS = frozenset({"landing_view", "demo_click", "signup", "instagram_view", "escape_click", "dm_click"})
 
 _MAX_VISITOR = 64
 _MAX_SOURCE = 40

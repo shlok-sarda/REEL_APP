@@ -1118,42 +1118,40 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         """
     else:
         disabled_note = "<p class='tiny'>Google sign-in is not configured yet. Add `GOOGLE_CLIENT_ID` before launch.</p>" if not google_client_id else ""
-        # Looking costs nothing; signing in costs a Google account and a DM to
-        # a bot. So the demo leads and Google follows, in both CTA blocks.
-        # Points at /demo-soon rather than the real /try for now - the no-
-        # signup demo hasn't been verified end to end yet, so cold traffic
-        # gets a calm "not yet" instead of an unproven path. Always rendered
-        # (not gated on public_demo_ready()): a static placeholder link is
-        # never a dead CTA the way an unconfigured real one would be.
-        demo_cta = (
-            '<a class="cta cta-primary" data-demo-cta href="/demo-soon">'
-            '<span>See it working</span><span class="cta-note">no signup</span></a>'
+        # A visitor from the Instagram bio is inside Instagram's browser, where
+        # Google refuses sign-in. The one action that always works there is a
+        # DM, and a DM is also how every library starts, so it leads in both
+        # CTA blocks and Google follows. ig.me opens the chat natively.
+        dm_cta = (
+            f'<a class="cta cta-primary" data-dm-cta href="https://ig.me/m/{instagram_app_username}">'
+            f'Send a reel to @{instagram_app_username}</a>'
+            '<p class="cta-foot">Free, no app. Your library link comes back in the DM.</p>'
+            if instagram_app_username
+            else ""
         )
         top_auth = f"""
       <div class="cta-stack">
-        {demo_cta}
+        {dm_cta}
         <div id="googleButtonTop" class="google-shell"></div>
-        <p class="cta-foot">Free beta &middot; setup takes 2 minutes</p>
       </div>
         """
         auth_section = f"""
       <div class="cta-stack cta-stack--end">
-        {demo_cta}
+        {dm_cta}
         <div id="googleButton" class="google-shell"></div>
-        <p class="cta-foot">Free beta &middot; setup takes 2 minutes</p>
-        <button id="setupVideoButton" type="button" class="linkish">Watch the 40 second setup</button>
+        <button id="setupVideoButton" type="button" class="linkish">Watch how it works (38s)</button>
         {disabled_note}
       </div>
       <div id="setupModal" class="connect-modal hidden" aria-hidden="true">
         <div class="connect-card">
           <div class="connect-head">
             <div>
-              <p class="kicker">Setup</p>
-              <h3 style="margin:0;">The whole setup, start to finish</h3>
+              <p class="kicker">How it works</p>
+              <h3 style="margin:0;">ClipNest in 38 seconds</h3>
             </div>
             <button id="setupModalClose" type="button" class="ghost-button small-ghost">Close</button>
           </div>
-          <video id="setupVideo" class="setup-video" controls playsinline preload="none" src="/static/setup.mp4"></video>
+          <video id="setupVideo" class="setup-video" controls muted playsinline preload="none" src="/static/setup.mp4"></video>
         </div>
       </div>
         """
@@ -1304,7 +1302,9 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       transition:transform .22s var(--ease), box-shadow .22s var(--ease), filter .22s var(--ease);
     }
     .cta-primary { background:var(--brand-grad); color:#1b1206; box-shadow:0 10px 28px -14px rgba(242,168,102,0.85); }
+    .cta-primary:hover { filter:brightness(1.06); transform:translateY(-1px); }
     .cta-primary:active { transform:translateY(1px) scale(0.995); }
+    .cta-primary:focus-visible { outline:2px solid var(--tan, #f2a866); outline-offset:3px; }
     .cta-note { font-weight:500; opacity:0.62; font-size:0.8rem; }
     .cta-note::before { content:"·"; margin-right:8px; }
     .google-shell { min-height:38px; display:flex; justify-content:center; }
@@ -1325,6 +1325,8 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
       text-underline-offset:3px; cursor:pointer; padding:8px;
     }
     .linkish:hover { color:var(--text); }
+    .linkish:active { opacity:0.7; }
+    .linkish:focus-visible { outline:2px solid var(--tan, #f2a866); outline-offset:3px; border-radius:6px; }
 
     /* ---------- PROOF STACK (replaces the old static phone-video mockup) ----------
        Scattered real reel-photo cards behind a floating search card whose query
@@ -1614,7 +1616,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           <span class="brand-word">ClipNest</span>
         </div>
         <h1 class="display">Everything you saved.<br /><span class="accent">Finally findable.</span></h1>
-        <p class="lede">Send a reel to ClipNest in a DM. It watches the video, files it into a collection that builds itself, and hands it back the second you ask.</p>
+        <p class="lede">Send a reel to ClipNest in a DM. It watches the video, groups your reels as the library grows, and hands any of them back the second you ask.</p>
         __TOP_AUTH__
         <div class="phone-wrap">
           <div class="proof-stack" aria-hidden="true">
@@ -1754,7 +1756,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           </div>
           <div class="fact reveal">
             <h3>Keeps the useful parts</h3>
-            <p>Where it was, what was in it, and the recipe or product when the reel had one.</p>
+            <p>Where it was, what was in it, and what was said on screen.</p>
           </div>
         </div>
       </div>
@@ -1763,7 +1765,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     <section class="sec">
       <div class="wrap">
         <p class="eyebrow reveal">Straight answers</p>
-        <h2 class="sec-h reveal">Before you hand over a Google account.</h2>
+        <h2 class="sec-h reveal">Before you send the first one.</h2>
         <dl class="qa">
           <div class="qa-row reveal">
             <div class="qa-q">Who is behind this?</div>
@@ -1775,7 +1777,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           </div>
           <div class="qa-row reveal">
             <div class="qa-q">Why does it need Instagram?</div>
-            <div class="qa-a">Sharing to a DM is the only way to get a reel out of Instagram without you copying links by hand. You link once with a one-time code, then it is just the share button.</div>
+            <div class="qa-a">Sharing to a DM is the only way to get a reel out of Instagram without you copying links by hand. Share any reel to @clipnest.in in a DM. A link to your library comes back in the same chat. Google sign-in later keeps it.</div>
           </div>
           <div class="qa-row reveal">
             <div class="qa-q">What does it cost?</div>
@@ -1788,7 +1790,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     <section class="close">
       <div class="wrap">
         <h2 class="sec-h reveal">Start with one reel.</h2>
-        <p class="lede reveal">Look around the demo first if you would rather not sign in yet.</p>
+        <p class="lede reveal">No sign-in needed to begin. Send one in a DM and your library link comes back in the same chat.</p>
         __AUTH_SECTION__
       </div>
     </section>
@@ -2028,6 +2030,10 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           ? ev.target.closest('[data-escape-cta]')
           : null;
         if (esc) { track('escape_click'); }
+        var dm = ev.target && ev.target.closest
+          ? ev.target.closest('[data-dm-cta]')
+          : null;
+        if (dm) { track('dm_click'); }
       }, true);
     })();
 
