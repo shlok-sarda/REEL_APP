@@ -39,11 +39,19 @@ PRECEDENCE = [
     "m7_past_lock",
     "m2_first_library",
     "m1_first_ack",
+    "m9_could_not_read",
     "m8_recovery",
     "m3_quiet_nudge",
 ]
 
 ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock"}
+
+# Judged against the last time the SAME message went out, not against the
+# last DM of any kind. The failure reply usually follows the first-reel ack by
+# a minute or two, so the shared cooldown would swallow exactly the case it
+# exists for: "give me a few minutes", then silence. Measuring it against
+# itself still stops ten bad links producing ten replies.
+SELF_COOLDOWN = {"m9_could_not_read"}
 
 # There is deliberately no cap on quiet nudges. The 24 hour window already
 # enforces one: a nudge that goes unanswered is followed by the window
@@ -171,15 +179,19 @@ def load_state(user_id: str) -> dict[str, Any] | None:
         reel_count = connection.execute(
             "SELECT COUNT(*) AS n FROM reels WHERE user_id = ?", (user_id,)
         ).fetchone()["n"]
-        sent = {
-            r["message_key"]
+        last_sent = {
+            r["message_key"]: r["last_at"]
             for r in connection.execute(
-                "SELECT DISTINCT message_key FROM nudge_log WHERE user_id = ?", (user_id,)
+                "SELECT message_key, MAX(sent_at) AS last_at FROM nudge_log "
+                "WHERE user_id = ? GROUP BY message_key",
+                (user_id,),
             )
         }
+        sent = set(last_sent)
     user = dict(row)
     user["reel_count"] = int(reel_count or 0)
     user["already_sent"] = sent
+    user["last_sent_at"] = last_sent
     user["signed_in"] = bool((row["google_sub"] or "").strip())
     return user
 
@@ -191,8 +203,11 @@ def window_open(user: dict[str, Any]) -> bool:
     return _now() - last_in < timedelta(hours=WINDOW_HOURS)
 
 
-def cooldown_clear(user: dict[str, Any]) -> bool:
-    last_dm = _parse(user.get("last_dm_at") or "")
+def cooldown_clear(user: dict[str, Any], key: str = "") -> bool:
+    if key in SELF_COOLDOWN:
+        last_dm = _parse((user.get("last_sent_at") or {}).get(key) or "")
+    else:
+        last_dm = _parse(user.get("last_dm_at") or "")
     if not last_dm:
         return True
     return _now() - last_dm >= timedelta(minutes=settings.dm_cooldown_minutes)
@@ -213,7 +228,8 @@ def library_link(user: dict[str, Any]) -> str:
 def decide(user: dict[str, Any], trigger: str) -> str | None:
     """Which message, if any. Pure: no sends, no writes, no model.
 
-    `trigger` is what woke us: reel_saved, reel_ready, plain_message, timer.
+    `trigger` is what woke us: reel_saved, reel_ready, reel_failed,
+    unreadable_share, plain_message, timer.
     """
     if user["signed_in"]:
         # Converted. The bot already got what it was for.
@@ -246,6 +262,11 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
             candidates.append("m5_heads_up")
         elif n >= HOME_SCREEN_AT and "m4_home_screen" not in sent:
             candidates.append("m4_home_screen")
+
+    if trigger in {"reel_failed", "unreadable_share"}:
+        # They were told it is processing (or think they saved something).
+        # Silence here reads as a working save, and the window shuts on it.
+        candidates.append("m9_could_not_read")
 
     if trigger == "plain_message":
         candidates.append("m8_recovery")
@@ -291,6 +312,9 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
         return f"That is {LOCK_AT} reels. Sign in to keep saving and it is all still here: {link}"
     if key == "m7_past_lock":
         return f"Holding that one for you. Sign in and it saves straight away: {link}"
+    if key == "m9_could_not_read":
+        text = "I could not read that one. If it is private, a photo post, or deleted, try another reel."
+        return f"{text} Your library: {link}" if link else text
     if key == "m8_recovery":
         return f"Here is your library: {link}"
     return ""
@@ -324,7 +348,7 @@ def fire(user_id: str, trigger: str, title: str = "") -> str | None:
         # instantly, M2 fires a few minutes later once processing finishes,
         # and 10 minutes is comfortably inside that gap. This was silently
         # eating M2 for every single guest.
-        if key not in ONCE_EVER and not cooldown_clear(user):
+        if key not in ONCE_EVER and not cooldown_clear(user, key):
             log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
             return None
         text = render(key, user, title=title)

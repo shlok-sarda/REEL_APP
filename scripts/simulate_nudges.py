@@ -199,6 +199,20 @@ nudge.fire(uid6b, "reel_ready", title=TITLES[0])
 run("They send a no-reel message seconds after the library link", "cooldown correctly suppresses the repeat",
     lambda: nudge.fire(uid6b, "plain_message"))
 
+# --- 3b. A reel that could not be read ---------------------------------------
+uid10 = _fresh_guest("first_fails")
+nudge.fire(uid10, "reel_saved")
+run("Their first reel fails two minutes after the ack", "must not be eaten by the cooldown the ack just started",
+    lambda: nudge.fire(uid10, "reel_failed"))
+run("A second reel fails right after", "one failure reply per cooldown, not one per reel",
+    lambda: nudge.fire(uid10, "reel_failed"))
+
+uid11 = _fresh_guest("unreadable")
+_add_reel(uid11, 1, TITLES[0])
+nudge.fire(uid11, "reel_ready", title=TITLES[0])
+run("They share a story or photo with no reel link in it", "says it did not save, instead of 'here is your library'",
+    lambda: nudge.fire(uid11, "unreadable_share"))
+
 # --- 4. The gates ------------------------------------------------------------
 with get_connection() as c:
     now = iso_now()

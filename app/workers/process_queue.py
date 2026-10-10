@@ -109,7 +109,18 @@ def reel_is_finished(job: dict) -> bool:
 
 
 def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
+    """Fail the job and tell the owner. A failed job is final (nothing retries
+    it), and the owner was already told their reel is processing, so without
+    this they wait on a reply that never comes."""
     fail_job(job["id"], message, claim_token)
+    if job.get("job_type") != "process_reel":
+        return
+    try:
+        from app.services import nudge
+
+        nudge.fire(job["user_id"], "reel_failed")
+    except Exception:
+        pass
 
 
 def process_job(job: dict):

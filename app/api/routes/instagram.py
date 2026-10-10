@@ -159,6 +159,12 @@ def _extract_candidate_urls(message_event: dict) -> list[str]:
     return urls
 
 
+def _has_attachment(message_event: dict) -> bool:
+    """True when the message carries a share or media, not just typed text."""
+    attachments = (message_event.get("message") or {}).get("attachments")
+    return isinstance(attachments, list) and bool(attachments)
+
+
 def _extract_link_code(message_event: dict) -> str:
     for text in _deep_strings(message_event.get("message", {})):
         match = LINK_CODE_RE.search(text or "")
@@ -390,9 +396,12 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             )
             # Recovery path: any message re-sends their link. The IGSID is
             # permanent, so deleting the conversation must not cost someone
-            # their library.
+            # their library. A share we could not read a reel out of (story
+            # mention, photo, a video with no permalink) is different: "here
+            # is your library" tells them it saved, so say that it did not.
             if sender_id not in pending_replies:
-                background.add_task(nudge.fire, user["id"], "plain_message")
+                trigger = "unreadable_share" if _has_attachment(event) else "plain_message"
+                background.add_task(nudge.fire, user["id"], trigger)
         saved_here = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
