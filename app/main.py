@@ -30,6 +30,11 @@ app = FastAPI(
     title="Reel Organizer Backend",
     description="Backend for linked-account reel ingest, library management, and personalized saved-reel organization.",
     version="0.1.0",
+    # The generated docs listed every route, admin and debug ones included,
+    # to anyone who opened /docs.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(

@@ -26,6 +26,40 @@ def _queue_snapshot() -> dict:
 
 
 def _queue_debug(full: bool = False) -> dict:
+def _config_summary() -> dict:
+    """Which switches are on, for checking the host's settings with one curl.
+
+    Public, so it carries yes/no answers and non-secret names only. Never a
+    key, token or secret value.
+    """
+    import os
+
+    def _flag(name: str) -> bool:
+        return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+    # Same parsing as finale.py, which is too heavy to import here.
+    try:
+        keyframe_max_edge = int(os.getenv("KEYFRAME_MAX_EDGE", "").strip() or 512)
+    except ValueError:
+        keyframe_max_edge = 512
+    return {
+        "app_env": settings.app_env,
+        "openai_key_set": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "apify_configured": bool(settings.apify_token),
+        "instagram_app_secret_set": bool(settings.instagram_app_secret),
+        "session_secret_default": settings.session_secret.strip() in {"", "change-me-before-launch"},
+        "extraction_model": os.getenv("EXTRACTION_MODEL", "").strip() or "gpt-4.1-mini",
+        "keyframe_max_edge": keyframe_max_edge,
+        "outbound_dm_test": settings.outbound_dm_test,
+        "guest_autocreate_for_everyone": settings.guest_autocreate_for_everyone,
+        "dm_reply_for_everyone": settings.dm_reply_for_everyone,
+        "app_v2_for_everyone": settings.app_v2_for_everyone,
+        "collections_for_everyone": settings.collections_for_everyone,
+        "guest_lock_enabled": settings.guest_lock_enabled,
+        "queue_janitor": os.getenv("QUEUE_JANITOR", "on").strip().lower() != "off",
+    }
+
+
     """Read-only view of the recovery machinery's inputs, for remote triage.
 
     The default (public) view carries only operational vitals safe for an
@@ -71,6 +105,13 @@ def _queue_debug(full: bool = False) -> dict:
     except Exception:
         pass
     if not full:
+    info["config"] = _config_summary()
+    try:
+        from app.services.db_backup import last_backup_at
+
+        info["db_backup_last"] = last_backup_at()
+    except Exception:
+        info["db_backup_last"] = ""
         return info
     try:
         from app.services.jobs import _pid_is_worker, _stale_cutoff_for

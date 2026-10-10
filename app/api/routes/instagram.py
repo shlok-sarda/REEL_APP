@@ -64,7 +64,10 @@ PING_RE = re.compile(r"^\s*ping\s*$", re.IGNORECASE)
 
 def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
     if not settings.instagram_app_secret:
-        return True
+        # Local dev has no secret and must keep working. Production without
+        # one would trust any POST, which with the launch switches on means
+        # free account creation plus paid processing for anyone: fail closed.
+        return not settings.is_production
     expected = "sha256=" + hmac.new(
         settings.instagram_app_secret.encode("utf-8"),
         raw_body,

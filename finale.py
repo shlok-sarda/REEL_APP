@@ -27,17 +27,18 @@ SECONDARY_MODEL = "gpt-4.1"
 # size to fall clearly below that floor, which is why the default is 512.
 # Vision cost 0.69 -> 0.105 per reel. Set KEYFRAME_MAX_EDGE=0 to disable.
 try:
-    KEYFRAME_MAX_EDGE = int(os.getenv("KEYFRAME_MAX_EDGE", "").strip() or 0)
+    KEYFRAME_MAX_EDGE = int(os.getenv("KEYFRAME_MAX_EDGE", "").strip() or 512)
 except ValueError:
-    KEYFRAME_MAX_EDGE = 0
+    KEYFRAME_MAX_EDGE = 512
 
 # Router, branches, judge (pipeline_b_processor) and the product call below all
-# run on this. Default is gpt-4.1 -- today's behaviour, unchanged -- so this
-# deploy is a no-op until the env var is set. Measured on 5 reels through the
-# real pipeline, gpt-4.1 and gpt-4.1-mini produced identical categories (5/5),
-# and across 439 reels mini matched 94% of titles and 89% of summaries at
-# roughly a fifth of the price.
-EXTRACTION_MODEL = (os.getenv("EXTRACTION_MODEL", "").strip() or "gpt-4.1")
+# run on this. The default is the cheap model so a missing env var on the host
+# can never silently triple the per-reel bill (Rs 0.82 vs Rs 2.68). Measured on
+# 5 reels through the real pipeline, gpt-4.1 and gpt-4.1-mini produced identical
+# categories (5/5), and across 439 reels mini matched 94% of titles and 89% of
+# summaries at roughly a fifth of the price. Set EXTRACTION_MODEL=gpt-4.1 to
+# go back.
+EXTRACTION_MODEL = (os.getenv("EXTRACTION_MODEL", "").strip() or "gpt-4.1-mini")
 
 
 # --------------------------------------------------

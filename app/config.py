@@ -35,11 +35,9 @@ class Settings:
     instagram_access_token: str = os.getenv("INSTAGRAM_ACCESS_TOKEN", "").strip()
     instagram_graph_version: str = os.getenv("INSTAGRAM_GRAPH_VERSION", "v25.0").strip()
     # Temporary probe for the outbound DM channel, which has never been used.
-    # DMing the app account the single word PING gets a reply. On by default so
-    # the probe needs no dashboard trip; set OUTBOUND_DM_TEST=0 to kill it
-    # without a deploy. The trigger is a word no real user sends, and a reply
-    # that somehow fired for one would read as a harmless hello.
-    outbound_dm_test: bool = os.getenv("OUTBOUND_DM_TEST", "1").strip().lower() in {"1", "true", "yes", "on"}
+    # DMing the app account the single word PING gets a reply. The channel is
+    # verified now, so the probe is off unless OUTBOUND_DM_TEST=1 is set.
+    outbound_dm_test: bool = os.getenv("OUTBOUND_DM_TEST", "").strip().lower() in {"1", "true", "yes", "on"}
     # Who gets an automatic DM back when a reel saves. Admins always do, so
     # this can be tested without a dashboard trip. Everyone else has to be
     # listed here by email or user id: existing users signed up for a silent
@@ -90,7 +88,7 @@ class Settings:
     # instead of the allowlist. This is a spending decision as much as a
     # product one: each account routes its library once (3 calls per reel) and
     # draws a logo per folder, so the bill scales with signups.
-    collections_for_everyone: bool = os.getenv("COLLECTIONS_FOR_EVERYONE", "").strip() in {"1", "true", "yes", "on"}
+    collections_for_everyone: bool = os.getenv("COLLECTIONS_FOR_EVERYONE", "").strip().lower() in {"1", "true", "yes", "on"}
     # Accounts kept OUT of Collections even during a global rollout, by email
     # or user id. Cheaper and more reversible than deleting an account when the
     # only goal is to stop routing it.
@@ -134,6 +132,10 @@ class Settings:
     processor_script: Path = Path(os.getenv("PROCESSOR_SCRIPT", str(BASE_DIR / "process_shlok_reels.py")))
     worker_script: Path = BASE_DIR / "app" / "workers" / "process_queue.py"
     processor_timeout_seconds: int = int(os.getenv("PROCESSOR_TIMEOUT_SECONDS", "600"))
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() == "production"
 
     @property
     def session_https_only(self) -> bool:
@@ -191,3 +193,8 @@ class Settings:
 
 
 settings = Settings()
+
+# A production boot with the public default secret would let anyone who reads
+# the repo mint a session cookie for any user. Refuse to start instead.
+if settings.is_production and settings.session_secret.strip() in {"", "change-me-before-launch"}:
+    raise RuntimeError("SESSION_SECRET must be set to a long random value when APP_ENV=production")
