@@ -89,6 +89,29 @@ def rebuild_shelves_for(user_id: str) -> None:
         print(f"[collections] shelf rebuild skipped for {user_id}: {exc}")
 
 
+def reel_is_finished(job: dict) -> bool:
+    """True when this job's reel was fully read, whatever the processor's exit
+    says: the row is completed and it has a real (non-failure) item."""
+    if job.get("job_type") != "process_reel":
+        return False
+    try:
+        reel = get_reel_by_id(job["reel_id"])
+        if not reel or reel.get("status") != "completed":
+            return False
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM reel_items WHERE reel_id = ? AND item_name != 'Processing Failed' LIMIT 1",
+                (job["reel_id"],),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
+    fail_job(job["id"], message, claim_token)
+
+
 def process_job(job: dict):
     claim_token = job.get("started_at") or None
     timeout_seconds = job_timeout_seconds(job["job_type"])
@@ -103,6 +126,9 @@ def process_job(job: dict):
     if job["job_type"] == "rebuild_library":
         rebuild_shelves_for(job["user_id"])
 
+    # Set when the processor ended badly (non-zero exit, timeout) AFTER it had
+    # already finished the reel itself. Kept on the job row for diagnosis.
+    late_failure = ""
     try:
         cmd = [
             sys.executable,
@@ -118,20 +144,30 @@ def process_job(job: dict):
             cmd += ["--only-url", reel["url"]]
         result = run_processor(cmd, timeout_seconds)
     except subprocess.TimeoutExpired:
-        fail_job(job["id"], f"Processor timed out after {timeout_seconds}s", claim_token)
-        return
+        late_failure = f"Processor timed out after {timeout_seconds}s"
+        if not reel_is_finished(job):
+            fail_reel_job(job, late_failure, claim_token)
+            return
+        result = None
     except Exception as exc:
         detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-        fail_job(job["id"], f"Worker error: {detail}", claim_token)
+        fail_reel_job(job, f"Worker error: {detail}", claim_token)
         return
 
-    if result.returncode != 0:
+    if result is not None and result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "Processor failed"
-        if is_quota_failure(message):
+        # The reel is read, marked completed and has its items; what crashed is
+        # a whole-library step that runs afterwards. Failing the job here threw
+        # away a finished reel, paid for the extraction again on every retry
+        # and never told the owner their library was ready.
+        if reel_is_finished(job):
+            late_failure = message
+        elif is_quota_failure(message):
             pause_queue_for_quota(job["id"], claim_token)
             return
-        fail_job(job["id"], message, claim_token)
-        return
+        else:
+            fail_reel_job(job, message, claim_token)
+            return
 
     if job["job_type"] == "process_reel":
         reel = get_reel_by_id(job["reel_id"])
@@ -143,7 +179,7 @@ def process_job(job: dict):
             if is_quota_failure(summary):
                 pause_queue_for_quota(job["id"], claim_token)
                 return
-            fail_job(job["id"], summary, claim_token)
+            fail_reel_job(job, summary, claim_token)
             return
 
     try:
@@ -175,7 +211,7 @@ def process_job(job: dict):
         except Exception:
             pass
 
-    complete_job(job["id"], claim_token)
+    complete_job(job["id"], claim_token, note=late_failure)
 
     # Now that the reel has a title and media, tell the owner - this is the
     # first moment their library link would actually show them something.

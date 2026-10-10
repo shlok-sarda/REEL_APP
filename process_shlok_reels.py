@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -260,6 +261,24 @@ def run_step(cmd):
     return result
 
 
+def run_library_step(cmd) -> bool:
+    """Run a whole-library step that is allowed to fail.
+
+    By the time these steps run the reel itself is already read, marked
+    completed and synced. They re-sort the entire library and each one calls
+    OpenAI, so they fail for reasons that have nothing to do with the reel.
+    Letting that raise failed the job, re-billed the extraction on retry and
+    cost the owner their library DM. The failure is printed and the caller
+    falls back to what it already has.
+    """
+    try:
+        run_step(cmd)
+        return True
+    except StepFailure as exc:
+        print(f"[library] {exc}", file=sys.stderr, flush=True)
+        return False
+
+
 def build_file_uri(path_value):
     if not normalize(path_value):
         return ""
@@ -467,6 +486,7 @@ def main(user_id="default", only_urls=None):
         lightweight_rebuild = True
 
     if paths.raw_output.exists():
+        accumulated_fresh = True
         current_rows = load_raw_rows(paths)
         current_rows = normalize_failed_rows(current_rows)
         successful_rows = [
@@ -509,8 +529,7 @@ def main(user_id="default", only_urls=None):
             if paths.folder_items.exists():
                 filter_csv_by_active_urls(paths.folder_items, paths.folder_items, active_url_set)
         else:
-            run_step(
-                [
+            accumulate_from_raw = [
                     sys.executable,
                     BASE_DIR / "list_list_name_accumulation.py",
                     "--input",
@@ -524,23 +543,7 @@ def main(user_id="default", only_urls=None):
                     "--granularity",
                     "0.35",
                 ]
-            )
-
-            run_step(
-                [
-                    sys.executable,
-                    BASE_DIR / "merge_existing_topics.py",
-                    "--input",
-                    paths.accumulated,
-                    "--raw-output",
-                    paths.cleaned_raw,
-                    "--mapping-output",
-                    paths.merge_mapping,
-                ]
-            )
-
-            run_step(
-                [
+            accumulate_from_cleaned = [
                     sys.executable,
                     BASE_DIR / "list_list_name_accumulation.py",
                     "--input",
@@ -554,10 +557,28 @@ def main(user_id="default", only_urls=None):
                     "--granularity",
                     "0.35",
                 ]
-            )
+            accumulated_fresh = run_library_step(accumulate_from_raw)
+            if accumulated_fresh:
+                merged = run_library_step(
+                    [
+                        sys.executable,
+                        BASE_DIR / "merge_existing_topics.py",
+                        "--input",
+                        paths.accumulated,
+                        "--raw-output",
+                        paths.cleaned_raw,
+                        "--mapping-output",
+                        paths.merge_mapping,
+                    ]
+                )
+                if not merged:
+                    # No merge this run: topics keep the names they already have.
+                    shutil.copyfile(paths.accumulated, paths.cleaned_raw)
+                    paths.merge_mapping.write_text("topic,canonical_topic\n", encoding="utf-8")
+                accumulated_fresh = run_library_step(accumulate_from_cleaned)
 
         if personalization_mode() == "hybrid":
-            run_step(
+            run_library_step(
                 [
                     sys.executable,
                     BASE_DIR / "hybrid_personalization.py",
@@ -576,7 +597,7 @@ def main(user_id="default", only_urls=None):
                 ]
             )
         elif personalization_mode() == "semantic":
-            run_step(
+            run_library_step(
                 [
                     sys.executable,
                     BASE_DIR / "semantic_personalization.py",
@@ -595,7 +616,7 @@ def main(user_id="default", only_urls=None):
                 ]
             )
         elif personalization_mode() == "ambitious":
-            run_step(
+            run_library_step(
                 [
                     sys.executable,
                     BASE_DIR / "ambitious_personalization.py",
@@ -614,7 +635,7 @@ def main(user_id="default", only_urls=None):
                 ]
             )
         else:
-            run_step(
+            graph_built = run_library_step(
                 [
                     sys.executable,
                     BASE_DIR / "build_topic_graph.py",
@@ -627,7 +648,7 @@ def main(user_id="default", only_urls=None):
                 ]
             )
 
-            run_step(
+            graph_built and run_library_step(
                 [
                     sys.executable,
                     BASE_DIR / "personalised.py",
@@ -641,10 +662,24 @@ def main(user_id="default", only_urls=None):
             )
 
         title_root = "Shlok Reels" if user_id == "default" else f"Reels · {user_id}"
-        build_standard_page(paths, app_title=title_root)
-        build_personalized_page(paths, app_title=f"{title_root} Personalized")
-        sync_reel_items_from_accumulated(user_id, paths.accumulated)
-        sync_reel_diagnostics_from_accumulated(user_id, paths.accumulated)
+        # Legacy static pages. The live app reads the database, so a page that
+        # cannot be built (a personalization step above failed and left no
+        # view file) must not take the reel down with it.
+        for build_page, page_title in (
+            (build_standard_page, title_root),
+            (build_personalized_page, f"{title_root} Personalized"),
+        ):
+            try:
+                build_page(paths, app_title=page_title)
+            except Exception as exc:
+                print(f"[library] {build_page.__name__} skipped: {exc}", file=sys.stderr, flush=True)
+        # This sync deletes every item of the user and re-inserts from the CSV
+        # it is given. If the accumulation step failed, the accumulated file is
+        # stale or half-written and would drop the reel just processed, so
+        # fall back to the raw output, which always has it.
+        sync_source = paths.accumulated if accumulated_fresh else paths.raw_output
+        sync_reel_items_from_accumulated(user_id, sync_source)
+        sync_reel_diagnostics_from_accumulated(user_id, sync_source)
         try:
             rebuild_deep_search_documents(user_id)
         except Exception:

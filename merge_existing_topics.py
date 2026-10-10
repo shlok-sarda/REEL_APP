@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import re
+import sys
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
@@ -246,7 +247,16 @@ def build_final_lookup(grouped_topics, model):
             if payload["seed_title"] not in seed_to_canonical
         ]
         if missing:
-            raise ValueError(f"Missing canonical topic for umbrella {umbrella_name}: {missing}")
+            # The model sometimes leaves a seed out of its mapping. Raising here
+            # failed the whole reel after extraction had already been paid for
+            # (and the owner never got their library DM). A topic the model did
+            # not merge simply stays its own canonical topic.
+            print(
+                f"[merge] no canonical topic from the model for umbrella {umbrella_name}: {missing}; keeping them as-is",
+                file=sys.stderr,
+            )
+            for seed_title in missing:
+                seed_to_canonical[seed_title] = seed_title
 
         for alias, seed_signature in alias_to_seed.items():
             seed_title = merged_topics[seed_signature]["seed_title"]
@@ -281,8 +291,14 @@ def write_cleaned_raw_csv(output_path, rows, final_lookup):
         cleaned_row["Folder"] = canonical
         cleaned_rows.append(cleaned_row)
 
+    # Rows written by different pipeline versions carry different columns;
+    # DictWriter raises on a key it was not told about, so take the union.
+    for row in cleaned_rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with open(output_path, "w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(cleaned_rows)
 

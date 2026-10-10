@@ -168,15 +168,17 @@ def write_mapping_csv(output_csv, folder_data, lookup):
 
 
 def write_enriched_csv(output_csv, rows, lookup):
-    if rows:
-        existing = list(rows[0].keys())
-        preferred = ["Primary Category", "Secondary Category", "Umbrella Folder"]
-        fieldnames = preferred + [key for key in existing if key not in preferred]
-    else:
-        fieldnames = ["Primary Category", "Secondary Category", "Umbrella Folder"]
+    preferred = ["Primary Category", "Secondary Category", "Umbrella Folder"]
+    # Union of every row's keys: rows from different pipeline versions carry
+    # different columns and DictWriter raises on one it was not told about.
+    fieldnames = list(preferred)
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
 
     with open(output_csv, "w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
 
         for row in rows:

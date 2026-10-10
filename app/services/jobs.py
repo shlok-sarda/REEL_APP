@@ -328,13 +328,16 @@ def claim_next_job() -> dict | None:
     return dict(updated)
 
 
-def complete_job(job_id: int, claim_started_at: str | None = None) -> None:
+def complete_job(job_id: int, claim_started_at: str | None = None, note: str = "") -> None:
+    """Mark the job done. `note` records a failure that happened after the
+    reel itself was finished, so it stays visible without failing the job."""
     query = """
         UPDATE processing_jobs
-        SET status = 'completed', finished_at = ?
+        SET status = 'completed', finished_at = ?, error_message = ?
         WHERE id = ?
     """
-    params: list = [_now(), job_id]
+    stored_note = f"Completed; a later step failed: {(note or '')[-400:]}" if note else ""
+    params: list = [_now(), stored_note, job_id]
     if claim_started_at:
         # Only finalize our own claim: if the job was requeued and re-claimed
         # after this worker stalled, leave the newer claim alone.
