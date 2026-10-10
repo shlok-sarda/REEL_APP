@@ -107,6 +107,16 @@ def startup_event():
     try:
         from app.services.reel_ingest import purge_failed_reels_once
 
+
+        # Database copy to object storage: once shortly after boot, then
+        # about every 6 hours (144 ticks of 150s).
+        if tick % 144 == 1:
+            try:
+                from app.services.db_backup import backup_database
+
+                print(f"[janitor] database backup: {backup_database()}", flush=True)
+            except Exception as exc:
+                print(f"[janitor] database backup failed: {exc}", flush=True)
         result = purge_failed_reels_once()
         if result.get("ran"):
             print(f"[startup] purged failed reels: {result}")
