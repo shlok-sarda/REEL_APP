@@ -305,7 +305,9 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
         head = f"Here is your library: {link}"
         if title:
             head = f"Saved it as {title}. Here is your library: {link}"
-        return head + " That is 1 of 5. At five reels it starts grouping them for you."
+        # No promise tied to a number: shelves appear when a few reels share
+        # a subject, which five mixed reels may not.
+        return head + " That is 1 of 5. Send a few more and shelves start appearing on your Home."
     if key == "m3_quiet_nudge":
         # The only message aimed at someone who is drifting, so it asks for
         # one specific small thing rather than describing the product.
@@ -314,7 +316,7 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
                 return f"You saved {title} yesterday. Send me one more and I can start grouping them for you."
             return "Send me one more reel and I can start grouping them for you."
         if n < HOME_SCREEN_AT:
-            return f"{n} saved so far. One more gets you to five, which is where it starts sorting itself."
+            return f"{n} saved so far. A few more and it sorts them onto shelves for you."
         return f"Still here whenever you find something worth keeping. Your library: {link}"
     if key == "m4_home_screen":
         return f"{n} reels now. Put ClipNest on your home screen so you are not digging through DMs for this link: {link}"
