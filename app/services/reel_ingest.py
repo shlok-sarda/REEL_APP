@@ -27,6 +27,26 @@ def is_valid_instagram_url(url: str) -> bool:
     return bool(INSTAGRAM_URL_RE.match(normalize(url)))
 
 
+_CANONICAL_URL_RE = re.compile(
+    r"^https?://(?:www\.)?instagram\.com/(reel|p)/([A-Za-z0-9_-]+)",
+    re.IGNORECASE,
+)
+
+
+def canonical_reel_url(url: str) -> str:
+    """The same reel always gets the same stored URL.
+
+    Copy link adds a tracking query (?igsh=...) that differs on every share,
+    so the raw URL made each re-send of a reel look like a new one: a new row,
+    a second full extraction, a second bill.
+    """
+    normalized = normalize(url)
+    match = _CANONICAL_URL_RE.match(normalized)
+    if not match:
+        return normalized
+    return f"https://www.instagram.com/{match.group(1).lower()}/{match.group(2)}/"
+
+
 def extract_shortcode(url: str) -> str:
     path_parts = [part for part in urlparse(normalize(url)).path.split("/") if part]
     return path_parts[-1] if path_parts else ""
@@ -198,18 +218,23 @@ def append_reel(url: str, user_id: str = "default", source: str = "telegram") ->
 
 def _append_reel_attempt(url: str, user_id: str = "default", source: str = "telegram") -> dict:
     normalized_user = ensure_user(user_id)
-    normalized_url = normalize(url)
+    normalized_url = canonical_reel_url(url)
     shortcode = extract_shortcode(normalized_url)
     timestamp = datetime.now().isoformat(timespec="seconds")
 
     with get_connection() as connection:
+        # Matching on the shortcode as well finds rows stored before URLs were
+        # canonical (they still carry their ?igsh= query). The row keeps the
+        # URL it was stored with, since the pipeline files are keyed on it.
         existing = connection.execute(
             """
             SELECT id, user_id, url, shortcode, received_at, status, media_status, local_video_path, thumbnail_path
             FROM reels
-            WHERE user_id = ? AND url = ?
+            WHERE user_id = ? AND (url = ? OR (? != '' AND shortcode = ?))
+            ORDER BY (url = ?) DESC, received_at ASC
+            LIMIT 1
             """,
-            (normalized_user, normalized_url),
+            (normalized_user, normalized_url, shortcode, shortcode, normalized_url),
         ).fetchone()
         if existing:
             reel = _normalize_reel_row(dict(existing))

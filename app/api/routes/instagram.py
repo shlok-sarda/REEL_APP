@@ -227,7 +227,8 @@ def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) ->
             continue
         try:
             reel = append_reel(url, user_id=user_id, source="instagram")
-            enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+            if reel.get("status") != "completed":
+                enqueue_reel_job(reel["id"], user_id=reel["user_id"])
             saved += 1
             _log_webhook_event(
                 "reel", sender_id=sender_id, sender_username=sender_username,
@@ -403,8 +404,19 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 trigger = "unreadable_share" if _has_attachment(event) else "plain_message"
                 background.add_task(nudge.fire, user["id"], trigger)
         saved_here = 0
+        already_saved = 0
         for url in urls:
             reel = append_reel(url, user_id=user["id"], source="instagram")
+            if reel.get("status") == "completed":
+                # They sent a reel that is already in their library. Queueing
+                # it again would pay for a second full extraction of the same
+                # video and change nothing they can see.
+                already_saved += 1
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="already_saved", detail=url,
+                )
+                continue
             job = enqueue_reel_job(reel["id"], user_id=reel["user_id"])
             saved_reel_ids.append(reel["id"])
             reels_saved += 1
@@ -421,6 +433,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             # silence on a stranger's first message reads as broken, not as
             # processing. Every later reel waits for its title.
             background.add_task(nudge.fire, user["id"], "reel_saved")
+        elif already_saved and sender_id not in pending_replies:
+            # Nothing new to process, so the answer is their library link.
+            background.add_task(nudge.fire, user["id"], "plain_message")
 
     # Replies are decided in app/services/nudge, not here. This route's job
     # is to record what happened and say so; what the bot says about it is one
