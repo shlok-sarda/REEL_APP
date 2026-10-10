@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.db.database import get_connection
@@ -260,7 +261,14 @@ async def instagram_webhook(
     background: BackgroundTasks,
     x_hub_signature_256: str = Header(default="", alias="X-Hub-Signature-256"),
 ):
+    # Only reading the body happens on the event loop. Handling a delivery
+    # looks up each new sender over the network (up to 8s) and waits on the
+    # database, and on the single loop that froze every page for everyone.
     raw_body = await request.body()
+    return await run_in_threadpool(_handle_delivery, raw_body, x_hub_signature_256, background)
+
+
+def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: BackgroundTasks) -> JSONResponse:
     if not _verify_signature(raw_body, x_hub_signature_256):
         _log_webhook_event("delivery", outcome="rejected", detail="signature verification failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Instagram signature")
