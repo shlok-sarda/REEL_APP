@@ -56,7 +56,12 @@ def build_legal_html(title: str, body_html: str) -> str:
     h1 {{ margin:0 0 14px; font-size:clamp(1.6rem, 6vw, 2.4rem); line-height:1.02; letter-spacing:-.04em; }}
     h2 {{ margin:22px 0 8px; font-size:1.02rem; }}
     p, li {{ color:var(--muted); line-height:1.6; font-size:.95rem; }}
-    a {{ color:var(--accent); }}
+    a {{ color:var(--accent); text-underline-offset:3px; transition:opacity .18s ease; }}
+    a:hover {{ opacity:.82; }}
+    a:active {{ opacity:.64; }}
+    a:focus-visible {{ outline:2px solid var(--accent); outline-offset:3px; border-radius:4px; }}
+    .back-row {{ margin:0 0 18px; font-size:.86rem; }}
+    .back-row a {{ display:inline-block; padding:10px 0; }}
     ul {{ padding-left:18px; }}
   </style>
 </head>
@@ -911,37 +916,47 @@ def build_demo_library_review_html() -> str:
 </html>"""
 
 
+# The mailbox printed on the three legal pages. Meta's reviewer reads these,
+# and a deletion request has to have somewhere to go.
+LEGAL_CONTACT_EMAIL = "shloksarda2804@gmail.com"
+_LEGAL_CONTACT_LINK = f'<a href="mailto:{LEGAL_CONTACT_EMAIL}">{LEGAL_CONTACT_EMAIL}</a>'
+_LEGAL_BACK_LINK = '<p class="back-row"><a href="/">Back to ClipNest</a></p>'
+
+
 def build_privacy_html() -> str:
     return build_legal_html(
         "Reel Organizer Privacy Policy",
-        """
+        f"""
+      {_LEGAL_BACK_LINK}
       <p class="kicker">Privacy Policy</p>
       <h1>Reel Organizer Privacy Policy</h1>
       <p>Reel Organizer helps users collect Instagram reel links they intentionally share and organizes them into a personal library. This page explains what data we store and how we use it.</p>
       <h2>Information We Collect</h2>
       <ul>
-        <li>Google account identity needed to create and maintain your Reel Organizer account.</li>
-        <li>Instagram reel URLs that you choose to send to our connected ingestion channel.</li>
+        <li>The Instagram account ID and username of the account you message us from, so the reels you send land in your own library.</li>
+        <li>Google account identity (name, email address and profile picture), if you choose to sign in with Google.</li>
+        <li>Instagram reel URLs that you choose to send to our Instagram account in a direct message.</li>
         <li>Processed reel metadata such as extracted item names, summaries, categories, transcript availability, visual extraction results, and personalization outputs.</li>
-        <li>Operational metadata such as linked Telegram or Instagram account IDs, processing status, and media file locations required to keep your library working.</li>
+        <li>Operational metadata such as processing status and media file locations required to keep your library working.</li>
       </ul>
       <h2>How We Use Information</h2>
       <ul>
         <li>To ingest the reels you send us and attach them to your account.</li>
         <li>To generate summaries, product extraction, and personalized lists.</li>
+        <li>To reply in the same Instagram chat with the link to your library.</li>
         <li>To troubleshoot failed processing and improve product quality.</li>
       </ul>
       <h2>What We Do Not Do</h2>
       <ul>
-        <li>We do not access arbitrary personal Instagram messages outside the messages you intentionally send to the app’s connected account.</li>
+        <li>We do not access arbitrary personal Instagram messages outside the messages you intentionally send to the app&rsquo;s connected account.</li>
         <li>We do not sell your personal data.</li>
       </ul>
       <h2>Storage and Retention</h2>
       <p>Saved reels, extracted metadata, and generated media assets may be stored as long as needed to operate your library, unless you ask for deletion.</p>
       <h2>Your Choices</h2>
-      <p>You can request deletion of your account-linked data using the instructions on the Data Deletion page.</p>
+      <p>You can request deletion of your account-linked data using the instructions on the <a href="/data-deletion">Data Deletion</a> page.</p>
       <h2>Contact</h2>
-      <p>For privacy questions, contact the app operator using the email configured in the associated Meta app settings.</p>
+      <p>For privacy questions, email {_LEGAL_CONTACT_LINK}.</p>
         """,
     )
 
@@ -949,7 +964,8 @@ def build_privacy_html() -> str:
 def build_terms_html() -> str:
     return build_legal_html(
         "Reel Organizer Terms of Service",
-        """
+        f"""
+      {_LEGAL_BACK_LINK}
       <p class="kicker">Terms of Service</p>
       <h1>Reel Organizer Terms of Service</h1>
       <p>By using Reel Organizer, you agree to use the service only for reels and content you are permitted to share with the app.</p>
@@ -964,20 +980,28 @@ def build_terms_html() -> str:
       <h2>Availability</h2>
       <p>The service may change, improve, or go offline temporarily while features are being developed or maintained.</p>
       <h2>Data and Deletion</h2>
-      <p>You may request deletion of your account-linked data using the instructions on the Data Deletion page.</p>
+      <p>You may request deletion of your account-linked data using the instructions on the <a href="/data-deletion">Data Deletion</a> page. How we handle your data is described in the <a href="/privacy">Privacy Policy</a>.</p>
       <h2>Disclaimer</h2>
       <p>The service is provided on an as-is basis during active product development and beta testing.</p>
+      <h2>Contact</h2>
+      <p>Questions about these terms: {_LEGAL_CONTACT_LINK}.</p>
         """,
     )
 
 
 def build_data_deletion_html() -> str:
+    handle = settings.instagram_app_username or "clipnest.in"
     return build_legal_html(
         "Reel Organizer Data Deletion",
-        """
+        f"""
+      {_LEGAL_BACK_LINK}
       <p class="kicker">Data Deletion</p>
       <h1>Data Deletion Instructions</h1>
-      <p>If you want your Reel Organizer data removed, email the app operator from the email address associated with your Google sign-in and request deletion of your account data.</p>
+      <p>You can have your Reel Organizer data removed in either of two ways. Requests are handled by hand and completed within 7 days.</p>
+      <h2>If You Signed In With Google</h2>
+      <p>Email {_LEGAL_CONTACT_LINK} from the email address associated with your Google sign-in and ask for your account data to be deleted. Include your Instagram username if you also sent reels by direct message.</p>
+      <h2>If You Saved Reels By DM Only</h2>
+      <p>Send the message <strong>delete my data</strong> to <a href="https://ig.me/m/{handle}">@{handle}</a> from that Instagram account. Nothing else is needed, because the request arrives from the account the data belongs to.</p>
       <h2>What Will Be Deleted</h2>
       <ul>
         <li>Your linked account identifiers</li>
@@ -985,13 +1009,8 @@ def build_data_deletion_html() -> str:
         <li>Extracted reel items, summaries, diagnostics, and personalization data</li>
         <li>Associated cached local media generated for your library</li>
       </ul>
-      <h2>What To Include</h2>
-      <ul>
-        <li>Your Google account email used in the app</li>
-        <li>Your Instagram username if you linked Instagram</li>
-        <li>Your Telegram username if you linked Telegram</li>
-      </ul>
-      <p>Deletion requests are handled manually during the current beta phase.</p>
+      <h2>Contact</h2>
+      <p>If a request has not been completed within 7 days, email {_LEGAL_CONTACT_LINK}.</p>
         """,
     )
 
