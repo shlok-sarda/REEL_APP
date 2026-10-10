@@ -17,9 +17,11 @@ from app.services.jobs import (
     create_worker_lock,
     fail_job,
     is_quota_failure,
+    is_rate_limited,
     job_timeout_seconds,
     pause_queue_for_quota,
     release_worker_lock,
+    retry_after_rate_limit,
 )
 from app.services.reel_ingest import get_reel_by_id
 
@@ -176,6 +178,9 @@ def process_job(job: dict):
         elif is_quota_failure(message):
             pause_queue_for_quota(job["id"], claim_token)
             return
+        elif is_rate_limited(message):
+            retry_after_rate_limit(job["id"], claim_token)
+            return
         else:
             fail_reel_job(job, message, claim_token)
             return
@@ -189,6 +194,9 @@ def process_job(job: dict):
             summary = failure_summary_for_reel(job["reel_id"])
             if is_quota_failure(summary):
                 pause_queue_for_quota(job["id"], claim_token)
+                return
+            if is_rate_limited(summary):
+                retry_after_rate_limit(job["id"], claim_token)
                 return
             fail_reel_job(job, summary, claim_token)
             return

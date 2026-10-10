@@ -30,19 +30,36 @@ WORKER_WEDGE_SECONDS = MAX_SINGLE_REEL_SECONDS + STALE_RUNNING_GRACE_SECONDS
 OPENAI_PAUSE_FLAG = "openai_pause_until"
 OPENAI_PAUSE_MINUTES = 15
 
+# Out of credits: nothing will work until the account is topped up, so the
+# whole queue parks for OPENAI_PAUSE_MINUTES.
 _QUOTA_ERROR_SIGNATURES = (
     "insufficient_quota",
     "processing is paused",
+    "exceeded your current quota",
+    "check your plan and billing",
+)
+
+# A momentary rate limit is a different thing: it clears in seconds. Treating
+# it like an empty balance made one busy minute cost every user 15 minutes.
+_RATE_LIMIT_SIGNATURES = (
     "ratelimiterror",
     "rate_limit",
     "rate limit",
     "429",
 )
+RATE_LIMIT_RETRY_SECONDS = 60
 
 
 def is_quota_failure(message: str) -> bool:
     text = (message or "").lower()
     return any(signature in text for signature in _QUOTA_ERROR_SIGNATURES)
+
+
+def is_rate_limited(message: str) -> bool:
+    """A transient 429. Check is_quota_failure first: an empty balance also
+    arrives as a 429 and must take the long pause."""
+    text = (message or "").lower()
+    return any(signature in text for signature in _RATE_LIMIT_SIGNATURES)
 
 
 def openai_pause_until() -> str:
@@ -90,6 +107,43 @@ def pause_queue_for_quota(job_id: int, claim_started_at: str | None = None) -> s
     return until
 
 
+def retry_after_rate_limit(job_id: int, claim_started_at: str | None = None) -> str:
+    """Put the job back and hold claims for a minute.
+
+    Unlike the quota pause this keeps the attempt it used, so a reel that is
+    rate limited every time still ends (as failed, after the usual three
+    tries) instead of looping forever.
+    """
+    until = (datetime.now() + timedelta(seconds=RATE_LIMIT_RETRY_SECONDS)).isoformat(
+        timespec="seconds"
+    )
+    with get_connection() as connection:
+        query = """
+            UPDATE processing_jobs
+            SET status = 'pending',
+                started_at = '',
+                error_message = 'Rate limited by OpenAI, retrying shortly'
+            WHERE id = ?
+        """
+        params: list = [job_id]
+        if claim_started_at:
+            query += " AND status = 'running' AND started_at = ?"
+            params.append(claim_started_at)
+        connection.execute(query, params)
+        current = connection.execute(
+            "SELECT executed_at FROM maintenance_flags WHERE flag = ? LIMIT 1",
+            (OPENAI_PAUSE_FLAG,),
+        ).fetchone()
+        # Never shorten a longer pause that is already in force.
+        if not current or (current["executed_at"] or "") < until:
+            connection.execute(
+                "INSERT OR REPLACE INTO maintenance_flags (flag, executed_at) VALUES (?, ?)",
+                (OPENAI_PAUSE_FLAG, until),
+            )
+    print(f"[jobs] OpenAI rate limit, retrying job {job_id} after {until}", flush=True)
+    return until
+
+
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -105,12 +159,40 @@ def _stale_cutoff_for(job_type: str) -> str:
     return (datetime.now() - timedelta(seconds=grace)).isoformat(timespec="seconds")
 
 
+# Owners of reel jobs that just ran out of attempts. Filled inside the cleanup
+# transaction, drained by notify_exhausted_owners() once it has committed: the
+# DM writes to the database itself and would deadlock against the open write.
+_EXHAUSTED_OWNERS: list[str] = []
+
+
+def notify_exhausted_owners() -> None:
+    """Tell each owner their reel could not be read. Never raises."""
+    owners = list(dict.fromkeys(_EXHAUSTED_OWNERS))
+    _EXHAUSTED_OWNERS.clear()
+    for user_id in owners:
+        try:
+            from app.services import nudge
+
+            nudge.fire(user_id, "reel_failed")
+        except Exception:
+            pass
+
+
 def _fail_exhausted_jobs(connection, status: str, stale_only: bool = False) -> None:
     """Flip jobs of the given status that are out of attempts to 'failed'."""
     for job_type, max_attempts, label in (
         ("process_reel", MAX_PROCESS_REEL_ATTEMPTS, "Reel processing interrupted repeatedly"),
         ("rebuild_library", MAX_REBUILD_ATTEMPTS, "Library rebuild interrupted repeatedly"),
     ):
+        if job_type == "process_reel":
+            owner_query = "SELECT user_id FROM processing_jobs WHERE status = ? AND job_type = ? AND attempts >= ?"
+            owner_params: list = [status, job_type, max_attempts]
+            if stale_only:
+                owner_query += " AND started_at < ?"
+                owner_params.append(_stale_cutoff_for(job_type))
+            _EXHAUSTED_OWNERS.extend(
+                row["user_id"] for row in connection.execute(owner_query, owner_params).fetchall()
+            )
         query = """
             UPDATE processing_jobs
             SET status = 'failed',
@@ -255,34 +337,20 @@ def job_counts(user_id: str | None = None) -> dict:
     }
 
 
-def claim_next_job() -> dict | None:
-    # Self-heal before claiming: requeue orphaned 'running' rows left behind by
-    # a worker that died mid-job, then retire jobs that are out of attempts.
-    # Isolated from the claim itself — a cleanup failure (e.g. legacy schema
-    # constraints) must degrade to a log line, never crash the worker.
-    try:
-        with get_connection() as connection:
-            recover_stale_running_jobs(connection)
-            _fail_exhausted_jobs(connection, "pending")
-    except Exception as exc:
-        print(f"[jobs] pre-claim cleanup failed: {exc}", flush=True)
-    pause = openai_pause_until()
-    if pause and pause > _now():
-        return None
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
-            FROM processing_jobs AS job
-            WHERE status = 'pending'
-            ORDER BY
+# How far back "recently served" looks when senders take turns.
+FAIRNESS_WINDOW_MINUTES = 30
+# Median single-reel run on prod is about two minutes (p50 128s).
+MINUTES_PER_REEL = 2
+
+# The order jobs are claimed in. Takes one parameter: _fairness_cutoff().
+_CLAIM_ORDER_SQL = """
                 CASE
                     WHEN job_type = 'process_reel' THEN 0
                     WHEN job_type = 'rebuild_library' THEN 1
                     ELSE 2
                 END ASC,
                 -- A newcomer's first reel goes ahead of everyone's backlog:
-                -- they were just told "a couple of minutes" and have nothing
+                -- they were just told "a few minutes" and have nothing
                 -- to look at yet. Only one reel per newcomer jumps (their
                 -- oldest pending, and none already running), so a stranger's
                 -- bulk save cannot starve the queue.
@@ -302,9 +370,88 @@ def claim_next_job() -> dict | None:
                     THEN 0
                     ELSE 1
                 END ASC,
+                -- Senders take turns. Whoever has had the fewest reels worked
+                -- on in the last half hour goes next, so one person's bulk
+                -- send of fifty no longer holds everyone else for two hours.
+                -- Someone sending alone is unaffected: it falls through to
+                -- arrival order.
+                (
+                    SELECT COUNT(*) FROM processing_jobs AS recent
+                    WHERE recent.user_id = job.user_id
+                      AND recent.job_type = 'process_reel'
+                      AND recent.status IN ('running', 'completed', 'failed')
+                      AND recent.started_at >= ?
+                ) ASC,
                 id ASC
+"""
+
+
+def _fairness_cutoff() -> str:
+    return (datetime.now() - timedelta(minutes=FAIRNESS_WINDOW_MINUTES)).isoformat(timespec="seconds")
+
+
+def estimated_wait(user_id: str) -> dict:
+    """How long until this person's next reel is likely to be picked up.
+
+    Reads the same ordering the worker claims by, so it is the worker's own
+    answer rather than a guess: reels ahead of theirs (plus the one running),
+    times the median run, plus whatever is left of a queue pause. Returns
+    {"ahead": int, "minutes": int}. Fails open to zero, which keeps the reply
+    at its short default wording.
+    """
+    try:
+        with get_connection() as connection:
+            running = connection.execute(
+                "SELECT COUNT(*) FROM processing_jobs WHERE status = 'running' AND job_type = 'process_reel'"
+            ).fetchone()[0]
+            rows = connection.execute(
+                f"""
+                SELECT user_id FROM processing_jobs AS job
+                WHERE status = 'pending' AND job_type = 'process_reel'
+                ORDER BY {_CLAIM_ORDER_SQL}
+                """,
+                (_fairness_cutoff(),),
+            ).fetchall()
+        owners = [row["user_id"] for row in rows]
+        if user_id not in owners:
+            return {"ahead": 0, "minutes": 0}
+        ahead = int(running) + owners.index(user_id)
+        minutes = ahead * MINUTES_PER_REEL
+        pause = openai_pause_until()
+        if pause and pause > _now():
+            remaining = datetime.fromisoformat(pause) - datetime.now()
+            minutes += max(int(remaining.total_seconds() // 60) + 1, 0)
+        return {"ahead": ahead, "minutes": minutes}
+    except Exception:
+        return {"ahead": 0, "minutes": 0}
+
+
+def claim_next_job() -> dict | None:
+    # Self-heal before claiming: requeue orphaned 'running' rows left behind by
+    # a worker that died mid-job, then retire jobs that are out of attempts.
+    # Isolated from the claim itself — a cleanup failure (e.g. legacy schema
+    # constraints) must degrade to a log line, never crash the worker.
+    try:
+        with get_connection() as connection:
+            recover_stale_running_jobs(connection)
+            _fail_exhausted_jobs(connection, "pending")
+    except Exception as exc:
+        print(f"[jobs] pre-claim cleanup failed: {exc}", flush=True)
+        _EXHAUSTED_OWNERS.clear()  # rolled back: nothing actually failed
+    notify_exhausted_owners()
+    pause = openai_pause_until()
+    if pause and pause > _now():
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            f"""
+            SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
+            FROM processing_jobs AS job
+            WHERE status = 'pending'
+            ORDER BY {_CLAIM_ORDER_SQL}
             LIMIT 1
             """,
+            (_fairness_cutoff(),),
         ).fetchone()
         if not row:
             return None
@@ -511,6 +658,7 @@ def recover_orphaned_jobs() -> int:
                 """
             )
             recovered += cursor.rowcount
+    notify_exhausted_owners()
     # Reel reconciliation runs in its OWN transaction: get_connection() rolls
     # back the whole block on any exception, and a reconcile failure (e.g.
     # schema drift on the reels table) must never undo the job recovery above.

@@ -288,7 +288,19 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
     n = user["reel_count"]
 
     if key == "m1_first_ack":
-        return "Thank you for saving a reel with me. It is processing now, give me a couple of minutes."
+        # Honest about the line. One worker reads one reel at a time, so on a
+        # busy night "a few minutes" would be a promise broken for most people
+        # who hear it. With nothing much ahead, the short line is true.
+        from app.services.jobs import estimated_wait
+
+        wait = estimated_wait(user["id"])
+        if wait["ahead"] > 1:
+            minutes = max(5, -(-wait["minutes"] // 5) * 5)
+            return (
+                "Thank you for saving a reel with me. A few reels are ahead of yours, "
+                f"so it will take about {minutes} minutes. I will message you the moment it is ready."
+            )
+        return "Thank you for saving a reel with me. It is processing now, give me a few minutes."
     if key == "m2_first_library":
         head = f"Here is your library: {link}"
         if title:

@@ -986,7 +986,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
     Never call this from a request handler — it talks to OpenAI. It belongs in
     the rebuild_library job.
     """
-    from app.services.jobs import is_quota_failure
+    from app.services.jobs import is_quota_failure, is_rate_limited
 
     ensure_schema()
     rows = _reel_rows(user_id)
@@ -1033,7 +1033,7 @@ def rebuild_user_shelves(user_id: str, max_new_routes: int = 400) -> dict:
             except Exception as exc:
                 message = str(exc)
                 print(f"[collections] route failed for {reel_id}: {message[:200]}")
-                if is_quota_failure(message):
+                if is_quota_failure(message) or is_rate_limited(message):
                     quota_hit = True
                     break
                 continue

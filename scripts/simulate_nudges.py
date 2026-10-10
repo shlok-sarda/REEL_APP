@@ -213,6 +213,30 @@ nudge.fire(uid11, "reel_ready", title=TITLES[0])
 run("They share a story or photo with no reel link in it", "says it did not save, instead of 'here is your library'",
     lambda: nudge.fire(uid11, "unreadable_share"))
 
+# --- 3c. A busy night: the first reply states the real wait ------------------
+def _queue_job(user_id: str, reel_id: str) -> None:
+    now = iso_now()
+    with get_connection() as c:
+        c.execute(
+            "INSERT INTO reels (id,user_id,url,received_at,status,created_at,updated_at) "
+            "VALUES (?,?,?,?, 'pending',?,?)", (reel_id, user_id, reel_id, now, now, now),
+        )
+        c.execute(
+            "INSERT INTO processing_jobs (reel_id,user_id,job_type,status,attempts,error_message,"
+            "created_at,started_at,finished_at) VALUES (?,?, 'process_reel','pending',0,'',?,'','')",
+            (reel_id, user_id, now),
+        )
+
+
+for i in range(12):
+    _queue_job(_fresh_guest(f"busy{i}"), f"busy_reel_{i}")
+uid12 = _fresh_guest("busy_last")
+_queue_job(uid12, "busy_reel_last")
+run("First reel, with 12 other new people's reels ahead of it", "says the real wait (2 minutes a reel, rounded up to 5)",
+    lambda: nudge.fire(uid12, "reel_saved"))
+with get_connection() as c:
+    c.execute("DELETE FROM processing_jobs")
+
 # --- 4. The gates ------------------------------------------------------------
 with get_connection() as c:
     now = iso_now()
