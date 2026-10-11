@@ -56,6 +56,7 @@ def _config_summary() -> dict:
         "app_v2_for_everyone": settings.app_v2_for_everyone,
         "collections_for_everyone": settings.collections_for_everyone,
         "guest_lock_enabled": settings.guest_lock_enabled,
+        "worker_count": settings.worker_count,
         "queue_janitor": os.getenv("QUEUE_JANITOR", "on").strip().lower() != "off",
     }
 

@@ -386,6 +386,29 @@ _CLAIM_ORDER_SQL = """
 """
 
 
+# With more than one worker, a pending job waits while it would collide with
+# one already running: the same person's jobs rewrite the same library files,
+# and two people's copies of one reel share a video file on disk.
+_PARALLEL_GUARD_SQL = """
+              AND NOT EXISTS (
+                SELECT 1 FROM processing_jobs AS busy
+                WHERE busy.status = 'running' AND busy.user_id = job.user_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM processing_jobs AS busy
+                JOIN reels AS busy_reel ON busy_reel.id = busy.reel_id
+                JOIN reels AS mine ON mine.id = job.reel_id
+                WHERE busy.status = 'running'
+                  AND (busy_reel.url = mine.url
+                       OR (mine.shortcode != '' AND busy_reel.shortcode = mine.shortcode))
+              )
+"""
+
+
+def _parallel_guard_sql() -> str:
+    return _PARALLEL_GUARD_SQL if settings.worker_count > 1 else ""
+
+
 def _fairness_cutoff() -> str:
     return (datetime.now() - timedelta(minutes=FAIRNESS_WINDOW_MINUTES)).isoformat(timespec="seconds")
 
@@ -416,7 +439,8 @@ def estimated_wait(user_id: str) -> dict:
         if user_id not in owners:
             return {"ahead": 0, "minutes": 0}
         ahead = int(running) + owners.index(user_id)
-        minutes = ahead * MINUTES_PER_REEL
+        # Two workers clear the line twice as fast (rounded up).
+        minutes = -(-ahead * MINUTES_PER_REEL // settings.worker_count)
         pause = openai_pause_until()
         if pause and pause > _now():
             remaining = datetime.fromisoformat(pause) - datetime.now()
@@ -443,11 +467,15 @@ def claim_next_job() -> dict | None:
     if pause and pause > _now():
         return None
     with get_connection() as connection:
+        if settings.worker_count > 1:
+            # Take the write lock before looking, so two workers can never
+            # pick the same job or two jobs that must not overlap.
+            connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
             f"""
             SELECT id, reel_id, user_id, job_type, status, attempts, error_message, created_at, started_at, finished_at
             FROM processing_jobs AS job
-            WHERE status = 'pending'
+            WHERE status = 'pending'{_parallel_guard_sql()}
             ORDER BY {_CLAIM_ORDER_SQL}
             LIMIT 1
             """,
@@ -549,7 +577,13 @@ def _pid_is_worker(pid: int) -> bool:
 
 
 def is_worker_running() -> bool:
-    lock_file = settings.worker_lock_file
+    """True when any worker is alive."""
+    # A list, not a generator: every slot gets its stale-lock cleanup.
+    return any([_slot_is_running(slot) for slot in range(settings.worker_count)])
+
+
+def _slot_is_running(slot: int) -> bool:
+    lock_file = settings.worker_lock_file_for(slot)
     if not lock_file.exists():
         return False
     try:
@@ -591,17 +625,23 @@ def is_worker_running() -> bool:
     return False
 
 
-def start_worker_if_needed() -> bool:
-    if is_worker_running():
-        return False
-
-    # Inherit stdout/stderr so worker + processor output lands in the host's
-    # logs (Render Logs tab) instead of vanishing into DEVNULL.
-    subprocess.Popen(
-        [sys.executable, str(settings.worker_script)],
-        cwd=str(settings.worker_script.parent.parent.parent),
-    )
-    return True
+def start_worker_if_needed(limit: int | None = None) -> bool:
+    """Start a worker in each free slot, at most `limit` of them."""
+    started = 0
+    for slot in range(settings.worker_count):
+        if limit is not None and started >= limit:
+            break
+        if _slot_is_running(slot):
+            continue
+        # Inherit stdout/stderr so worker + processor output lands in the host's
+        # logs (Render Logs tab) instead of vanishing into DEVNULL.
+        subprocess.Popen(
+            [sys.executable, str(settings.worker_script)],
+            cwd=str(settings.worker_script.parent.parent.parent),
+            env={**os.environ, "WORKER_SLOT": str(slot)},
+        )
+        started += 1
+    return started > 0
 
 
 def maybe_spawn_media_repair() -> bool:
@@ -788,9 +828,11 @@ def ensure_background_progress(user_id: str | None = None, throttled: bool = Fal
     except Exception as exc:
         print(f"[jobs] missing-job backfill failed: {exc}", flush=True)
     try:
-        if is_worker_running():
+        if all([_slot_is_running(slot) for slot in range(settings.worker_count)]):
             return
-        query = "SELECT COUNT(*) FROM processing_jobs WHERE status = 'pending'"
+        # With two workers, count only jobs a new worker could actually take,
+        # so one is not started just to find nothing and exit.
+        query = f"SELECT COUNT(*) FROM processing_jobs AS job WHERE status = 'pending'{_parallel_guard_sql()}"
         params = []
         if user_id:
             query += " AND user_id = ?"
@@ -798,15 +840,29 @@ def ensure_background_progress(user_id: str | None = None, throttled: bool = Fal
         with get_connection() as connection:
             pending = connection.execute(query, params).fetchone()[0]
         if pending:
-            start_worker_if_needed()
+            start_worker_if_needed(limit=pending)
     except Exception as exc:
         print(f"[jobs] worker start failed: {exc}", flush=True)
 
 
+def worker_slot() -> int:
+    """Which slot this worker process holds. Set by whoever started it and
+    inherited across the one-job-per-process re-exec."""
+    try:
+        return max(int(os.getenv("WORKER_SLOT", "0").strip() or 0), 0)
+    except ValueError:
+        return 0
+
+
 def create_worker_lock() -> bool:
+    slot = worker_slot()
+    if slot >= settings.worker_count:
+        # WORKER_COUNT was lowered while this chain was running: bow out.
+        return False
+    lock_file = settings.worker_lock_file_for(slot)
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     try:
-        fd = os.open(settings.worker_lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, str(os.getpid()).encode("utf-8"))
         os.close(fd)
         return True
@@ -814,8 +870,8 @@ def create_worker_lock() -> bool:
         # A worker that re-exec'd between jobs keeps its PID: adopt our own lock
         # and refresh its mtime — the heartbeat that proves we aren't wedged.
         try:
-            if int(settings.worker_lock_file.read_text().strip()) == os.getpid():
-                os.utime(settings.worker_lock_file)
+            if int(lock_file.read_text().strip()) == os.getpid():
+                os.utime(lock_file)
                 return True
             return False
         except Exception:
@@ -823,4 +879,4 @@ def create_worker_lock() -> bool:
 
 
 def release_worker_lock() -> None:
-    settings.worker_lock_file.unlink(missing_ok=True)
+    settings.worker_lock_file_for(worker_slot()).unlink(missing_ok=True)

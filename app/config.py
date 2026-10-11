@@ -132,6 +132,13 @@ class Settings:
     processor_script: Path = Path(os.getenv("PROCESSOR_SCRIPT", str(BASE_DIR / "process_shlok_reels.py")))
     worker_script: Path = BASE_DIR / "app" / "workers" / "process_queue.py"
     processor_timeout_seconds: int = int(os.getenv("PROCESSOR_TIMEOUT_SECONDS", "600"))
+    # How many reels are read at once. One until WORKER_COUNT is set. Capped at
+    # two: measured, the site plus one reel peaks near 450 MB, so each extra
+    # worker costs about 365 MB of the instance's memory.
+    try:
+        worker_count: int = min(max(int(os.getenv("WORKER_COUNT", "1").strip() or 1), 1), 2)
+    except ValueError:
+        worker_count: int = 1
 
     @property
     def is_production(self) -> bool:
@@ -190,6 +197,12 @@ class Settings:
     @property
     def worker_lock_file(self) -> Path:
         return self.storage_dir / "job_worker.lock"
+
+    def worker_lock_file_for(self, slot: int = 0) -> Path:
+        # Slot 0 keeps the original file name, so a single worker is unchanged.
+        if slot <= 0:
+            return self.worker_lock_file
+        return self.storage_dir / f"job_worker.{slot}.lock"
 
 
 settings = Settings()
