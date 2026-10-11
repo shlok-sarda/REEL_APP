@@ -54,6 +54,12 @@ class Settings:
     # turning it on changes what happens to a real person's reel, so it is a
     # deliberate switch rather than something that arrives with a deploy.
     guest_lock_enabled: bool = os.getenv("GUEST_LOCK_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    # New reels one account may send in a calendar month. Past it a reel is
+    # not saved or read, and the bot says so once. 0 turns the cap off.
+    try:
+        monthly_reel_cap: int = max(int(os.getenv("MONTHLY_REEL_CAP", "50").strip() or 50), 0)
+    except ValueError:
+        monthly_reel_cap: int = 50
     # Senders who get the full new-user experience: an account created for
     # them on their first DM, and replies. Accepts Instagram usernames or
     # IGSIDs, comma separated, so a test account can be named by handle

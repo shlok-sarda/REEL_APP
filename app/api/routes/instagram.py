@@ -20,7 +20,7 @@ from app.services.instagram_profile import (
 )
 from app.services.instagram_send import send_text
 from app.services import nudge
-from app.services.reel_ingest import append_reel, is_valid_instagram_url
+from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_valid_instagram_url
 
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
@@ -242,6 +242,12 @@ def _handle_needed_now() -> bool:
     return not (settings.guest_autocreate_for_everyone and settings.dm_reply_for_everyone)
 
 
+def _over_cap(user_id: str, url: str) -> bool:
+    """Would saving this use a reel the account no longer has this month?
+    A reel already in the library is not a new one, so it is let through."""
+    return nudge.over_monthly_cap(user_id) and not get_reel_by_url(canonical_reel_url(url), user_id=user_id)
+
+
 def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) -> int:
     """Ingest reels the sender shared before their link completed.
 
@@ -267,6 +273,12 @@ def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) ->
         if not is_valid_instagram_url(url):
             continue
         try:
+            if _over_cap(user_id, url):
+                _log_webhook_event(
+                    "reel", sender_id=sender_id, sender_username=sender_username,
+                    outcome="over_month_cap", detail=url,
+                )
+                continue
             reel = append_reel(url, user_id=user_id, source="instagram")
             if reel.get("status") != "completed":
                 enqueue_reel_job(reel["id"], user_id=reel["user_id"])
@@ -455,6 +467,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             saved_here = 0
             already_saved = 0
             held_here = 0
+            capped_here = 0
             for url in urls:
                 # Checked per reel, not only per message: one message can
                 # carry many links, and checking once let a single text with
@@ -465,6 +478,15 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         outcome="buffered", detail=url,
                     )
                     held_here += 1
+                    continue
+                if _over_cap(user["id"], url):
+                    # Not buffered: a held reel is saved later, and this one
+                    # must not be read or paid for at all.
+                    _log_webhook_event(
+                        "reel", sender_id=sender_id, sender_username=sender_username,
+                        outcome="over_month_cap", detail=url,
+                    )
+                    capped_here += 1
                     continue
                 reel = append_reel(url, user_id=user["id"], source="instagram")
                 if reel.get("status") == "completed":
@@ -495,6 +517,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 _reply_later(nudge.fire, user["id"], "reel_saved")
             if held_here:
                 _reply_later(nudge.fire, user["id"], "reel_held")
+            elif capped_here:
+                _reply_later(nudge.fire, user["id"], "month_cap")
             elif already_saved and not saved_here and sender_id not in pending_replies:
                 # Nothing new to process, so the answer is their library link.
                 _reply_later(nudge.fire, user["id"], "plain_message")

@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -735,6 +736,13 @@ def initialize_database():
     create_tables()
     ensure_default_user()
     import_legacy_reel_csv()
+    # The monthly reel cap counts from the first start that carries it, so
+    # reels people already have never use up their month.
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO maintenance_flags (flag, executed_at) VALUES (?, ?)",
+            ("monthly_reel_cap_live", datetime.now().isoformat(timespec="seconds")),
+        )
 
 
 def main():

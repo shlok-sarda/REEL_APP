@@ -33,6 +33,7 @@ WINDOW_HOURS = 24
 # Highest precedence first. When several messages are eligible at the same
 # moment, one wins and the rest are dropped rather than queued.
 PRECEDENCE = [
+    "m10_month_cap",
     "m6_lock",
     "m5_heads_up",
     "m4_home_screen",
@@ -51,7 +52,14 @@ ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up"
 # a minute or two, so the shared cooldown would swallow exactly the case it
 # exists for: "give me a few minutes", then silence. Measuring it against
 # itself still stops ten bad links producing ten replies.
-SELF_COOLDOWN = {"m9_could_not_read"}
+SELF_COOLDOWN = {"m9_could_not_read", "m10_month_cap"}
+
+# The monthly cap counts only reels received after this flag was first
+# stamped, so nobody's existing library uses up their month on the day the
+# cap arrives.
+MONTH_CAP_FLAG = "monthly_reel_cap_live"
+# The month turns over at midnight in India, where the users are.
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 # There is deliberately no cap on quiet nudges. The 24 hour window already
 # enforces one: a nudge that goes unanswered is followed by the window
@@ -165,6 +173,44 @@ def is_locked(user_id: str) -> bool:
         return False
 
 
+def _month_start() -> datetime:
+    return datetime.now(_IST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def over_monthly_cap(user_id: str) -> bool:
+    """Has this account already saved its reels for the month?
+
+    Applies to everyone, signed in or not: every reel costs money to read.
+    Counted from the reels table, against whichever is later of the 1st of
+    the month and the moment the cap went live.
+    """
+    cap = settings.monthly_reel_cap
+    if cap <= 0:
+        return False
+    try:
+        # Reels are stamped in naive server-local time, so compare in that.
+        month_start = _month_start().astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT executed_at FROM maintenance_flags WHERE flag = ? LIMIT 1", (MONTH_CAP_FLAG,)
+            ).fetchone()
+            if row:
+                live_since = row["executed_at"]
+            else:
+                live_since = datetime.now().isoformat(timespec="seconds")
+                connection.execute(
+                    "INSERT OR IGNORE INTO maintenance_flags (flag, executed_at) VALUES (?, ?)",
+                    (MONTH_CAP_FLAG, live_since),
+                )
+            n = connection.execute(
+                "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND received_at >= ?",
+                (user_id, max(month_start, live_since)),
+            ).fetchone()["n"]
+        return int(n or 0) >= cap
+    except Exception:
+        return False
+
+
 def load_state(user_id: str) -> dict[str, Any] | None:
     """Everything a decision needs, in one read."""
     with get_connection() as connection:
@@ -231,6 +277,12 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     `trigger` is what woke us: reel_saved, reel_ready, reel_failed,
     unreadable_share, plain_message, timer.
     """
+    if trigger == "month_cap":
+        # Said once a month, to signed-in accounts too: without it their
+        # reels would simply stop saving with no word why.
+        last = _parse((user.get("last_sent_at") or {}).get("m10_month_cap") or "")
+        return None if last and last >= _month_start() else "m10_month_cap"
+
     if user["signed_in"]:
         # Converted. The bot already got what it was for.
         return None
@@ -329,6 +381,8 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
     if key == "m9_could_not_read":
         text = "I could not read that one. If it is private, a photo post, or deleted, try another reel."
         return f"{text} Your library: {link}" if link else text
+    if key == "m10_month_cap":
+        return f"You have hit this month's limit of {settings.monthly_reel_cap} reels. It resets on the 1st."
     if key == "m8_recovery":
         return f"Here is your library: {link}"
     return ""
