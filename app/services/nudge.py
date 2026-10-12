@@ -15,12 +15,20 @@ reel ingest and inside the job worker and must never cost someone their reel.
 
 from __future__ import annotations
 
+import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.config import settings
 from app.db.database import get_connection
-from app.services.instagram_send import send_text
+from app.services.instagram_send import (
+    MAX_BUTTON_TITLE_CHARS,
+    send_button_template,
+    send_quick_replies,
+    send_sender_action,
+    send_text,
+)
 
 # Reel counts at which the funnel changes shape. From the rulebook.
 HOME_SCREEN_AT = 5
@@ -34,13 +42,20 @@ WINDOW_HOURS = 24
 # moment, one wins and the rest are dropped rather than queued.
 PRECEDENCE = [
     "m10_month_cap",
+    "m21_delete_ack",
     "m6_lock",
     "m5_heads_up",
     "m4_home_screen",
     "m7_past_lock",
     "m2_first_library",
     "m1_first_ack",
+    "m17_already_saved",
     "m9_could_not_read",
+    "m15_photo_post",
+    "m16_unreadable_share",
+    "m11_how_to_save",
+    "m12_what_it_does",
+    "m13_is_it_free",
     "m8_recovery",
     "m3_quiet_nudge",
 ]
@@ -51,8 +66,54 @@ ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up"
 # last DM of any kind. The failure reply usually follows the first-reel ack by
 # a minute or two, so the shared cooldown would swallow exactly the case it
 # exists for: "give me a few minutes", then silence. Measuring it against
-# itself still stops ten bad links producing ten replies.
-SELF_COOLDOWN = {"m9_could_not_read", "m10_month_cap"}
+# itself still stops ten bad links producing ten replies. The answers to a
+# direct question are here for the same reason: two questions in a row are
+# two questions, and the second must not be eaten by the first answer.
+SELF_COOLDOWN = {
+    "m9_could_not_read",
+    "m10_month_cap",
+    "m11_how_to_save",
+    "m12_what_it_does",
+    "m13_is_it_free",
+    "m15_photo_post",
+    "m16_unreadable_share",
+    "m17_already_saved",
+    "m21_delete_ack",
+}
+
+# Messages that are nothing without the person's own link. With no link to
+# give (PUBLIC_BASE_URL unset) these are skipped rather than sent empty.
+NEEDS_LINK = {"m2_first_library", "m4_home_screen", "m6_lock", "m7_past_lock", "m8_recovery"}
+
+# How long the typing dots show before a message, in seconds. Short for the
+# instant acknowledgement so it still reads as instant, longest for the first
+# library message.
+TYPING_SECONDS = {"m1_first_ack": 1.2, "m2_first_library": 2.0}
+TYPING_SECONDS_DEFAULT = 1.5
+# "Seen" and the dots are decoration. Meta's send endpoint can hang for its
+# full timeout, and this runs inside the reel worker too, so they get a short
+# one of their own and a failure simply skips the pause.
+SENDER_ACTION_TIMEOUT_SECONDS = 6
+
+# Chips offered under an answer to a typed question, so a wrong guess about
+# what they meant costs one tap. Titles are cut at 20 characters by Instagram.
+QUESTION_CHIPS = [
+    {"title": "How do I save a reel", "payload": "ICE_HOW"},
+    {"title": "What does it do", "payload": "ICE_WHAT"},
+    {"title": "Is it free", "payload": "ICE_FREE"},
+]
+HOW_TO_SHARE_CHIP = [{"title": "How to share a reel", "payload": "ICE_HOW"}]
+
+# What woke us, to the answer it gets. The typed_ variants are the same
+# answers with the chips above attached, since a typed question was guessed at.
+ANSWER_FOR = {
+    "ask_how": "m11_how_to_save",
+    "typed_how": "m11_how_to_save",
+    "ask_what": "m12_what_it_does",
+    "typed_what": "m12_what_it_does",
+    "ask_free": "m13_is_it_free",
+    "typed_free": "m13_is_it_free",
+}
 
 # The monthly cap counts only reels received after this flag was first
 # stamped, so nobody's existing library uses up their month on the day the
@@ -234,8 +295,19 @@ def load_state(user_id: str) -> dict[str, Any] | None:
             )
         }
         sent = set(last_sent)
+        completed_count = connection.execute(
+            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND status = 'completed'", (user_id,)
+        ).fetchone()["n"]
+        # Reels waiting behind the sign-in wall live in the webhook log.
+        held_count = connection.execute(
+            "SELECT COUNT(DISTINCT detail) AS n FROM instagram_webhook_events "
+            "WHERE kind = 'reel' AND outcome = 'buffered' AND sender_id = ? AND sender_id != ''",
+            ((row["instagram_user_id"] or "").strip(),),
+        ).fetchone()["n"]
     user = dict(row)
     user["reel_count"] = int(reel_count or 0)
+    user["completed_count"] = int(completed_count or 0)
+    user["held_count"] = int(held_count or 0)
     user["already_sent"] = sent
     user["last_sent_at"] = last_sent
     user["signed_in"] = bool((row["google_sub"] or "").strip())
@@ -249,8 +321,8 @@ def window_open(user: dict[str, Any]) -> bool:
     return _now() - last_in < timedelta(hours=WINDOW_HOURS)
 
 
-def cooldown_clear(user: dict[str, Any], key: str = "") -> bool:
-    if key in SELF_COOLDOWN:
+def cooldown_clear(user: dict[str, Any], key: str = "", direct: bool = False) -> bool:
+    if key in SELF_COOLDOWN or direct:
         last_dm = _parse((user.get("last_sent_at") or {}).get(key) or "")
     else:
         last_dm = _parse(user.get("last_dm_at") or "")
@@ -274,14 +346,21 @@ def library_link(user: dict[str, Any]) -> str:
 def decide(user: dict[str, Any], trigger: str) -> str | None:
     """Which message, if any. Pure: no sends, no writes, no model.
 
-    `trigger` is what woke us: reel_saved, reel_ready, reel_failed,
-    unreadable_share, plain_message, timer.
+    `trigger` is what woke us: reel_saved, reel_ready, reel_failed, reel_held,
+    already_saved, photo_post, unreadable_share, plain_message, ask_how,
+    ask_what, ask_free (and their typed_ variants), delete_request, month_cap,
+    timer.
     """
     if trigger == "month_cap":
         # Said once a month, to signed-in accounts too: without it their
         # reels would simply stop saving with no word why.
         last = _parse((user.get("last_sent_at") or {}).get("m10_month_cap") or "")
         return None if last and last >= _month_start() else "m10_month_cap"
+
+    if trigger == "delete_request":
+        # Signed in or not: the data deletion page promises this message is
+        # enough, to everyone.
+        return "m21_delete_ack"
 
     if user["signed_in"]:
         # Converted. The bot already got what it was for.
@@ -315,13 +394,29 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         elif n >= HOME_SCREEN_AT and "m4_home_screen" not in sent:
             candidates.append("m4_home_screen")
 
-    if trigger in {"reel_failed", "unreadable_share"}:
-        # They were told it is processing (or think they saved something).
-        # Silence here reads as a working save, and the window shuts on it.
+    if trigger == "reel_failed":
+        # They were told it is processing. Silence here reads as a working
+        # save, and the window shuts on it.
         candidates.append("m9_could_not_read")
 
+    if trigger == "unreadable_share":
+        # Not their reel at fault but the way it was shared, so the fix they
+        # are told is different: copy the link.
+        candidates.append("m16_unreadable_share")
+
+    if trigger == "photo_post":
+        candidates.append("m15_photo_post")
+
+    if trigger == "already_saved":
+        candidates.append("m17_already_saved")
+
+    if trigger in ANSWER_FOR:
+        candidates.append(ANSWER_FOR[trigger])
+
     if trigger == "plain_message":
-        candidates.append("m8_recovery")
+        # "Here is your library" to someone who has none yet is a button to
+        # an empty page. They get how to start instead.
+        candidates.append("m8_recovery" if n > 0 else "m11_how_to_save")
 
     if trigger == "timer":
         candidates.append("m3_quiet_nudge")
@@ -333,42 +428,61 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     return None
 
 
-def render(key: str, user: dict[str, Any], title: str = "") -> str:
-    """Static copy, exactly as approved in the rulebook. Also the fallback the
-    validator falls back to once a model is writing these."""
+# Pictographs, dingbats, flags, and the joiners that glue them together.
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF\U0001F1E6-\U0001F1FF←-⇿⌀-⏿"
+    "☀-➿⬀-⯿〰〽㊗㊙️‍⃣]"
+)
+_DASH_RE = re.compile("—|–|\\s-+\\s|--")
+
+
+def copy_problems(text: str) -> list[str]:
+    """Why a piece of bot copy breaks the house rules, or [] when it is fine.
+
+    No long dashes, no hyphen standing in for one, no emoji, no exclamation
+    marks. scripts/simulate_nudges.py fails on any of these, and fire() checks
+    again at send time because a reel title is written by a model, not by us.
+    """
+    problems = []
+    if "—" in text:
+        problems.append("em dash")
+    if "–" in text:
+        problems.append("en dash")
+    if re.search("\\s-+\\s|--", text):
+        problems.append("hyphen used as a dash")
+    if "!" in text:
+        problems.append("exclamation mark")
+    if _EMOJI_RE.search(text):
+        problems.append("emoji")
+    return problems
+
+
+def clean_title(title: str) -> str:
+    """A reel title made safe to quote back inside a sentence of ours."""
+    cleaned = _EMOJI_RE.sub("", title or "")
+    cleaned = _DASH_RE.sub(", ", cleaned).replace("!", "")
+    cleaned = " ".join(cleaned.split()).strip(" .,;:")
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80].rsplit(" ", 1)[0].strip(" .,;:")
+    return cleaned
+
+
+def _legacy_text(key: str, user: dict[str, Any], title: str = "") -> str:
+    """The plain text each message was before the redesign, link pasted in.
+
+    This is what goes out when Instagram refuses a button message, and what
+    everything falls back to with DM_RICH_MESSAGES=0. It worked for every
+    guest before buttons existed, which is the point of keeping it.
+    """
     link = library_link(user)
     n = user["reel_count"]
 
-    if key == "m1_first_ack":
-        # Honest about the line. One worker reads one reel at a time, so on a
-        # busy night "a few minutes" would be a promise broken for most people
-        # who hear it. With nothing much ahead, the short line is true.
-        from app.services.jobs import estimated_wait
-
-        wait = estimated_wait(user["id"])
-        if wait["ahead"] > 1:
-            minutes = max(5, -(-wait["minutes"] // 5) * 5)
-            return (
-                "Thank you for saving a reel with me. A few reels are ahead of yours, "
-                f"so it will take about {minutes} minutes. I will message you the moment it is ready."
-            )
-        return "Thank you for saving a reel with me. It is processing now, give me a few minutes."
     if key == "m2_first_library":
         head = f"Here is your library: {link}"
         if title:
             head = f"Saved it as {title}. Here is your library: {link}"
-        # No promise tied to a number: shelves appear when a few reels share
-        # a subject, which five mixed reels may not.
         return head + " That is 1 of 5. Send a few more and shelves start appearing on your Home."
     if key == "m3_quiet_nudge":
-        # The only message aimed at someone who is drifting, so it asks for
-        # one specific small thing rather than describing the product.
-        if n <= 1:
-            if title:
-                return f"You saved {title} yesterday. Send me one more and I can start grouping them for you."
-            return "Send me one more reel and I can start grouping them for you."
-        if n < HOME_SCREEN_AT:
-            return f"{n} saved so far. A few more and it sorts them onto shelves for you."
         return f"Still here whenever you find something worth keeping. Your library: {link}"
     if key == "m4_home_screen":
         return f"{n} reels now. Put ClipNest on your home screen so you are not digging through DMs for this link: {link}"
@@ -388,10 +502,202 @@ def render(key: str, user: dict[str, Any], title: str = "") -> str:
     return ""
 
 
-def fire(user_id: str, trigger: str, title: str = "") -> str | None:
+def _message(text: str, fallback: str = "", buttons: list | None = None, chips: list | None = None) -> dict[str, Any]:
+    buttons = [b for b in (buttons or []) if b.get("url")]
+    chips = list(chips or [])
+    if buttons:
+        # A button with nowhere to paste its link as text has no fallback
+        # worth sending, so the link rides on the end of the sentence.
+        fallback = fallback or f"{text} Your library: {buttons[0]['url']}"
+        return {"text": text, "format": "button", "buttons": buttons, "quick_replies": [], "fallback_text": fallback}
+    if chips:
+        return {"text": text, "format": "quick_replies", "buttons": [], "quick_replies": chips, "fallback_text": fallback or text}
+    return {"text": text, "format": "text", "buttons": [], "quick_replies": [], "fallback_text": text}
+
+
+def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -> dict[str, Any]:
+    """What to send for a message key: the words, the format, and the plain
+    text to fall back to.
+
+    Returns {"text", "format": "text" | "button" | "quick_replies", "buttons",
+    "quick_replies", "fallback_text"}. Copy is launch_kit/DM_REDESIGN_SPEC.md
+    section 5, verbatim. Static, so it is also what a validator falls back to
+    if a model ever writes these.
+    """
+    link = library_link(user)
+    n = user["reel_count"]
+    title = clean_title(title)
+    legacy = _legacy_text(key, user, title=title)
+
+    def open_library(url: str = link) -> list[dict]:
+        return [{"type": "web_url", "title": "Open my library", "url": url}] if link else []
+
+    def sign_in(label: str) -> list[dict]:
+        return [{"type": "web_url", "title": label, "url": f"{link}?signin=1"}] if link else []
+
+    if key == "m1_first_ack":
+        # Honest about the line. One worker reads one reel at a time, so on a
+        # busy night "a few minutes" would be a promise broken for most people
+        # who hear it. With nothing much ahead, the short line is true.
+        from app.services.jobs import estimated_wait
+
+        wait = estimated_wait(user["id"])
+        if wait["ahead"] > 1:
+            minutes = max(5, -(-wait["minutes"] // 5) * 5)
+            return _message(
+                f"Got it. A few reels are ahead of yours, so this one takes about {minutes} minutes. "
+                "I will message you here the moment it is ready."
+            )
+        # No button: there is nothing to open yet, and a button to an empty
+        # page is worse than none.
+        return _message("Got it. I am watching that reel now. Your library link comes back here in a few minutes.")
+    if key == "m2_first_library":
+        # No promise tied to a number: shelves appear when a few reels share
+        # a subject, which five mixed reels may not.
+        head = f"Saved it as {title}." if title else "Saved your first reel."
+        return _message(
+            f"{head} That is 1 of 5. Send a few more and shelves start appearing on your Home.",
+            legacy, buttons=open_library(),
+        )
+    if key == "m3_quiet_nudge":
+        # The only message aimed at someone who is drifting, so it asks for
+        # one specific small thing rather than describing the product. No
+        # button until there is a library worth opening: the ask is to send.
+        if n <= 1:
+            if title:
+                return _message(f"You saved {title} yesterday. Send me one more and I can start grouping them.")
+            return _message("Send me one more reel and I can start grouping them.")
+        if n < HOME_SCREEN_AT:
+            return _message(f"{n} saved so far. A few more and they sort themselves onto shelves.")
+        return _message("Still here whenever you find something worth keeping.", legacy, buttons=open_library())
+    if key == "m4_home_screen":
+        return _message(
+            f"{n} reels in. Put ClipNest on your home screen so this link is never buried in DMs again.",
+            legacy, buttons=open_library(f"{link}?hs=prompt"),
+        )
+    if key == "m5_heads_up":
+        return _message(
+            f"{n} saved. At {LOCK_AT} I will ask you to sign in with Google, so your library is safe "
+            "if this chat ever disappears. One tap, nothing moves.",
+            legacy, buttons=sign_in("Sign in now"),
+        )
+    if key == "m6_lock":
+        return _message(
+            f"That is {LOCK_AT} reels. Sign in to keep saving. Everything you have stays exactly where it is.",
+            legacy, buttons=sign_in("Sign in to keep them"),
+        )
+    if key == "m7_past_lock":
+        held = int(user.get("held_count") or 0)
+        if held >= 2:
+            return _message(
+                f"Holding {held} reels for you. Sign in and they all save at once.",
+                f"Holding {held} reels for you. Sign in and they all save at once: {link}",
+                buttons=sign_in("Sign in to keep them"),
+            )
+        return _message(
+            "Holding that one for you. Sign in and it saves straight away.",
+            legacy, buttons=sign_in("Sign in to keep them"),
+        )
+    if key == "m8_recovery":
+        return _message(
+            "Here is your library. Share any reel to this chat and I will add it.",
+            legacy, buttons=open_library(),
+        )
+    if key == "m9_could_not_read":
+        text = "I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel."
+        # On a first reel that fails there is nothing to open, so no button.
+        if int(user.get("completed_count") or 0) >= 1:
+            return _message(text, legacy, buttons=open_library())
+        return _message(text)
+    if key == "m10_month_cap":
+        return _message(
+            f"That is this month's {settings.monthly_reel_cap} reels. New reels save again from the 1st. "
+            "Everything already saved is still there.",
+            legacy, buttons=open_library(),
+        )
+    if key == "m11_how_to_save":
+        text = (
+            "Share any reel to this chat. Tap the paper plane under the reel, search clipnest, send. "
+            "I will read it and send your library back in a few minutes."
+        )
+        return _message(text, chips=QUESTION_CHIPS if trigger.startswith("typed_") else None)
+    if key == "m12_what_it_does":
+        text = (
+            "You send me reels, I watch them and file them by what they are actually about. Then you can "
+            'search your own saved reels in plain words, like "cafe in goa" or "that press down exercise".'
+        )
+        if trigger.startswith("typed_"):
+            return _message(text, chips=QUESTION_CHIPS)
+        return _message(text, buttons=open_library() if n > 0 else None)
+    if key == "m13_is_it_free":
+        cap = settings.monthly_reel_cap
+        head = f"Yes. Up to {cap} reels a month, free." if cap > 0 else "Yes, it is free."
+        text = (
+            f"{head} After {LOCK_AT} reels I will ask you to sign in with Google so your library "
+            "is safe even if this chat is lost."
+        )
+        return _message(text, chips=QUESTION_CHIPS if trigger.startswith("typed_") else None)
+    if key == "m15_photo_post":
+        return _message("That is a photo post, not a reel. I only read reels for now.")
+    if key == "m16_unreadable_share":
+        return _message(
+            "I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here.",
+            chips=HOW_TO_SHARE_CHIP,
+        )
+    if key == "m17_already_saved":
+        text = "You already have that one. It is in your library"
+        text = f"{text} as {title}." if title else f"{text}."
+        return _message(text, buttons=open_library())
+    if key == "m21_delete_ack":
+        return _message("Got it. Your data will be deleted within 7 days. You will get a message here when it is done.")
+    return _message("")
+
+
+def _pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _show_typing(igsid: str, key: str) -> None:
+    """ "Seen", then the dots for a second or two, like a person replying.
+    Decoration: if either call fails the message simply goes straight out."""
+    try:
+        if not send_sender_action(igsid, "mark_seen", timeout=SENDER_ACTION_TIMEOUT_SECONDS)["ok"]:
+            return
+        if not send_sender_action(igsid, "typing_on", timeout=SENDER_ACTION_TIMEOUT_SECONDS)["ok"]:
+            return
+        _pause(TYPING_SECONDS.get(key, TYPING_SECONDS_DEFAULT))
+    except Exception:
+        pass
+
+
+def _deliver(igsid: str, key: str, message: dict[str, Any]) -> tuple[dict, bool]:
+    """Send one rendered message. Returns (result, fell_back_to_text).
+
+    A person must never hear nothing because a template was rejected: any
+    failure of the rich form is followed by the plain text one.
+    """
+    if not settings.dm_rich_messages:
+        return send_text(igsid, message["fallback_text"]), False
+    _show_typing(igsid, key)
+    if message["format"] == "button":
+        rich = send_button_template(igsid, message["text"], message["buttons"])
+    elif message["format"] == "quick_replies":
+        rich = send_quick_replies(igsid, message["text"], message["quick_replies"])
+    else:
+        return send_text(igsid, message["text"]), False
+    if rich["ok"]:
+        return rich, False
+    result = send_text(igsid, message["fallback_text"])
+    result = {"ok": result["ok"], "detail": f"{message['format']} refused ({rich['detail']}) :: text {result['detail']}"}
+    return result, True
+
+
+def fire(user_id: str, trigger: str, title: str = "", direct: bool = False) -> str | None:
     """Decide, send, record. Returns the message key actually sent, or None.
 
     The only entry point. Callers say what happened, never what to send.
+    `direct` marks an answer to a tap: it is judged against the last time the
+    same answer went out, so tapping two questions in a row gets two answers.
     """
     try:
         user = load_state(user_id)
@@ -416,15 +722,18 @@ def fire(user_id: str, trigger: str, title: str = "") -> str | None:
         # instantly, M2 fires a few minutes later once processing finishes,
         # and 10 minutes is comfortably inside that gap. This was silently
         # eating M2 for every single guest.
-        if key not in ONCE_EVER and not cooldown_clear(user, key):
+        if key not in ONCE_EVER and not cooldown_clear(user, key, direct=direct):
             log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
             return None
-        text = render(key, user, title=title)
-        if not text or "://" in text and not library_link(user):
+        message = render(key, user, title=title, trigger=trigger)
+        if title and _message_problems(message):
+            # The title is the only part of a message we did not write.
+            message = render(key, user, trigger=trigger)
+        if not message["text"] or (key in NEEDS_LINK and not library_link(user)):
             log_event("nudge", igsid, "skipped", f"{key} produced no usable text")
             return None
 
-        result = send_text(igsid, text)
+        result, fell_back = _deliver(igsid, key, message)
         if result["ok"]:
             now = _iso(_now())
             with get_connection() as connection:
@@ -435,15 +744,25 @@ def fire(user_id: str, trigger: str, title: str = "") -> str | None:
                     "INSERT INTO nudge_log (user_id, message_key, sent_at, detail) VALUES (?, ?, ?, ?)",
                     (user_id, key, now, (title or "")[:120]),
                 )
-        log_event(
-            "nudge", igsid,
-            "sent" if result["ok"] else "send_failed",
-            f"{key} trigger={trigger} :: {result['detail']}",
-        )
+        outcome = "send_failed"
+        if result["ok"]:
+            outcome = "fallback_text" if fell_back else "sent"
+        log_event("nudge", igsid, outcome, f"{key} trigger={trigger} :: {result['detail']}")
         return key if result["ok"] else None
     except Exception as exc:
         log_event("nudge", "", "nudge_crashed", f"{user_id} {trigger} :: {exc}")
         return None
+
+
+def _message_problems(message: dict[str, Any]) -> list[str]:
+    """Every rule a rendered message breaks, labels included."""
+    problems = copy_problems(message.get("text") or "")
+    for item in (message.get("buttons") or []) + (message.get("quick_replies") or []):
+        label = item.get("title") or ""
+        problems += copy_problems(label)
+        if len(label) > MAX_BUTTON_TITLE_CHARS:
+            problems.append(f"label over {MAX_BUTTON_TITLE_CHARS} characters: {label!r}")
+    return problems
 
 
 def due_for_last_call(limit: int = 20) -> list[str]:

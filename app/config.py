@@ -50,6 +50,10 @@ class Settings:
     # Minimum gap between automatic DMs to one person. A batch of reels
     # finishing one after another would otherwise send a message each.
     dm_cooldown_minutes: int = int(os.getenv("DM_COOLDOWN_MINUTES", "10"))
+    # Buttons, reply chips and the typing dots. On unless DM_RICH_MESSAGES=0,
+    # which sends every message as the plain text it was before the redesign:
+    # the way back if a template ever looks wrong on a real phone.
+    dm_rich_messages: bool = os.getenv("DM_RICH_MESSAGES", "1").strip().lower() not in {"0", "false", "no", "off"}
     # Whether hitting the reel wall actually stops new saves. Off by default:
     # turning it on changes what happens to a real person's reel, so it is a
     # deliberate switch rather than something that arrives with a deploy.
