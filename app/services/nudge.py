@@ -405,6 +405,10 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         candidates.append("m16_unreadable_share")
 
     if trigger == "photo_post":
+        # Nothing fires this yet. The plan was to refuse /p/ links up front,
+        # but on production 4 of the 6 /p/ links ever sent were videos that
+        # saved fine, so the link alone does not say "photo". Until there is
+        # a free way to tell, a photo post fails and gets m9, which names it.
         candidates.append("m15_photo_post")
 
     if trigger == "already_saved":
@@ -430,10 +434,12 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
 
 # Pictographs, dingbats, flags, and the joiners that glue them together.
 _EMOJI_RE = re.compile(
-    "[\U0001F000-\U0001FAFF\U0001F1E6-\U0001F1FF←-⇿⌀-⏿"
-    "☀-➿⬀-⯿〰〽㊗㊙️‍⃣]"
+    "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u23FF"
+    "\u2600-\u27BF\u2B00-\u2BFF\u3030\u303D\u3297\u3299\uFE0F\u200D\u20E3]"
 )
-_DASH_RE = re.compile("—|–|\\s-+\\s|--")
+_EM_DASH = "\u2014"
+_EN_DASH = "\u2013"
+_DASH_RE = re.compile(r"\s*(?:" + _EM_DASH + "|" + _EN_DASH + r"|--)\s*|\s+-+\s+")
 
 
 def copy_problems(text: str) -> list[str]:
@@ -444,11 +450,11 @@ def copy_problems(text: str) -> list[str]:
     again at send time because a reel title is written by a model, not by us.
     """
     problems = []
-    if "—" in text:
+    if _EM_DASH in text:
         problems.append("em dash")
-    if "–" in text:
+    if _EN_DASH in text:
         problems.append("en dash")
-    if re.search("\\s-+\\s|--", text):
+    if re.search(r"\s-+\s|--", text):
         problems.append("hyphen used as a dash")
     if "!" in text:
         problems.append("exclamation mark")

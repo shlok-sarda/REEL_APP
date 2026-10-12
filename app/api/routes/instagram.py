@@ -67,11 +67,13 @@ def _log_webhook_event(
             # buffered reels: this table doubles as the holding pen for reels
             # sent before an account existed or past the 20-reel wall, and
             # pruning those would silently lose a reel the person was told
-            # was being held. They become prunable once drained.
+            # was being held. They become prunable once drained. Requests to
+            # delete data are kept for the same reason: each one is a promise
+            # that is acted on by hand, days later, from the health page.
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE outcome != 'buffered'
+                WHERE outcome NOT IN ('buffered', 'delete_requested')
                   AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
                   )
@@ -80,9 +82,122 @@ def _log_webhook_event(
     except Exception as exc:  # pragma: no cover - diagnostics must not crash ingest
         print(f"[instagram] failed to log webhook event: {exc}")
 
+
+def _log_delete_request(sender_id: str, sender_username: str, user_id: str) -> None:
+    """Someone asked for their data to be deleted. Deletion is done by hand
+    within 7 days; this row is the to-do list, shown on the health page."""
+    _log_webhook_event(
+        "delete", sender_id=sender_id, sender_username=sender_username,
+        outcome="delete_requested", detail=user_id,
+    )
+
+
 INSTAGRAM_URL_FINDER = re.compile(r"https?://(?:www\.)?instagram\.com/(?:reel|p)/[A-Za-z0-9_-]+/?(?:\?[^\s]+)?", re.IGNORECASE)
 LINK_CODE_RE = re.compile(r"\bREEL-\d{6}\b", re.IGNORECASE)
 PING_RE = re.compile(r"^\s*ping\s*$", re.IGNORECASE)
+# The data deletion page tells people to send these words.
+DELETE_RE = re.compile(r"\bdelete\s+(?:all\s+)?(?:my\s+(?:clipnest\s+)?(?:data|account)|everything)\b", re.IGNORECASE)
+
+# What a tapped button, chip or ice breaker means. The payload is ours, set
+# where the button was made. Anything not listed here still gets an answer
+# (their library), because a tap that is met with silence reads as broken.
+# DELETE_YES and DELETE_NO are deliberately absent: deletion is done by hand,
+# so no message of ours carries those chips.
+TAP_TRIGGERS = {
+    "ICE_HOW": "ask_how",
+    "ICE_WHAT": "ask_what",
+    "ICE_FREE": "ask_free",
+    "ICE_LIBRARY": "plain_message",
+    "MENU_LIBRARY": "plain_message",
+    "MENU_DELETE": "delete_request",
+}
+# Ice breakers typed into Instagram's own dashboard may arrive with no payload
+# of ours, or as an ordinary message, so the question itself is matched too.
+ICE_BREAKER_QUESTIONS = {
+    "how do i save a reel here": "ask_how",
+    "how do i save a reel": "ask_how",
+    "how to share a reel": "ask_how",
+    "what does clipnest do": "ask_what",
+    "what does it do": "ask_what",
+    "is it free": "ask_free",
+    "where is my library": "plain_message",
+}
+_QUESTION_STARTS = {"how", "what", "why", "where", "can", "does", "do", "is"}
+_FREE_WORDS = re.compile(r"\b(?:free|cost|costs|price|paid|pay|charge|charges|money)\b")
+_LIBRARY_WORDS = re.compile(r"\b(?:library|link|my reels|my saved)\b")
+_SAVE_WORDS = re.compile(r"\b(?:save|saved|saving|send|share|sharing|add|reel|reels)\b")
+
+
+def _plain_words(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split())
+
+
+def _tap(message_event: dict) -> tuple[bool, str, str]:
+    """(was it a tap, payload, title) for a button, ice breaker, menu item or
+    quick reply chip. A typed message is (False, "", "")."""
+    postback = message_event.get("postback")
+    if isinstance(postback, dict):
+        return True, str(postback.get("payload") or "").strip(), str(postback.get("title") or "").strip()
+    message = message_event.get("message")
+    quick_reply = message.get("quick_reply") if isinstance(message, dict) else None
+    if isinstance(quick_reply, dict):
+        return True, str(quick_reply.get("payload") or "").strip(), str(message.get("text") or "").strip()
+    return False, "", ""
+
+
+def _trigger_for_tap(payload: str, title: str) -> str:
+    trigger = TAP_TRIGGERS.get((payload or "").strip().upper())
+    if trigger:
+        return trigger
+    return ICE_BREAKER_QUESTIONS.get(_plain_words(title), "plain_message")
+
+
+def _typed_text(message_event: dict) -> str:
+    message = message_event.get("message")
+    text = message.get("text") if isinstance(message, dict) else ""
+    return text if isinstance(text, str) else ""
+
+
+def _trigger_for_text(text: str) -> str:
+    """What a typed message with no reel in it is asking for.
+
+    Keyword matching only: no model is called, so this costs nothing and can
+    only ever choose between replies that are already written.
+    """
+    if DELETE_RE.search(text or ""):
+        return "delete_request"
+    words = _plain_words(text)
+    if words in ICE_BREAKER_QUESTIONS:
+        return ICE_BREAKER_QUESTIONS[words]
+    first = words.split(" ", 1)[0] if words else ""
+    if not ((text or "").strip().endswith("?") or first in _QUESTION_STARTS):
+        return "plain_message"
+    if _FREE_WORDS.search(words):
+        return "typed_free"
+    if _LIBRARY_WORDS.search(words):
+        return "plain_message"
+    if _SAVE_WORDS.search(words):
+        return "typed_how"
+    return "typed_what"
+
+
+def _only_a_reaction(message_event: dict) -> bool:
+    """A heart on one of our messages, or a read receipt. Not a message."""
+    if isinstance(message_event.get("message"), dict) or isinstance(message_event.get("postback"), dict):
+        return False
+    return isinstance(message_event.get("reaction"), dict) or isinstance(message_event.get("read"), dict)
+
+
+def _saved_title(reel_id: str) -> str:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT item_name FROM reel_items WHERE reel_id = ? AND item_name != '' ORDER BY id ASC LIMIT 1",
+                (reel_id,),
+            ).fetchone()
+        return row["item_name"] if row else ""
+    except Exception:
+        return ""
 
 
 def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
@@ -107,7 +222,10 @@ def _iter_message_events(payload: Any):
         current = stack.pop()
         if isinstance(current, dict):
             if isinstance(current.get("sender"), dict) and (
-                isinstance(current.get("message"), dict) or isinstance(current.get("postback"), dict)
+                isinstance(current.get("message"), dict)
+                or isinstance(current.get("postback"), dict)
+                or isinstance(current.get("reaction"), dict)
+                or isinstance(current.get("read"), dict)
             ):
                 # Skip echoes. When the app account sends a DM, Instagram
                 # delivers a copy back with the business account as `sender`,
@@ -369,12 +487,31 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 _log_webhook_event("event", outcome="ignored", detail="no sender id in event")
                 continue
 
+            if _only_a_reaction(event):
+                # Never answered, and not counted as them writing to us: a
+                # heart on a bot message must not earn "Here is your library".
+                ignored_events += 1
+                _log_webhook_event(
+                    "event", sender_id=sender_id, sender_username=sender_username,
+                    outcome="ignored_reaction",
+                )
+                continue
+
             if settings.outbound_dm_test and _is_ping(event):
                 _reply_later(_send_ping_reply, sender_id, sender_username)
                 continue
 
             # The 24h window and the last-call timer both hang off this.
             nudge.record_inbound(sender_id)
+
+            tapped, tap_payload, tap_title = _tap(event)
+            if tapped:
+                # Counted per payload: the only direct measure of whether
+                # anyone taps what the bot sends.
+                _log_webhook_event(
+                    "tap", sender_id=sender_id, sender_username=sender_username,
+                    outcome=f"tap:{tap_payload or 'none'}"[:80], detail=tap_title[:200],
+                )
 
             link_code = _extract_link_code(event)
             if link_code:
@@ -435,6 +572,16 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 ignored_events += 1
                 continue
 
+            if tapped:
+                # A tap is a direct question and always gets its answer. It
+                # must never fall through to the reel branches below, where
+                # it would be read as a message with no reel in it.
+                trigger = _trigger_for_tap(tap_payload, tap_title)
+                if trigger == "delete_request":
+                    _log_delete_request(sender_id, sender_username, user["id"])
+                _reply_later(nudge.fire, user["id"], trigger, "", True)
+                continue
+
             # The wall. Hold the reel rather than process it, and rather than
             # reject it: signing in then saves everything waiting in one go.
             if nudge.is_locked(user["id"]):
@@ -461,13 +608,18 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # their library. A share we could not read a reel out of (story
                 # mention, photo, a video with no permalink) is different: "here
                 # is your library" tells them it saved, so say that it did not.
-                if sender_id not in pending_replies:
-                    trigger = "unreadable_share" if _has_attachment(event) else "plain_message"
+                trigger = "unreadable_share" if _has_attachment(event) else _trigger_for_text(_typed_text(event))
+                if trigger == "delete_request":
+                    # Recorded and answered whatever else is in this delivery.
+                    _log_delete_request(sender_id, sender_username, user["id"])
+                    _reply_later(nudge.fire, user["id"], trigger)
+                elif sender_id not in pending_replies:
                     _reply_later(nudge.fire, user["id"], trigger)
             saved_here = 0
             already_saved = 0
             held_here = 0
             capped_here = 0
+            already_title = ""
             for url in urls:
                 # Checked per reel, not only per message: one message can
                 # carry many links, and checking once let a single text with
@@ -494,6 +646,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     # it again would pay for a second full extraction of the same
                     # video and change nothing they can see.
                     already_saved += 1
+                    already_title = _saved_title(reel["id"])
                     _log_webhook_event(
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="already_saved", detail=url,
@@ -520,8 +673,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             elif capped_here:
                 _reply_later(nudge.fire, user["id"], "month_cap")
             elif already_saved and not saved_here and sender_id not in pending_replies:
-                # Nothing new to process, so the answer is their library link.
-                _reply_later(nudge.fire, user["id"], "plain_message")
+                # Nothing new to process. Say so, with the name it was saved
+                # under, rather than a library link that tells them nothing.
+                _reply_later(nudge.fire, user["id"], "already_saved", already_title)
         except Exception as exc:
             # One message that cannot be handled must not cost the others in
             # the same delivery. It is recorded, and the delivery is answered

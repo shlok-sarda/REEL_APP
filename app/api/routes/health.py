@@ -363,6 +363,32 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
         ]
     except Exception as exc:
         out["events_error"] = str(exc)[:200]
+    # People who sent "delete my data". Nothing deletes automatically: each
+    # row here is owed a deletion by hand within 7 days of "at".
+    try:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT MIN(received_at) AS first_at, COUNT(*) AS times, sender_id,
+                       MAX(sender_username) AS username, detail AS user_id
+                FROM instagram_webhook_events
+                WHERE outcome = 'delete_requested'
+                GROUP BY sender_id, detail
+                ORDER BY first_at ASC
+                """
+            ).fetchall()
+        out["delete_requests"] = [
+            {
+                "at": r["first_at"],
+                "times_asked": int(r["times"] or 0),
+                "user_id": r["user_id"],
+                "username": r["username"],
+                "sender": r["sender_id"],
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        out["delete_requests_error"] = str(exc)[:200]
     return out
 
 
