@@ -4,8 +4,13 @@ print what actually gets sent.
 This exists so a change can be verified in seconds against a throwaway
 database instead of by waiting real hours or burning a real Instagram
 account. It calls app.services.nudge.fire() - the exact function production
-calls - with send_text replaced by a recorder, so what you see here is
-provably what the live code would do, not a description of intent.
+calls - with the Instagram send calls replaced by recorders, so what you see
+here is provably what the live code would do, not a description of intent.
+
+It is also the copy check. The run fails (exit code 1) if any message breaks
+the house rules (a long dash, a hyphen used as one, an emoji, an exclamation
+mark), if any button or chip label is over 20 characters, or if any message
+the code can send never appeared in a scenario.
 
 Usage:
     QUEUE_JANITOR=off python3 scripts/simulate_nudges.py
@@ -40,15 +45,45 @@ from app.services.auth import create_guest_user, iso_now  # noqa: E402
 
 initialize_database()
 
-SENT: list[str] = []
+SENT: list[dict] = []
+ACTIONS: list[str] = []  # "seen", typing dots and pauses, in the order they happened
+REFUSE_TEMPLATES = False  # flipped on to act out Instagram rejecting a button message
 
 
-def _record(igsid: str, text: str) -> dict:
-    SENT.append(text)
+def _record_text(igsid: str, text: str) -> dict:
+    SENT.append({"format": "text", "text": text, "labels": [], "before": list(ACTIONS)})
+    ACTIONS.clear()
     return {"ok": True, "detail": "simulated"}
 
 
-nudge.send_text = _record  # the only thing faked: the actual Graph call
+def _record_buttons(igsid: str, text: str, buttons: list) -> dict:
+    if REFUSE_TEMPLATES:
+        return {"ok": False, "detail": "http_400: simulated refusal"}
+    SENT.append({"format": "button", "text": text, "labels": [b["title"] for b in buttons],
+                 "urls": [b.get("url", "") for b in buttons], "before": list(ACTIONS)})
+    ACTIONS.clear()
+    return {"ok": True, "detail": "simulated"}
+
+
+def _record_chips(igsid: str, text: str, replies: list) -> dict:
+    if REFUSE_TEMPLATES:
+        return {"ok": False, "detail": "http_400: simulated refusal"}
+    SENT.append({"format": "quick_replies", "text": text, "labels": [r["title"] for r in replies], "before": list(ACTIONS)})
+    ACTIONS.clear()
+    return {"ok": True, "detail": "simulated"}
+
+
+def _record_action(igsid: str, action: str, timeout: float = 0) -> dict:
+    ACTIONS.append(action)
+    return {"ok": True, "detail": "simulated"}
+
+
+# The only things faked: the actual Graph calls, and the wait for the dots.
+nudge.send_text = _record_text
+nudge.send_button_template = _record_buttons
+nudge.send_quick_replies = _record_chips
+nudge.send_sender_action = _record_action
+nudge._pause = lambda seconds: ACTIONS.append(f"pause {seconds}s")
 
 TITLES = [
     "Triceps Press Down", "Banaras Cafe", "Goa Hostel", "AI Video Editing",
@@ -95,13 +130,27 @@ def _fresh_guest(tag: str) -> str:
     return u["id"]
 
 
+def _fresh_guest_with_reel(tag: str) -> str:
+    user_id = _fresh_guest(tag)
+    _add_reel(user_id, 1, TITLES[0])
+    return user_id
+
+
 ROWS: list[tuple[str, str, str]] = []  # (situation, condition, reply)
+
+
+def _show(message: dict) -> str:
+    """One sent message as a person would see it: [a button], (a chip)."""
+    shown = message["text"]
+    for label in message["labels"]:
+        shown += f" [{label}]" if message["format"] == "button" else f" ({label})"
+    return shown
 
 
 def run(situation: str, condition: str, fn) -> None:
     before = len(SENT)
     fn()
-    reply = SENT[-1] if len(SENT) > before else "(nothing sent)"
+    reply = _show(SENT[-1]) if len(SENT) > before else "(nothing sent)"
     ROWS.append((situation, condition, reply))
 
 
@@ -279,6 +328,126 @@ run("A second reel is held seconds after the lock fires", "repeatable M7 respect
     lambda: nudge.fire(uid9, "reel_held"))
 
 
+# --- 5. Questions, taps and the new replies ----------------------------------
+uid13 = _fresh_guest("asker_new")
+run("Brand new chat: taps 'How do I save a reel here?'", "ice breaker, nothing saved yet",
+    lambda: nudge.fire(uid13, "ask_how", direct=True))
+run("Then taps 'What does ClipNest do?' straight after", "two questions in a row get two answers",
+    lambda: nudge.fire(uid13, "ask_what", direct=True))
+run("Then taps 'Is it free?'", "third answer, still not eaten by the cooldown",
+    lambda: nudge.fire(uid13, "ask_free", direct=True))
+run("Then taps 'Is it free?' again", "the same answer twice in ten minutes: silent",
+    lambda: nudge.fire(uid13, "ask_free", direct=True))
+run("Someone else's first tap is 'Where is my library?'", "no library yet, so they get how to start",
+    lambda: nudge.fire(_fresh_guest("asker_no_library"), "plain_message", direct=True))
+
+uid14 = _fresh_guest("asker_typed")
+_add_reel(uid14, 1, TITLES[0])
+run("Types 'how do i add one?'", "a typed question is a guess, so chips offer the other answers",
+    lambda: nudge.fire(uid14, "typed_how"))
+_clear_cooldown(uid14)
+run("Types 'what is this?'", "typed question, already has a library",
+    lambda: nudge.fire(uid14, "typed_what"))
+_clear_cooldown(uid14)
+run("Types 'does it cost anything?'", "typed question about price",
+    lambda: nudge.fire(uid14, "typed_free"))
+run("Taps 'What does ClipNest do?' with a library", "tapped, so the answer carries their library button",
+    lambda: nudge.fire(_fresh_guest_with_reel("asker_tap"), "ask_what", direct=True))
+
+uid15 = _fresh_guest("dupe")
+_add_reel(uid15, 1, TITLES[0])
+run("Sends a reel they already saved", "nothing queued or paid for; names it",
+    lambda: nudge.fire(uid15, "already_saved", title=TITLES[0]))
+uid15b = _fresh_guest("dupe_untitled")
+_add_reel(uid15b, 1, "")
+run("Sends a reel they already saved, which has no title", "same reply without a name",
+    lambda: nudge.fire(uid15b, "already_saved"))
+
+uid16 = _fresh_guest("photo")
+run("A photo post reply (written, but nothing sends it yet)", "kept unwired: most /p/ links on production were real videos",
+    lambda: nudge.fire(uid16, "photo_post"))
+
+uid17 = _fresh_guest("fail_with_library")
+_add_reel(uid17, 1, TITLES[0])
+nudge.fire(uid17, "reel_ready", title=TITLES[0])
+run("A later reel fails, and they already have a library", "the failure reply carries the library button",
+    lambda: nudge.fire(uid17, "reel_failed"))
+
+uid18 = _fresh_guest("delete_guest")
+_add_reel(uid18, 1, TITLES[0])
+run("Types 'delete my data'", "acknowledged only; the deleting is done by hand from the health page",
+    lambda: nudge.fire(uid18, "delete_request"))
+uid19 = _fresh_guest("delete_signed_in")
+_stamp(uid19, google_sub="g_signed_in_456")
+run("A signed in user types 'delete my data'", "the one question a signed in user is always answered on",
+    lambda: nudge.fire(uid19, "delete_request"))
+run("A signed in user types 'hi'", "signed in: silent, as before",
+    lambda: nudge.fire(uid19, "plain_message"))
+
+uid20 = _fresh_guest("cap")
+_add_reel(uid20, 1, TITLES[0])
+run("Their 51st reel of the month arrives", "said once a month; the reel is not read or paid for",
+    lambda: nudge.fire(uid20, "month_cap"))
+run("A 52nd arrives", "already told this month: silent",
+    lambda: nudge.fire(uid20, "month_cap"))
+
+uid21 = _fresh_guest("held_many")
+with get_connection() as c:
+    now = iso_now()
+    for n in range(1, 21):
+        c.execute("INSERT INTO reels (id,user_id,url,received_at,status,created_at,updated_at) "
+                   "VALUES (?,?,?,?, 'completed',?,?)", (f"{uid21}_r{n}", uid21, f"u{n}", now, now, now))
+    for n in range(3):
+        c.execute("INSERT INTO instagram_webhook_events (received_at,kind,sender_id,outcome,detail) "
+                   "VALUES (?, 'reel', 'sim_held_many', 'buffered', ?)", (now, f"https://www.instagram.com/reel/held{n}/"))
+run("Three reels arrive at once past the lock", "one message, carrying the count",
+    lambda: nudge.fire(uid21, "reel_held"))
+
+# --- 6. Instagram refuses a button message -----------------------------------
+uid22 = _fresh_guest("refused")
+_add_reel(uid22, 1, TITLES[0])
+REFUSE_TEMPLATES = True
+run("First library message, but Instagram rejects the button", "falls back to the plain text with the link, never silence",
+    lambda: nudge.fire(uid22, "reel_ready", title=TITLES[0]))
+uid23 = _fresh_guest("refused_chips")
+run("Unreadable share, but Instagram rejects the chips", "same words go out as plain text",
+    lambda: nudge.fire(uid23, "unreadable_share"))
+REFUSE_TEMPLATES = False
+
+# --- 7. A title the bot did not write ----------------------------------------
+uid24 = _fresh_guest("messy_title")
+_add_reel(uid24, 1, "x")
+run("First reel is titled 'Paneer Tikka \u2014 SO easy!! \U0001F525'", "the title is cleaned before it is quoted back",
+    lambda: nudge.fire(uid24, "reel_ready", title="Paneer Tikka \u2014 SO easy!! \U0001F525"))
+
+
+# --- checks ------------------------------------------------------------------
+def problems() -> list[str]:
+    found: list[str] = []
+    for message in SENT:
+        for issue in nudge.copy_problems(message["text"]):
+            found.append(f"{issue} in: {message['text']}")
+        for label in message["labels"]:
+            for issue in nudge.copy_problems(label):
+                found.append(f"{issue} in label: {label}")
+            if len(label) > 20:
+                found.append(f"label over 20 characters ({len(label)}): {label}")
+        if len(message["text"].encode("utf-8")) > (640 if message["format"] == "button" else 1000):
+            found.append(f"too long for a {message['format']} message: {message['text'][:60]}")
+        if "telegram" in message["text"].lower():
+            found.append(f"mentions Telegram: {message['text']}")
+        if message["format"] != "text" and "://" in message["text"]:
+            found.append(f"a raw link inside a {message['format']} message: {message['text']}")
+        if message["before"][:2] != ["mark_seen", "typing_on"] or not message["before"][-1].startswith("pause"):
+            found.append(f"sent without seen, typing dots and a pause first: {message['text'][:60]}")
+    with get_connection() as c:
+        logged = {row[0] for row in c.execute("SELECT DISTINCT message_key FROM nudge_log")}
+    never = [key for key in nudge.PRECEDENCE if key not in logged]
+    if never:
+        found.append(f"no scenario ever sent: {', '.join(never)}")
+    return found
+
+
 # --- report ------------------------------------------------------------------
 def to_markdown() -> str:
     lines = [
@@ -287,8 +456,11 @@ def to_markdown() -> str:
         f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} by "
         "`scripts/simulate_nudges.py` against a throwaway database. Every reply below came "
         "from `app.services.nudge.fire()`, the exact function production calls; only the "
-        "Instagram Graph call itself was replaced with a recorder. Re-run this after any "
+        "Instagram Graph calls themselves were replaced with recorders. Re-run this after any "
         "change to `app/services/nudge.py` to see every situation at once.",
+        "",
+        "`[Open my library]` is a button under the message. `(Is it free)` is a chip above the "
+        "keyboard. Before every message the person sees \"seen\" and then the typing dots.",
         "",
         "| Situation | Condition | What gets sent |",
         "|---|---|---|",
@@ -311,6 +483,13 @@ def main() -> None:
         print(f"wrote {len(ROWS)} scenarios to {args.markdown}")
     else:
         print(report)
+
+    found = problems()
+    for issue in found:
+        print(f"FAIL: {issue}", file=sys.stderr)
+    if found:
+        sys.exit(1)
+    print(f"copy check passed: {len(SENT)} messages covering all {len(nudge.PRECEDENCE)} message kinds", file=sys.stderr)
 
 
 if __name__ == "__main__":
