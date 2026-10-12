@@ -3992,7 +3992,7 @@ HOME_SCREEN_CARD_AT = 15
 
 
 @router.get("/g/{token}")
-def library_link_login(token: str, request: Request, preview: str = "", signin: str = ""):
+def library_link_login(token: str, request: Request, preview: str = "", signin: str = "", hs: str = ""):
     """Personal library link: opens one account straight into the app.
 
     This is the entry point for someone who has never signed in - the link
@@ -4061,6 +4061,12 @@ def library_link_login(token: str, request: Request, preview: str = "", signin: 
     if signin == "1" and claim_stage in ("", "home") and request.session.get(GUEST_LINK_SESSION_KEY) and not (user.get("google_sub") or "").strip():
         claim_stage = "signin"
 
+    # ?hs=prompt: the button on the bot's 5 reel message. It promises the
+    # home screen steps, so the card opens straight away instead of the
+    # quieter widget.
+    if hs == "prompt" and claim_stage in ("", "home") and request.session.get(GUEST_LINK_SESSION_KEY) and not (user.get("google_sub") or "").strip():
+        claim_stage = "home"
+
     wants_signin = claim_stage in ("signin", "locked")
     login_csrf = create_login_csrf(request) if wants_signin else ""
     google_client_id = settings.google_client_id if wants_signin else ""
@@ -4071,26 +4077,64 @@ def library_link_login(token: str, request: Request, preview: str = "", signin: 
         # The new UI asks for the home screen quietly first: a widget on Home
         # until 15 reels, then the card.
         v2_stage = claim_stage
-        if claim_stage == "home" and n < HOME_SCREEN_CARD_AT and preview != "home":
+        if claim_stage == "home" and n < HOME_SCREEN_CARD_AT and preview != "home" and hs != "prompt":
             v2_stage = "tile"
         return app_shell(
-            build_app_v2_html(
-                user,
-                library_token=token,
-                claim_stage=v2_stage,
-                login_csrf=login_csrf,
-                google_client_id=google_client_id,
+            _with_library_preview(
+                build_app_v2_html(
+                    user,
+                    library_token=token,
+                    claim_stage=v2_stage,
+                    login_csrf=login_csrf,
+                    google_client_id=google_client_id,
+                ),
+                user["id"],
             )
         )
     return app_shell(
-        build_clipnest_v1_html(
+        _with_library_preview(
+            build_clipnest_v1_html(
+                user["id"],
+                library_token=token,
+                claim_stage="home" if claim_stage == "tile" else claim_stage,
+                login_csrf=login_csrf,
+                google_client_id=google_client_id,
+            ),
             user["id"],
-            library_token=token,
-            claim_stage="home" if claim_stage == "tile" else claim_stage,
-            login_csrf=login_csrf,
-            google_client_id=google_client_id,
         )
     )
+
+
+def _with_library_preview(html: str, user_id: str) -> str:
+    """Name the card Instagram builds when a library link is pasted somewhere.
+
+    The bot sends the link as a button now, but a pasted link still gets a
+    preview from these tags, and without them it was a bare "ClipNest".
+    """
+    try:
+        from app.db.database import get_connection
+
+        with get_connection() as connection:
+            n = int(connection.execute("SELECT COUNT(*) FROM reels WHERE user_id = ?", (user_id,)).fetchone()[0] or 0)
+    except Exception:
+        n = 0
+    if n == 1:
+        description = "1 saved reel, searchable in plain words."
+    elif n > 1:
+        description = f"{n} saved reels, searchable in plain words."
+    else:
+        description = "Your saved reels, searchable in plain words."
+    base = (settings.public_base_url or "").rstrip("/")
+    tags = (
+        '<meta property="og:title" content="Your ClipNest library" />\n'
+        f'  <meta property="og:description" content="{description}" />\n'
+        '  <meta property="og:type" content="website" />\n'
+    )
+    if base.startswith("http"):
+        tags += f'  <meta property="og:image" content="{base}/static/icon-512.png" />\n'
+    if "</head>" not in html or 'property="og:title"' in html:
+        return html
+    return html.replace("</head>", tags + "</head>", 1)
 
 
 @router.get("/g/{token}/manifest.webmanifest")
