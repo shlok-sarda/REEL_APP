@@ -142,25 +142,14 @@ def user_row(sender: str) -> dict:
 
 def main() -> None:
     with TestClient(app) as client:
-        # --- taps ----------------------------------------------------------
+        # --- taps and typed text are left for a person ----------------------
         fired, sent = deliver(client, postback("tap_how", "ICE_HOW", "How do I save a reel here?"))
-        check("ice breaker tap reaches the how-to answer", [f["trigger"] for f in fired] == ["ask_how"], str(fired))
-        check("a tap is answered as a direct question", fired and fired[0]["direct"] is True)
-        check("the how-to answer went out", sent and sent[0]["text"].startswith("Share any reel to this chat"), str(sent))
-        check("the tap was counted", "tap:ICE_HOW" in outcomes("tap_how"), str(outcomes("tap_how")))
-
-        fired, sent = deliver(client, postback("tap_how", "ICE_FREE", "Is it free?"))
-        check("a second tap straight after is still answered", sent and sent[0]["text"].startswith("Yes."), str(sent))
-
-        fired, sent = deliver(client, postback("tap_title", "", "What does ClipNest do?"))
-        check("an ice breaker with no payload is matched on its question", [f["trigger"] for f in fired] == ["ask_what"], str(fired))
-
+        check("an ice breaker tap gets no bot reply", fired == [] and sent == [], str(sent))
+        check("an ice breaker tap is flagged for Shlok", "needs_human" in outcomes("tap_how"), str(outcomes("tap_how")))
+        check("the tap is still counted", "tap:ICE_HOW" in outcomes("tap_how"), str(outcomes("tap_how")))
         fired, sent = deliver(client, message("tap_chip", "What does it do", quick_reply={"payload": "ICE_WHAT"}))
-        check("a tapped chip reaches its answer", [f["trigger"] for f in fired] == ["ask_what"], str(fired))
-        check("a tapped chip is not read as a typed message", "ignored" not in outcomes("tap_chip"), str(outcomes("tap_chip")))
-
-        fired, sent = deliver(client, postback("tap_unknown", "SOMETHING_ELSE", "Mystery"))
-        check("an unknown tap still gets an answer", [f["trigger"] for f in fired] == ["plain_message"] and len(sent) == 1, str(fired))
+        check("a tapped chip gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("tap_chip"), str(outcomes("tap_chip")))
+        check("a tapped chip is not read as a reel message", "ignored" not in outcomes("tap_chip"), str(outcomes("tap_chip")))
 
         # --- a heart is not a message --------------------------------------
         deliver(client, message("heart", "hi"))
@@ -172,36 +161,46 @@ def main() -> None:
         fired, sent = deliver(client, {"sender": {"id": "heart"}, "read": {"mid": "x"}})
         check("a read receipt gets no reply", fired == [] and sent == [])
 
-        # --- typed text ----------------------------------------------------
-        fired, sent = deliver(client, message("typed_a", "how do i save one?"))
-        check("a typed how-to question gets the how-to answer", [f["trigger"] for f in fired] == ["typed_how"], str(fired))
-        check("a typed question carries the three chips", sent and sent[0]["labels"] == ["How do I save a reel", "What does it do", "Is it free"], str(sent))
-        fired, sent = deliver(client, message("typed_b", "what even is this"))
-        check("a typed what question gets the what answer", [f["trigger"] for f in fired] == ["typed_what"], str(fired))
-        fired, sent = deliver(client, message("typed_c", "Is it free?"))
-        check("the ice breaker question typed by hand gets its answer", [f["trigger"] for f in fired] == ["ask_free"], str(fired))
-        fired, sent = deliver(client, message("typed_d", "hello"))
-        check("a hello with no library gets how to start", [f["trigger"] for f in fired] == ["plain_message"] and sent and sent[0]["text"].startswith("Share any reel"), str(sent))
+        # --- typed text -----------------------------------------------------
+        for sender, text in (("typed_a", "hi"), ("typed_b", "how do i save one?"), ("typed_c", "Is it free?"), ("typed_d", "\U0001F44B")):
+            fired, sent = deliver(client, message(sender, text))
+            check(f"typed {text!r} gets no bot reply", fired == [] and sent == [], str(sent))
+            check(f"typed {text!r} is flagged for Shlok", "needs_human" in outcomes(sender), str(outcomes(sender)))
+        with get_connection() as c:
+            stored = c.execute("SELECT detail FROM instagram_webhook_events WHERE outcome = 'needs_human' AND sender_id = 'typed_b'").fetchone()[0]
+        check("what they wrote is not stored", "save" not in stored, stored)
+        fired, sent = deliver(client, message("voice", attachments=[{"type": "audio", "payload": {"url": "https://lookaside.fbsbx.com/a"}}]))
+        check("a voice note gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("voice"), str(outcomes("voice")))
+        fired, sent = deliver(client, message("story", attachments=[{"type": "story_mention", "payload": {"url": "https://lookaside.fbsbx.com/s"}}]))
+        check("a story mention gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("story"), str(outcomes("story")))
+        fired, sent = deliver(client, message("unsender", is_deleted=True))
+        check("an unsent message is neither answered nor flagged", sent == [] and "needs_human" not in outcomes("unsender"), str(outcomes("unsender")))
 
         # --- delete my data ------------------------------------------------
         fired, sent = deliver(client, message("deleter", "Delete my data"))
         check("delete my data reaches the delete acknowledgement", [f["trigger"] for f in fired] == ["delete_request"], str(fired))
+        check("delete my data is also flagged for Shlok", "needs_human" in outcomes("deleter"), str(outcomes("deleter")))
         check("the acknowledgement says 7 days", sent and "within 7 days" in sent[0]["text"], str(sent))
         check("the request is logged", "delete_requested" in outcomes("deleter"), str(outcomes("deleter")))
         fired, sent = deliver(client, postback("deleter_menu", "MENU_DELETE", "Delete my data"))
-        check("the delete menu item is logged too", "delete_requested" in outcomes("deleter_menu"))
+        check("the delete menu item is logged too", "delete_requested" in outcomes("deleter_menu") and len(sent) == 1, str(sent))
         fired, sent = deliver(client, message("not_deleter", "can you delete this reel"))
         check("an ordinary sentence with delete in it is not a request", "delete_requested" not in outcomes("not_deleter"))
 
         for i in range(260):  # the log keeps only its newest 200 rows
             route._log_webhook_event("filler", sender_id="filler", outcome="noise", detail=str(i))
         check("a delete request survives the log being trimmed", "delete_requested" in outcomes("deleter"))
+        check("a waiting message survives the log being trimmed", "needs_human" in outcomes("typed_a"))
 
         from app.api.routes.health import _instagram_webhook_debug
 
         listed = _instagram_webhook_debug().get("delete_requests") or []
         check("the health page lists the delete requests", {r["sender"] for r in listed} == {"deleter", "deleter_menu"}, str(listed))
         check("each listed request names the account", all(r["user_id"] == user_row(r["sender"])["id"] for r in listed), str(listed))
+        waiting = _instagram_webhook_debug().get("human_messages") or {}
+        people = {p["sender"] for p in waiting.get("people", [])}
+        check("the health page counts the waiting messages", waiting.get("last_24h", 0) >= 9 and {"typed_a", "typed_b", "tap_how", "voice"} <= people, str(waiting)[:300])
+        check("the health page shows no message text", "how do i save" not in str(waiting).lower())
 
         # --- reels ---------------------------------------------------------
         url = "https://www.instagram.com/reel/ABC123xyz/?igsh=abc"
@@ -227,9 +226,11 @@ def main() -> None:
             jobs = c.execute("SELECT COUNT(*) FROM processing_jobs WHERE user_id = ?", (saver["id"],)).fetchone()[0]
         check("a duplicate reel queues no second read", jobs == 1, f"jobs={jobs}")
 
-        fired, sent = deliver(client, message("saver", attachments=[{"type": "story_mention", "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
-        check("a story mention reaches the unreadable share reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
-        check("the unreadable share reply explains Copy link", sent and "Copy link" in sent[0]["text"] and sent[0]["labels"] == ["How to share a reel"], str(sent))
+        with get_connection() as c:
+            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = 'saver'")
+        fired, sent = deliver(client, message("saver", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "5"}}]))
+        check("a reel share with no link reaches the unreadable share reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
+        check("the unreadable share reply explains Copy link", sent and "Copy link" in sent[0]["text"] and sent[0]["labels"] == [], str(sent))
 
         for kind in ("share", "ig_post", "image"):
             fired, sent = deliver(client, message(f"post_{kind}", attachments=[{"type": kind, "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
@@ -248,7 +249,7 @@ def main() -> None:
         with get_connection() as c:
             c.execute("UPDATE users SET google_sub = 'g_member' WHERE instagram_user_id = 'member'")
         fired, sent = deliver(client, message("member", "hello"))
-        check("a signed in user typing hello hears nothing, as before", sent == [], str(sent))
+        check("a signed in user typing hello hears nothing and is flagged", sent == [] and "needs_human" in outcomes("member"), str(sent))
         fired, sent = deliver(client, message("member", "delete my data"))
         check("a signed in user asking to delete is acknowledged", len(sent) == 1 and sent[0]["text"] == "Got it. Your data will be deleted within 7 days.", str(sent))
         member = user_row("member")

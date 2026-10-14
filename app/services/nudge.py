@@ -53,11 +53,7 @@ PRECEDENCE = [
     "m9_could_not_read",
     "m15_photo_post",
     "m16_unreadable_share",
-    "m11_how_to_save",
-    "m12_what_it_does",
-    "m13_is_it_free",
     "m23_welcome_back",
-    "m8_recovery",
     "m3_quiet_nudge",
 ]
 
@@ -67,15 +63,10 @@ ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up"
 # last DM of any kind. The failure reply usually follows the first-reel ack by
 # a minute or two, so the shared cooldown would swallow exactly the case it
 # exists for: "give me a few minutes", then silence. Measuring it against
-# itself still stops ten bad links producing ten replies. The answers to a
-# direct question are here for the same reason: two questions in a row are
-# two questions, and the second must not be eaten by the first answer.
+# itself still stops ten bad links producing ten replies.
 SELF_COOLDOWN = {
     "m9_could_not_read",
     "m10_month_cap",
-    "m11_how_to_save",
-    "m12_what_it_does",
-    "m13_is_it_free",
     "m15_photo_post",
     "m16_unreadable_share",
     "m17_already_saved",
@@ -84,7 +75,7 @@ SELF_COOLDOWN = {
 
 # Messages that are nothing without the person's own link. With no link to
 # give (PUBLIC_BASE_URL unset) these are skipped rather than sent empty.
-NEEDS_LINK = {"m2_first_library", "m4_home_screen", "m6_lock", "m7_past_lock", "m8_recovery", "m23_welcome_back"}
+NEEDS_LINK = {"m2_first_library", "m4_home_screen", "m6_lock", "m7_past_lock", "m23_welcome_back"}
 
 # A guest whose newest reel before this one is older than this has been away,
 # and the usual silence on a save would read as nobody being home.
@@ -99,39 +90,6 @@ TYPING_SECONDS_DEFAULT = 1.5
 # full timeout, and this runs inside the reel worker too, so they get a short
 # one of their own and a failure simply skips the pause.
 SENDER_ACTION_TIMEOUT_SECONDS = 6
-
-# Chips offered under an answer to a typed question, so a wrong guess about
-# what they meant costs one tap. Titles are cut at 20 characters by Instagram.
-QUESTION_CHIPS = [
-    {"title": "How do I save a reel", "payload": "ICE_HOW"},
-    {"title": "What does it do", "payload": "ICE_WHAT"},
-    {"title": "Is it free", "payload": "ICE_FREE"},
-]
-HOW_TO_SHARE_CHIP = [{"title": "How to share a reel", "payload": "ICE_HOW"}]
-
-# What woke us, to the answer it gets. The typed_ variants are the same
-# answers with the chips above attached, since a typed question was guessed at.
-ANSWER_FOR = {
-    "ask_how": "m11_how_to_save",
-    "typed_how": "m11_how_to_save",
-    "ask_what": "m12_what_it_does",
-    "typed_what": "m12_what_it_does",
-    "ask_free": "m13_is_it_free",
-    "typed_free": "m13_is_it_free",
-}
-
-# The monthly cap counts only reels received after this flag was first
-# stamped, so nobody's existing library uses up their month on the day the
-# cap arrives.
-MONTH_CAP_FLAG = "monthly_reel_cap_live"
-# The month turns over at midnight in India, where the users are.
-_IST = timezone(timedelta(hours=5, minutes=30))
-
-# There is deliberately no cap on quiet nudges. The 24 hour window already
-# enforces one: a nudge that goes unanswered is followed by the window
-# closing, after which the person cannot be messaged at all. So at most one
-# nudge per dormancy can ever be sent, and a counter for it would be a
-# variable that is only ever 0 or 1.
 
 
 def _now() -> datetime:
@@ -353,9 +311,12 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
 
     `trigger` is what woke us: reel_saved, reel_returned (a reel after a
     week or more without one), reel_ready, reel_failed, reel_held,
-    already_saved, photo_post, unreadable_share, plain_message, ask_how,
-    ask_what, ask_free (and their typed_ variants), delete_request, month_cap,
+    already_saved, photo_post, unreadable_share, delete_request, month_cap,
     timer.
+
+    Typed messages and taps never reach here (only "delete my data" does):
+    Shlok answers people by hand, by decision on 2026-10-14. The bot does the
+    reel job and nothing else.
     """
     if trigger == "month_cap":
         # Said once a month, to signed-in accounts too: without it their
@@ -425,14 +386,6 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     if trigger == "already_saved":
         candidates.append("m17_already_saved")
 
-    if trigger in ANSWER_FOR:
-        candidates.append(ANSWER_FOR[trigger])
-
-    if trigger == "plain_message":
-        # "Here is your library" to someone who has none yet is a button to
-        # an empty page. They get how to start instead.
-        candidates.append("m8_recovery" if n > 0 else "m11_how_to_save")
-
     if trigger == "timer":
         candidates.append("m3_quiet_nudge")
 
@@ -501,8 +454,6 @@ def _legacy_text(key: str, user: dict[str, Any]) -> str:
         return f"{text} Your library: {link}" if link else text
     if key == "m10_month_cap":
         return f"You have hit this month's limit of {settings.monthly_reel_cap} reels. It resets on the 1st."
-    if key == "m8_recovery":
-        return f"Here is your library: {link}"
     return ""
 
 
@@ -602,11 +553,6 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             "Holding that one for you. Sign in and it saves straight away.",
             legacy, buttons=sign_in("Sign in to keep them"),
         )
-    if key == "m8_recovery":
-        return _message(
-            "Here is your library. Share any reel to this chat and I will add it.",
-            legacy, buttons=open_library(),
-        )
     if key == "m9_could_not_read":
         text = "I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel."
         # On a first reel that fails there is nothing to open, so no button.
@@ -619,34 +565,11 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             "Everything already saved is still there.",
             legacy, buttons=open_library(),
         )
-    if key == "m11_how_to_save":
-        text = (
-            "Share any reel to this chat. Tap the paper plane under the reel, search clipnest, send. "
-            "I will read it and send your library back in a few minutes."
-        )
-        return _message(text, chips=QUESTION_CHIPS if trigger.startswith("typed_") else None)
-    if key == "m12_what_it_does":
-        text = (
-            "You send me reels, I watch them and file them by what they are actually about. Then you can "
-            'search your own saved reels in plain words, like "cafe in goa" or "that press down exercise".'
-        )
-        if trigger.startswith("typed_"):
-            return _message(text, chips=QUESTION_CHIPS)
-        return _message(text, buttons=open_library() if n > 0 else None)
-    if key == "m13_is_it_free":
-        cap = settings.monthly_reel_cap
-        head = f"Yes. Up to {cap} reels a month, free." if cap > 0 else "Yes, it is free."
-        text = (
-            f"{head} After {LOCK_AT} reels I will ask you to sign in with Google so your library "
-            "is safe even if this chat is lost."
-        )
-        return _message(text, chips=QUESTION_CHIPS if trigger.startswith("typed_") else None)
     if key == "m15_photo_post":
         return _message("I only save reels for now, not posts or photos. Share a reel and I will add it.")
     if key == "m16_unreadable_share":
         return _message(
-            "I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here.",
-            chips=HOW_TO_SHARE_CHIP,
+            "I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here."
         )
     if key == "m17_already_saved":
         return _message("You already have that one. It is in your library.", buttons=open_library())

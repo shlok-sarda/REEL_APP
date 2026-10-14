@@ -70,17 +70,27 @@ def _log_webhook_event(
             # was being held. They become prunable once drained. Requests to
             # delete data are kept for the same reason: each one is a promise
             # that is acted on by hand, days later, from the health page.
+            # Messages waiting for a person are kept for 30 days, so the
+            # health page count is not wiped by a busy hour.
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE outcome NOT IN ('buffered', 'delete_requested')
+                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human')
                   AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
-                  )
-                """
+                  ))
+                  OR (outcome = 'needs_human' AND received_at < ?)
+                """,
+                (_thirty_days_ago(),),
             )
     except Exception as exc:  # pragma: no cover - diagnostics must not crash ingest
         print(f"[instagram] failed to log webhook event: {exc}")
+
+
+def _thirty_days_ago() -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
 
 
 def _away_for_a_while(user_id: str) -> bool:
@@ -120,38 +130,6 @@ PING_RE = re.compile(r"^\s*ping\s*$", re.IGNORECASE)
 # The data deletion page tells people to send these words.
 DELETE_RE = re.compile(r"\bdelete\s+(?:all\s+)?(?:my\s+(?:clipnest\s+)?(?:data|account)|everything)\b", re.IGNORECASE)
 
-# What a tapped button, chip or ice breaker means. The payload is ours, set
-# where the button was made. Anything not listed here still gets an answer
-# (their library), because a tap that is met with silence reads as broken.
-# DELETE_YES and DELETE_NO are deliberately absent: deletion is done by hand,
-# so no message of ours carries those chips.
-TAP_TRIGGERS = {
-    "ICE_HOW": "ask_how",
-    "ICE_WHAT": "ask_what",
-    "ICE_FREE": "ask_free",
-    "ICE_LIBRARY": "plain_message",
-    "MENU_LIBRARY": "plain_message",
-    "MENU_DELETE": "delete_request",
-}
-# Ice breakers typed into Instagram's own dashboard may arrive with no payload
-# of ours, or as an ordinary message, so the question itself is matched too.
-ICE_BREAKER_QUESTIONS = {
-    "how do i save a reel here": "ask_how",
-    "how do i save a reel": "ask_how",
-    "how to share a reel": "ask_how",
-    "what does clipnest do": "ask_what",
-    "what does it do": "ask_what",
-    "is it free": "ask_free",
-    "where is my library": "plain_message",
-}
-_QUESTION_STARTS = {"how", "what", "why", "where", "can", "does", "do", "is"}
-_FREE_WORDS = re.compile(r"\b(?:free|cost|costs|price|paid|pay|charge|charges|money)\b")
-_LIBRARY_WORDS = re.compile(r"\b(?:library|link|my reels|my saved)\b")
-_SAVE_WORDS = re.compile(r"\b(?:save|saved|saving|send|share|sharing|add|reel|reels)\b")
-
-
-def _plain_words(text: str) -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split())
 
 
 def _tap(message_event: dict) -> tuple[bool, str, str]:
@@ -167,40 +145,25 @@ def _tap(message_event: dict) -> tuple[bool, str, str]:
     return False, "", ""
 
 
-def _trigger_for_tap(payload: str, title: str) -> str:
-    trigger = TAP_TRIGGERS.get((payload or "").strip().upper())
-    if trigger:
-        return trigger
-    return ICE_BREAKER_QUESTIONS.get(_plain_words(title), "plain_message")
-
-
 def _typed_text(message_event: dict) -> str:
     message = message_event.get("message")
     text = message.get("text") if isinstance(message, dict) else ""
     return text if isinstance(text, str) else ""
 
 
-def _trigger_for_text(text: str) -> str:
-    """What a typed message with no reel in it is asking for.
+def _is_delete_request(text: str, payload: str = "") -> bool:
+    return payload.strip().upper() == "MENU_DELETE" or bool(DELETE_RE.search(text or ""))
 
-    Keyword matching only: no model is called, so this costs nothing and can
-    only ever choose between replies that are already written.
-    """
-    if DELETE_RE.search(text or ""):
-        return "delete_request"
-    words = _plain_words(text)
-    if words in ICE_BREAKER_QUESTIONS:
-        return ICE_BREAKER_QUESTIONS[words]
-    first = words.split(" ", 1)[0] if words else ""
-    if not ((text or "").strip().endswith("?") or first in _QUESTION_STARTS):
-        return "plain_message"
-    if _FREE_WORDS.search(words):
-        return "typed_free"
-    if _LIBRARY_WORDS.search(words):
-        return "plain_message"
-    if _SAVE_WORDS.search(words):
-        return "typed_how"
-    return "typed_what"
+
+def _log_needs_human(sender_id: str, sender_username: str, what: str) -> None:
+    """Someone wrote something that is not a reel or a post. The bot says
+    nothing and sends no "seen", so the message stays unread in the
+    @clipnest.in inbox and Instagram alerts Shlok, who answers by hand. The
+    row is the count on the health page. The text itself is not stored."""
+    _log_webhook_event(
+        "human", sender_id=sender_id, sender_username=sender_username,
+        outcome="needs_human", detail=what[:60],
+    )
 
 
 def _only_a_reaction(message_event: dict) -> bool:
@@ -317,19 +280,23 @@ def _has_attachment(message_event: dict) -> bool:
     return isinstance(attachments, list) and bool(attachments)
 
 
-# Attachment types that are a reel, or a story, which the bot could not find
-# a link in: the fix is to copy the link. Every other kind of share (a post,
-# a carousel, a photo from the gallery) is simply not something ClipNest
-# saves, and telling those people to copy the link would send them in a loop.
-_REEL_OR_STORY_TYPES = {"ig_reel", "reel", "video", "story_mention", "story", "story_reply"}
+# A reel the bot could not find a link in: the fix is to copy the link.
+_REEL_TYPES = {"ig_reel", "reel", "video"}
+# A post or a photo: not something ClipNest saves, and telling those people
+# to copy the link would send them in a loop.
+_POST_TYPES = {"share", "ig_post", "post", "image", "photo", "carousel", "album"}
 
 
 def _attachment_trigger(message_event: dict) -> str:
+    """unreadable_share, photo_post, or needs_human for anything else (a
+    story mention, a voice note, a sticker), which Shlok answers by hand."""
     attachments = (message_event.get("message") or {}).get("attachments") or []
     kinds = {str(att.get("type") or "").strip().lower() for att in attachments if isinstance(att, dict)}
-    if kinds & _REEL_OR_STORY_TYPES or not kinds:
+    if kinds & _REEL_TYPES:
         return "unreadable_share"
-    return "photo_post"
+    if kinds & _POST_TYPES:
+        return "photo_post"
+    return "needs_human"
 
 
 def _extract_link_code(message_event: dict) -> str:
@@ -598,13 +565,18 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 continue
 
             if tapped:
-                # A tap is a direct question and always gets its answer. It
-                # must never fall through to the reel branches below, where
-                # it would be read as a message with no reel in it.
-                trigger = _trigger_for_tap(tap_payload, tap_title)
-                if trigger == "delete_request":
+                # A tapped ice breaker or chip is a person talking, so it is
+                # left for Shlok like typed text. It must never fall through to
+                # the reel branches below.
+                if _is_delete_request(tap_title, tap_payload):
                     _log_delete_request(sender_id, sender_username, user["id"])
-                _reply_later(nudge.fire, user["id"], trigger, "", True)
+                    _reply_later(nudge.fire, user["id"], "delete_request")
+                _log_needs_human(sender_id, sender_username, "tap")
+                continue
+
+            if (event.get("message") or {}).get("is_deleted"):
+                # They unsent a message. Nothing to answer, nothing to flag.
+                _log_webhook_event("event", sender_id=sender_id, sender_username=sender_username, outcome="ignored_unsent")
                 continue
 
             # The wall. Hold the reel rather than process it, and rather than
@@ -628,16 +600,27 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     outcome="ignored",
                     detail="no reel url found :: " + _describe_message(event),
                 )
-                # Recovery path: any message re-sends their link. The IGSID is
-                # permanent, so deleting the conversation must not cost someone
-                # their library. A share we could not read a reel out of (story
-                # mention, photo, a video with no permalink) is different: "here
-                # is your library" tells them it saved, so say that it did not.
-                trigger = _attachment_trigger(event) if _has_attachment(event) else _trigger_for_text(_typed_text(event))
+                # The bot answers reels and posts only. A reel it could not
+                # find a link in, and a post, each get their one line; anything
+                # else a person writes is left unread for Shlok to answer by
+                # hand (decided 2026-10-14). "delete my data" is the exception:
+                # the data deletion page promises the reply, so it is sent, and
+                # the message is still flagged for Shlok like any other.
+                if _has_attachment(event):
+                    trigger = _attachment_trigger(event)
+                else:
+                    trigger = "delete_request" if _is_delete_request(_typed_text(event)) else "needs_human"
                 if trigger == "delete_request":
-                    # Recorded and answered whatever else is in this delivery.
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], trigger)
+                    _log_needs_human(sender_id, sender_username, "text")
+                elif trigger == "needs_human":
+                    kinds = sorted(
+                        str(att.get("type") or "")
+                        for att in ((event.get("message") or {}).get("attachments") or [])
+                        if isinstance(att, dict)
+                    )
+                    _log_needs_human(sender_id, sender_username, ",".join(kinds) or "text")
                 elif sender_id not in pending_replies:
                     _reply_later(nudge.fire, user["id"], trigger)
             saved_here = 0

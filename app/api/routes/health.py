@@ -389,6 +389,38 @@ def _instagram_webhook_debug(limit: int = 15) -> dict:
         ]
     except Exception as exc:
         out["delete_requests_error"] = str(exc)[:200]
+    # People who wrote something that is not a reel or a post. The bot does
+    # not answer these; they wait unread in the Instagram inbox for Shlok.
+    # Who and when only, never what they wrote.
+    try:
+        with get_connection() as connection:
+            counts = connection.execute(
+                """
+                SELECT SUM(CASE WHEN substr(replace(received_at, 'T', ' '), 1, 19) >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS last_24h,
+                       SUM(CASE WHEN substr(replace(received_at, 'T', ' '), 1, 19) >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS last_7d
+                FROM instagram_webhook_events WHERE outcome = 'needs_human'
+                """
+            ).fetchone()
+            latest = connection.execute(
+                """
+                SELECT MAX(received_at) AS at, COUNT(*) AS messages, sender_id, MAX(sender_username) AS username
+                FROM instagram_webhook_events
+                WHERE outcome = 'needs_human'
+                GROUP BY sender_id
+                ORDER BY at DESC
+                LIMIT 30
+                """
+            ).fetchall()
+        out["human_messages"] = {
+            "last_24h": int(counts["last_24h"] or 0),
+            "last_7d": int(counts["last_7d"] or 0),
+            "people": [
+                {"at": r["at"], "messages": int(r["messages"] or 0), "username": r["username"], "sender": r["sender_id"]}
+                for r in latest
+            ],
+        }
+    except Exception as exc:
+        out["human_messages_error"] = str(exc)[:200]
     return out
 
 

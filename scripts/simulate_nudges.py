@@ -234,20 +234,6 @@ _stamp(uid5, last_inbound_at=_ago(25), last_dm_at="")
 run("25 hours since their last message", "window is shut: permanently silent",
     lambda: nudge.run_last_call_sweep())
 
-# --- 3. Recovery -------------------------------------------------------------
-uid6 = _fresh_guest("recovery")
-_add_reel(uid6, 1, TITLES[0])
-nudge.fire(uid6, "reel_ready", title=TITLES[0])
-_clear_cooldown(uid6)
-run("They send a message with no reel in it", "the DM thread is the only way back in",
-    lambda: nudge.fire(uid6, "plain_message"))
-
-uid6b = _fresh_guest("recovery_burst")
-_add_reel(uid6b, 1, TITLES[0])
-nudge.fire(uid6b, "reel_ready", title=TITLES[0])
-run("They send a no-reel message seconds after the library link", "cooldown correctly suppresses the repeat",
-    lambda: nudge.fire(uid6b, "plain_message"))
-
 # --- 3b. A reel that could not be read ---------------------------------------
 uid10 = _fresh_guest("first_fails")
 nudge.fire(uid10, "reel_saved")
@@ -259,7 +245,7 @@ run("A second reel fails right after", "one failure reply per cooldown, not one 
 uid11 = _fresh_guest("unreadable")
 _add_reel(uid11, 1, TITLES[0])
 nudge.fire(uid11, "reel_ready", title=TITLES[0])
-run("They share a story or photo with no reel link in it", "says it did not save, instead of 'here is your library'",
+run("They share a reel the bot cannot find a link in", "says it did not save, and how to send it instead",
     lambda: nudge.fire(uid11, "unreadable_share"))
 
 # --- 3c. A busy night: the first reply states the real wait ------------------
@@ -328,32 +314,7 @@ run("A second reel is held seconds after the lock fires", "repeatable M7 respect
     lambda: nudge.fire(uid9, "reel_held"))
 
 
-# --- 5. Questions, taps and the new replies ----------------------------------
-uid13 = _fresh_guest("asker_new")
-run("Brand new chat: taps 'How do I save a reel here?'", "ice breaker, nothing saved yet",
-    lambda: nudge.fire(uid13, "ask_how", direct=True))
-run("Then taps 'What does ClipNest do?' straight after", "two questions in a row get two answers",
-    lambda: nudge.fire(uid13, "ask_what", direct=True))
-run("Then taps 'Is it free?'", "third answer, still not eaten by the cooldown",
-    lambda: nudge.fire(uid13, "ask_free", direct=True))
-run("Then taps 'Is it free?' again", "the same answer twice in ten minutes: silent",
-    lambda: nudge.fire(uid13, "ask_free", direct=True))
-run("Someone else's first tap is 'Where is my library?'", "no library yet, so they get how to start",
-    lambda: nudge.fire(_fresh_guest("asker_no_library"), "plain_message", direct=True))
-
-uid14 = _fresh_guest("asker_typed")
-_add_reel(uid14, 1, TITLES[0])
-run("Types 'how do i add one?'", "a typed question is a guess, so chips offer the other answers",
-    lambda: nudge.fire(uid14, "typed_how"))
-_clear_cooldown(uid14)
-run("Types 'what is this?'", "typed question, already has a library",
-    lambda: nudge.fire(uid14, "typed_what"))
-_clear_cooldown(uid14)
-run("Types 'does it cost anything?'", "typed question about price",
-    lambda: nudge.fire(uid14, "typed_free"))
-run("Taps 'What does ClipNest do?' with a library", "tapped, so the answer carries their library button",
-    lambda: nudge.fire(_fresh_guest_with_reel("asker_tap"), "ask_what", direct=True))
-
+# --- 5. Replies to things they sent ----------------------------------------
 uid15 = _fresh_guest("dupe")
 _add_reel(uid15, 1, TITLES[0])
 run("Sends a reel they already saved", "nothing queued or paid for; the title is not quoted",
@@ -381,8 +342,6 @@ uid19 = _fresh_guest("delete_signed_in")
 _stamp(uid19, google_sub="g_signed_in_456")
 run("A signed in user types 'delete my data'", "the one question a signed in user is always answered on",
     lambda: nudge.fire(uid19, "delete_request"))
-run("A signed in user types 'hi'", "signed in: silent, as before",
-    lambda: nudge.fire(uid19, "plain_message"))
 
 uid20 = _fresh_guest("cap")
 _add_reel(uid20, 1, TITLES[0])
