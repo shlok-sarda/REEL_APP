@@ -83,6 +83,28 @@ def _log_webhook_event(
         print(f"[instagram] failed to log webhook event: {exc}")
 
 
+def _away_for_a_while(user_id: str) -> bool:
+    """Was their newest reel, before this message, a week or more ago?
+    Read before anything in this message is saved, so a burst of reels in one
+    delivery does not hide the gap behind its own first reel."""
+    from datetime import datetime, timedelta
+
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT MAX(received_at) AS last FROM reels WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        last = datetime.fromisoformat((row["last"] or "").strip()) if row and row["last"] else None
+    except Exception:
+        return False
+    if not last:
+        return False
+    # Reels are stamped in naive server-local time.
+    if last.tzinfo:
+        last = last.astimezone().replace(tzinfo=None)
+    return datetime.now() - last >= timedelta(days=nudge.WELCOME_BACK_AFTER_DAYS)
+
+
 def _log_delete_request(sender_id: str, sender_username: str, user_id: str) -> None:
     """Someone asked for their data to be deleted. Deletion is done by hand
     within 7 days; this row is the to-do list, shown on the health page."""
@@ -607,6 +629,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             already_saved = 0
             held_here = 0
             capped_here = 0
+            returning = _away_for_a_while(user["id"]) if urls else False
             for url in urls:
                 # Checked per reel, not only per message: one message can
                 # carry many links, and checking once let a single text with
@@ -653,7 +676,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # Only the first-ever reel gets an immediate word. Five minutes of
                 # silence on a stranger's first message reads as broken, not as
                 # processing. Every later reel waits for its title.
-                _reply_later(nudge.fire, user["id"], "reel_saved")
+                _reply_later(nudge.fire, user["id"], "reel_returned" if returning else "reel_saved")
             if held_here:
                 _reply_later(nudge.fire, user["id"], "reel_held")
             elif capped_here:

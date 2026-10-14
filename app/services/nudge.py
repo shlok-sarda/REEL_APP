@@ -56,6 +56,7 @@ PRECEDENCE = [
     "m11_how_to_save",
     "m12_what_it_does",
     "m13_is_it_free",
+    "m23_welcome_back",
     "m8_recovery",
     "m3_quiet_nudge",
 ]
@@ -83,7 +84,11 @@ SELF_COOLDOWN = {
 
 # Messages that are nothing without the person's own link. With no link to
 # give (PUBLIC_BASE_URL unset) these are skipped rather than sent empty.
-NEEDS_LINK = {"m2_first_library", "m4_home_screen", "m6_lock", "m7_past_lock", "m8_recovery"}
+NEEDS_LINK = {"m2_first_library", "m4_home_screen", "m6_lock", "m7_past_lock", "m8_recovery", "m23_welcome_back"}
+
+# A guest whose newest reel before this one is older than this has been away,
+# and the usual silence on a save would read as nobody being home.
+WELCOME_BACK_AFTER_DAYS = 7
 
 # How long the typing dots show before a message, in seconds. Short for the
 # instant acknowledgement so it still reads as instant, longest for the first
@@ -346,7 +351,8 @@ def library_link(user: dict[str, Any]) -> str:
 def decide(user: dict[str, Any], trigger: str) -> str | None:
     """Which message, if any. Pure: no sends, no writes, no model.
 
-    `trigger` is what woke us: reel_saved, reel_ready, reel_failed, reel_held,
+    `trigger` is what woke us: reel_saved, reel_returned (a reel after a
+    week or more without one), reel_ready, reel_failed, reel_held,
     already_saved, photo_post, unreadable_share, plain_message, ask_how,
     ask_what, ask_free (and their typed_ variants), delete_request, month_cap,
     timer.
@@ -363,16 +369,22 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         return "m21_delete_ack"
 
     if user["signed_in"]:
-        # Converted. The bot already got what it was for.
-        return None
+        # Converted. The bot already got what it was for, so it speaks only
+        # to answer something that went wrong: a reel that could not be read
+        # leaves a signed in person with the same "is it broken" moment.
+        return "m9_could_not_read" if trigger == "reel_failed" else None
 
     n = user["reel_count"]
     sent = user["already_sent"]
     candidates: list[str] = []
 
-    if trigger == "reel_saved":
+    if trigger in {"reel_saved", "reel_returned"}:
         if n <= 1 and "m1_first_ack" not in sent:
             candidates.append("m1_first_ack")
+        elif trigger == "reel_returned":
+            # Back after a week or more. Reels after the first are otherwise
+            # saved in silence, which after a long gap feels like being ignored.
+            candidates.append("m23_welcome_back")
 
     if trigger == "reel_held":
         candidates.append("m7_past_lock")
@@ -639,8 +651,12 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         )
     if key == "m17_already_saved":
         return _message("You already have that one. It is in your library.", buttons=open_library())
+    if key == "m23_welcome_back":
+        return _message("Saved. Your library is where you left it.", buttons=open_library())
     if key == "m21_delete_ack":
-        return _message("Got it. Your data will be deleted within 7 days. You will get a message here when it is done.")
+        # Nothing more is promised: Instagram stops the bot 24 hours after
+        # their last message, so "you will hear when it is done" could not be kept.
+        return _message("Got it. Your data will be deleted within 7 days.")
     return _message("")
 
 

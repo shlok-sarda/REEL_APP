@@ -403,6 +403,21 @@ with get_connection() as c:
 run("Three reels arrive at once past the lock", "one message, carrying the count",
     lambda: nudge.fire(uid21, "reel_held"))
 
+uid25 = _fresh_guest("returner")
+for n in range(1, 4):
+    _add_reel(uid25, n, TITLES[n])
+run("A guest sends a reel after 10 days without one", "welcome back, since later reels are otherwise silent",
+    lambda: nudge.fire(uid25, "reel_returned"))
+uid26 = _fresh_guest("returner_new")
+run("A brand new person's first reel counts as returning", "the first reel acknowledgement wins",
+    lambda: nudge.fire(uid26, "reel_returned"))
+uid27 = _fresh_guest("member_fail")
+_add_reel(uid27, 1, TITLES[0])
+_stamp(uid27, google_sub="g_member_fail")
+run("A signed in user's reel cannot be read", "told, with their library button",
+    lambda: nudge.fire(uid27, "reel_failed"))
+
+
 # --- 6. Instagram refuses a button message -----------------------------------
 uid22 = _fresh_guest("refused")
 _add_reel(uid22, 1, TITLES[0])

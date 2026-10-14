@@ -1,6 +1,6 @@
 # Nudge scenarios, run against the live code
 
-Generated 2026-10-14 14:24 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
+Generated 2026-10-14 14:28 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
 
 `[Open my library]` is a button under the message. `(Is it free)` is a chip above the keyboard. Before every message the person sees "seen" and then the typing dots.
 
@@ -47,11 +47,14 @@ Generated 2026-10-14 14:24 UTC by `scripts/simulate_nudges.py` against a throwaw
 | Sends a reel they already saved, which has no title | same reply: titles are never quoted | You already have that one. It is in your library. [Open my library] |
 | A photo post reply (written, but nothing sends it yet) | kept unwired: most /p/ links on production were real videos | That is a photo post, not a reel. I only read reels for now. |
 | A later reel fails, and they already have a library | the failure reply carries the library button | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. [Open my library] |
-| Types 'delete my data' | acknowledged only; the deleting is done by hand from the health page | Got it. Your data will be deleted within 7 days. You will get a message here when it is done. |
-| A signed in user types 'delete my data' | the one question a signed in user is always answered on | Got it. Your data will be deleted within 7 days. You will get a message here when it is done. |
+| Types 'delete my data' | acknowledged only; the deleting is done by hand from the health page | Got it. Your data will be deleted within 7 days. |
+| A signed in user types 'delete my data' | the one question a signed in user is always answered on | Got it. Your data will be deleted within 7 days. |
 | A signed in user types 'hi' | signed in: silent, as before | (nothing sent) |
 | Their 51st reel of the month arrives | said once a month; the reel is not read or paid for | That is this month's 50 reels. New reels save again from the 1st. Everything already saved is still there. [Open my library] |
 | A 52nd arrives | already told this month: silent | (nothing sent) |
 | Three reels arrive at once past the lock | one message, carrying the count | Holding 3 reels for you. Sign in and they all save at once. [Sign in to keep them] |
-| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/AcmpsAUts3n3SseMKkl__cFy6sgg9ZlGd3umPQ_WNR0 That is 1 of 5. Send a few more and shelves start appearing on your Home. |
+| A guest sends a reel after 10 days without one | welcome back, since later reels are otherwise silent | Saved. Your library is where you left it. [Open my library] |
+| A brand new person's first reel counts as returning | the first reel acknowledgement wins | Got it. I am watching that reel now. Your library link comes back here in a few minutes. |
+| A signed in user's reel cannot be read | told, with their library button | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. [Open my library] |
+| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/_DjFtCc-fZXEgGBq7-tPUWzr2rku3T7LEkaIpJbkOLo That is 1 of 5. Send a few more and shelves start appearing on your Home. |
 | Unreadable share, but Instagram rejects the chips | same words go out as plain text | I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here. |

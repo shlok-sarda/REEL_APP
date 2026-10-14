@@ -244,7 +244,27 @@ def main() -> None:
         fired, sent = deliver(client, message("member", "hello"))
         check("a signed in user typing hello hears nothing, as before", sent == [], str(sent))
         fired, sent = deliver(client, message("member", "delete my data"))
-        check("a signed in user asking to delete is acknowledged", len(sent) == 1 and "within 7 days" in sent[0]["text"], str(sent))
+        check("a signed in user asking to delete is acknowledged", len(sent) == 1 and sent[0]["text"] == "Got it. Your data will be deleted within 7 days.", str(sent))
+        member = user_row("member")
+        with get_connection() as c:
+            c.execute("UPDATE reels SET status = 'completed' WHERE user_id = ?", (member["id"],))
+            c.execute("UPDATE users SET last_dm_at = '' WHERE id = ?", (member["id"],))
+        before = len(SENT)
+        nudge.fire(member["id"], "reel_failed")
+        check("a signed in user is told when a reel fails", len(SENT) == before + 1 and SENT[-1]["text"].startswith("I could not read that one"), str(SENT[before:]))
+
+        # --- coming back after a week ----------------------------------------
+        deliver(client, message("returner", "https://www.instagram.com/reel/OLD11111/"))
+        deliver(client, message("returner", "https://www.instagram.com/reel/OLD22222/"))
+        with get_connection() as c:
+            c.execute("UPDATE reels SET received_at = '2026-09-01T10:00:00' WHERE user_id = ?", (user_row("returner")["id"],))
+            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = 'returner'")
+        fired, sent = deliver(client, message("returner", "https://www.instagram.com/reel/NEW33333/ https://www.instagram.com/reel/NEW44444/"))
+        check("a guest back after a week is welcomed back", [f["trigger"] for f in fired] == ["reel_returned"] and sent and sent[0]["text"] == "Saved. Your library is where you left it." and sent[0]["labels"] == ["Open my library"], str(sent))
+        with get_connection() as c:
+            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = 'returner'")
+        fired, sent = deliver(client, message("returner", "https://www.instagram.com/reel/NEW55555/"))
+        check("the next reel straight after is silent again", [f["trigger"] for f in fired] == ["reel_saved"] and sent == [], str(sent))
 
         # --- the library page ----------------------------------------------
         token = user_row("saver")["library_token"]
