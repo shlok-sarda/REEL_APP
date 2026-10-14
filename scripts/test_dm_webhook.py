@@ -231,6 +231,12 @@ def main() -> None:
         check("a story mention reaches the unreadable share reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
         check("the unreadable share reply explains Copy link", sent and "Copy link" in sent[0]["text"] and sent[0]["labels"] == ["How to share a reel"], str(sent))
 
+        for kind in ("share", "ig_post", "image"):
+            fired, sent = deliver(client, message(f"post_{kind}", attachments=[{"type": kind, "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
+            check(f"a shared {kind} is told reels only", [f["trigger"] for f in fired] == ["photo_post"] and sent and sent[0]["text"].startswith("I only save reels for now, not posts"), str(sent))
+        fired, sent = deliver(client, message("reel_no_link", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "9"}}]))
+        check("a shared reel with no link still gets the copy link reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
+
         fired, sent = deliver(client, message("poster", "https://www.instagram.com/p/POST12345/"))
         check("a /p/ link is still saved, not refused", [f["trigger"] for f in fired] == ["reel_saved"] and "saved" in outcomes("poster"), str(fired))
 

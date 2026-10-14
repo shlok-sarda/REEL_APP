@@ -1,6 +1,6 @@
 # Nudge scenarios, run against the live code
 
-Generated 2026-10-14 14:28 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
+Generated 2026-10-14 16:17 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
 
 `[Open my library]` is a button under the message. `(Is it free)` is a chip above the keyboard. Before every message the person sees "seen" and then the typing dots.
 
@@ -45,7 +45,7 @@ Generated 2026-10-14 14:28 UTC by `scripts/simulate_nudges.py` against a throwaw
 | Taps 'What does ClipNest do?' with a library | tapped, so the answer carries their library button | You send me reels, I watch them and file them by what they are actually about. Then you can search your own saved reels in plain words, like "cafe in goa" or "that press down exercise". [Open my library] |
 | Sends a reel they already saved | nothing queued or paid for; the title is not quoted | You already have that one. It is in your library. [Open my library] |
 | Sends a reel they already saved, which has no title | same reply: titles are never quoted | You already have that one. It is in your library. [Open my library] |
-| A photo post reply (written, but nothing sends it yet) | kept unwired: most /p/ links on production were real videos | That is a photo post, not a reel. I only read reels for now. |
+| They share a post or a photo instead of a reel | told reels only; a pasted /p/ link still saves, most were videos | I only save reels for now, not posts or photos. Share a reel and I will add it. |
 | A later reel fails, and they already have a library | the failure reply carries the library button | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. [Open my library] |
 | Types 'delete my data' | acknowledged only; the deleting is done by hand from the health page | Got it. Your data will be deleted within 7 days. |
 | A signed in user types 'delete my data' | the one question a signed in user is always answered on | Got it. Your data will be deleted within 7 days. |
@@ -56,5 +56,5 @@ Generated 2026-10-14 14:28 UTC by `scripts/simulate_nudges.py` against a throwaw
 | A guest sends a reel after 10 days without one | welcome back, since later reels are otherwise silent | Saved. Your library is where you left it. [Open my library] |
 | A brand new person's first reel counts as returning | the first reel acknowledgement wins | Got it. I am watching that reel now. Your library link comes back here in a few minutes. |
 | A signed in user's reel cannot be read | told, with their library button | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. [Open my library] |
-| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/_DjFtCc-fZXEgGBq7-tPUWzr2rku3T7LEkaIpJbkOLo That is 1 of 5. Send a few more and shelves start appearing on your Home. |
+| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/aT7nCa7Hk6TxPxFs2-L53ug1QZXg1Yx_bfM2XCeYMVU That is 1 of 5. Send a few more and shelves start appearing on your Home. |
 | Unreadable share, but Instagram rejects the chips | same words go out as plain text | I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here. |

@@ -317,6 +317,21 @@ def _has_attachment(message_event: dict) -> bool:
     return isinstance(attachments, list) and bool(attachments)
 
 
+# Attachment types that are a reel, or a story, which the bot could not find
+# a link in: the fix is to copy the link. Every other kind of share (a post,
+# a carousel, a photo from the gallery) is simply not something ClipNest
+# saves, and telling those people to copy the link would send them in a loop.
+_REEL_OR_STORY_TYPES = {"ig_reel", "reel", "video", "story_mention", "story", "story_reply"}
+
+
+def _attachment_trigger(message_event: dict) -> str:
+    attachments = (message_event.get("message") or {}).get("attachments") or []
+    kinds = {str(att.get("type") or "").strip().lower() for att in attachments if isinstance(att, dict)}
+    if kinds & _REEL_OR_STORY_TYPES or not kinds:
+        return "unreadable_share"
+    return "photo_post"
+
+
 def _extract_link_code(message_event: dict) -> str:
     for text in _deep_strings(message_event.get("message", {})):
         match = LINK_CODE_RE.search(text or "")
@@ -618,7 +633,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # their library. A share we could not read a reel out of (story
                 # mention, photo, a video with no permalink) is different: "here
                 # is your library" tells them it saved, so say that it did not.
-                trigger = "unreadable_share" if _has_attachment(event) else _trigger_for_text(_typed_text(event))
+                trigger = _attachment_trigger(event) if _has_attachment(event) else _trigger_for_text(_typed_text(event))
                 if trigger == "delete_request":
                     # Recorded and answered whatever else is in this delivery.
                     _log_delete_request(sender_id, sender_username, user["id"])

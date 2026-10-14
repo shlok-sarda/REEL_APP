@@ -364,7 +364,7 @@ run("Sends a reel they already saved, which has no title", "same reply: titles a
     lambda: nudge.fire(uid15b, "already_saved"))
 
 uid16 = _fresh_guest("photo")
-run("A photo post reply (written, but nothing sends it yet)", "kept unwired: most /p/ links on production were real videos",
+run("They share a post or a photo instead of a reel", "told reels only; a pasted /p/ link still saves, most were videos",
     lambda: nudge.fire(uid16, "photo_post"))
 
 uid17 = _fresh_guest("fail_with_library")

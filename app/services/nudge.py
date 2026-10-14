@@ -417,10 +417,9 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         candidates.append("m16_unreadable_share")
 
     if trigger == "photo_post":
-        # Nothing fires this yet. The plan was to refuse /p/ links up front,
-        # but on production 4 of the 6 /p/ links ever sent were videos that
-        # saved fine, so the link alone does not say "photo". Until there is
-        # a free way to tell, a photo post fails and gets m9, which names it.
+        # A post or photo shared into the chat (the webhook tells these from
+        # reels by attachment type). A pasted /p/ link is not refused: on
+        # production 4 of the 6 ever sent were videos that saved fine.
         candidates.append("m15_photo_post")
 
     if trigger == "already_saved":
@@ -643,7 +642,7 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         )
         return _message(text, chips=QUESTION_CHIPS if trigger.startswith("typed_") else None)
     if key == "m15_photo_post":
-        return _message("That is a photo post, not a reel. I only read reels for now.")
+        return _message("I only save reels for now, not posts or photos. Share a reel and I will add it.")
     if key == "m16_unreadable_share":
         return _message(
             "I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here.",
