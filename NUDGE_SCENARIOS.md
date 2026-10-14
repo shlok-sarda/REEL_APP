@@ -1,6 +1,6 @@
 # Nudge scenarios, run against the live code
 
-Generated 2026-10-14 16:24 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
+Generated 2026-10-14 17:08 UTC by `scripts/simulate_nudges.py` against a throwaway database. Every reply below came from `app.services.nudge.fire()`, the exact function production calls; only the Instagram Graph calls themselves were replaced with recorders. Re-run this after any change to `app/services/nudge.py` to see every situation at once.
 
 `[Open my library]` is a button under the message. `(Is it free)` is a chip above the keyboard. Before every message the person sees "seen" and then the typing dots.
 
@@ -18,10 +18,10 @@ Generated 2026-10-14 16:24 UTC by `scripts/simulate_nudges.py` against a throwaw
 | Reel 20 finishes processing | hits the lock | That is 20 reels. Sign in to keep saving. Everything you have stays exactly where it is. [Sign in to keep them] |
 | Reel 21 arrives | GUEST_LOCK_ENABLED=1: held, not processed | Holding that one for you. Sign in and it saves straight away. [Sign in to keep them] |
 | Reels actually processed after 21 sends | 20 (the 21st was held, costs nothing) | - |
-| 23 hours since their last message, 1 reel saved | the quiet nudge, early-journey wording | You saved your first reel yesterday. Send me one more and I can start grouping them. |
+| 23 hours since their last message, 1 reel saved | the quiet nudge, early-journey wording | You saved your first reel yesterday. Send me one more and I can start grouping them. [Open my library] |
 | The 150s sweep runs again immediately after | same dormancy: must stay silent | (nothing sent) |
-| They replied, then went quiet again | fresh dormancy: nudges again | (nothing sent) |
-| 23 hours quiet, 3 reels saved (short of 5) | quiet nudge, mid-journey wording | 3 saved so far. A few more and they sort themselves onto shelves. |
+| They replied, then went quiet again | fresh dormancy: nudges again | You saved your first reel yesterday. Send me one more and I can start grouping them. [Open my library] |
+| 23 hours quiet, 3 reels saved (short of 5) | quiet nudge, mid-journey wording | 3 saved so far. A few more and they sort themselves onto shelves. [Open my library] |
 | 23 hours quiet, 8 reels saved (past 5) | quiet nudge, established-library wording | Still here whenever you find something worth keeping. [Open my library] |
 | 25 hours since their last message | window is shut: permanently silent | (nothing sent) |
 | Their first reel fails two minutes after the ack | must not be eaten by the cooldown the ack just started | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. |
@@ -44,5 +44,5 @@ Generated 2026-10-14 16:24 UTC by `scripts/simulate_nudges.py` against a throwaw
 | A guest sends a reel after 10 days without one | welcome back, since later reels are otherwise silent | Saved. Your library is where you left it. [Open my library] |
 | A brand new person's first reel counts as returning | the first reel acknowledgement wins | Got it. I am watching that reel now. Your library link comes back here in a few minutes. |
 | A signed in user's reel cannot be read | told, with their library button | I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel. [Open my library] |
-| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/f_8dQt-EdCvDo7kpM-8EcGiXLRg6ytbczxNjzhXUF_4 That is 1 of 5. Send a few more and shelves start appearing on your Home. |
+| First library message, but Instagram rejects the button | falls back to the plain text with the link, never silence | Saved your first reel. Here is your library: https://clipnest.in/g/TkbOWcuO0twJyw-TIGa-V-596m3UxYj0_UjzBTWEpuo That is 1 of 5. Send a few more and shelves start appearing on your Home. |
 | Unreadable share, but Instagram rejects the chips | same words go out as plain text | I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here. |

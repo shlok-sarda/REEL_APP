@@ -518,12 +518,16 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         )
     if key == "m3_quiet_nudge":
         # The only message aimed at someone who is drifting, so it asks for
-        # one specific small thing rather than describing the product. No
-        # button until there is a library worth opening: the ask is to send.
+        # one specific small thing rather than describing the product. Every
+        # version carries the library button: reels 2 to 4 are silent, so
+        # this is often the first time since reel 1 that the link comes back.
         if n <= 1:
-            return _message("You saved your first reel yesterday. Send me one more and I can start grouping them.")
+            return _message(
+                "You saved your first reel yesterday. Send me one more and I can start grouping them.",
+                buttons=open_library(),
+            )
         if n < HOME_SCREEN_AT:
-            return _message(f"{n} saved so far. A few more and they sort themselves onto shelves.")
+            return _message(f"{n} saved so far. A few more and they sort themselves onto shelves.", buttons=open_library())
         return _message("Still here whenever you find something worth keeping.", legacy, buttons=open_library())
     if key == "m4_home_screen":
         return _message(

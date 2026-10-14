@@ -209,7 +209,12 @@ run("23 hours since their last message, 1 reel saved", "the quiet nudge, early-j
 run("The 150s sweep runs again immediately after", "same dormancy: must stay silent",
     lambda: nudge.run_last_call_sweep())
 
-nudge.record_inbound(f"sim_quiet")
+# They wrote back after that nudge and then went quiet for another 23 hours.
+# The earlier nudge is moved back to before their reply, which is the order it
+# happens in for real. (Without this the run stamped their reply as older than
+# the nudge and wrongly showed silence.)
+with get_connection() as c:
+    c.execute("UPDATE nudge_log SET sent_at = ? WHERE user_id = ? AND message_key = 'm3_quiet_nudge'", (_ago(30), uid2))
 _stamp(uid2, last_inbound_at=_ago(23.5), last_dm_at="")
 run("They replied, then went quiet again", "fresh dormancy: nudges again",
     lambda: nudge.run_last_call_sweep())
