@@ -188,18 +188,6 @@ def _only_a_reaction(message_event: dict) -> bool:
     return isinstance(message_event.get("reaction"), dict) or isinstance(message_event.get("read"), dict)
 
 
-def _saved_title(reel_id: str) -> str:
-    try:
-        with get_connection() as connection:
-            row = connection.execute(
-                "SELECT item_name FROM reel_items WHERE reel_id = ? AND item_name != '' ORDER BY id ASC LIMIT 1",
-                (reel_id,),
-            ).fetchone()
-        return row["item_name"] if row else ""
-    except Exception:
-        return ""
-
-
 def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
     if not settings.instagram_app_secret:
         # Local dev has no secret and must keep working. Production without
@@ -619,7 +607,6 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             already_saved = 0
             held_here = 0
             capped_here = 0
-            already_title = ""
             for url in urls:
                 # Checked per reel, not only per message: one message can
                 # carry many links, and checking once let a single text with
@@ -646,7 +633,6 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     # it again would pay for a second full extraction of the same
                     # video and change nothing they can see.
                     already_saved += 1
-                    already_title = _saved_title(reel["id"])
                     _log_webhook_event(
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="already_saved", detail=url,
@@ -673,9 +659,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             elif capped_here:
                 _reply_later(nudge.fire, user["id"], "month_cap")
             elif already_saved and not saved_here and sender_id not in pending_replies:
-                # Nothing new to process. Say so, with the name it was saved
-                # under, rather than a library link that tells them nothing.
-                _reply_later(nudge.fire, user["id"], "already_saved", already_title)
+                # Nothing new to process. Say so, rather than a library link
+                # that tells them nothing.
+                _reply_later(nudge.fire, user["id"], "already_saved")
         except Exception as exc:
             # One message that cannot be handled must not cost the others in
             # the same delivery. It is recorded, and the delivery is answered

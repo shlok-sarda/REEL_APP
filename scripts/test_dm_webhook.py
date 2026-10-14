@@ -217,11 +217,12 @@ def main() -> None:
         nudge.fire(saver["id"], "reel_ready", "Banaras Cafe")
         first_library = SENT[-1]
         check("the first library message is a button, not a pasted link", first_library["format"] == "button" and first_library["labels"] == ["Open my library"] and "http" not in first_library["text"], str(first_library))
+        check("the first library message quotes no title", "Banaras" not in first_library["text"], str(first_library))
         check("the button opens their own link", first_library["urls"][0] == f"https://clipnest.in/g/{user_row('saver')['library_token']}", str(first_library))
 
         fired, sent = deliver(client, message("saver", "https://www.instagram.com/reel/ABC123xyz/"))
-        check("a duplicate reel reaches the already saved reply", [(f["trigger"], f["title"]) for f in fired] == [("already_saved", "Banaras Cafe")], str(fired))
-        check("the already saved reply names the reel", sent and sent[0]["text"] == "You already have that one. It is in your library as Banaras Cafe.", str(sent))
+        check("a duplicate reel reaches the already saved reply", [f["trigger"] for f in fired] == ["already_saved"], str(fired))
+        check("the already saved reply quotes no title", sent and sent[0]["text"] == "You already have that one. It is in your library.", str(sent))
         with get_connection() as c:
             jobs = c.execute("SELECT COUNT(*) FROM processing_jobs WHERE user_id = ?", (saver["id"],)).fetchone()[0]
         check("a duplicate reel queues no second read", jobs == 1, f"jobs={jobs}")

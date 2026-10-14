@@ -447,7 +447,7 @@ def copy_problems(text: str) -> list[str]:
 
     No long dashes, no hyphen standing in for one, no emoji, no exclamation
     marks. scripts/simulate_nudges.py fails on any of these, and fire() checks
-    again at send time because a reel title is written by a model, not by us.
+    again at send time, before anything goes out.
     """
     problems = []
     if _EM_DASH in text:
@@ -463,17 +463,7 @@ def copy_problems(text: str) -> list[str]:
     return problems
 
 
-def clean_title(title: str) -> str:
-    """A reel title made safe to quote back inside a sentence of ours."""
-    cleaned = _EMOJI_RE.sub("", title or "")
-    cleaned = _DASH_RE.sub(", ", cleaned).replace("!", "")
-    cleaned = " ".join(cleaned.split()).strip(" .,;:")
-    if len(cleaned) > 80:
-        cleaned = cleaned[:80].rsplit(" ", 1)[0].strip(" .,;:")
-    return cleaned
-
-
-def _legacy_text(key: str, user: dict[str, Any], title: str = "") -> str:
+def _legacy_text(key: str, user: dict[str, Any]) -> str:
     """The plain text each message was before the redesign, link pasted in.
 
     This is what goes out when Instagram refuses a button message, and what
@@ -484,10 +474,7 @@ def _legacy_text(key: str, user: dict[str, Any], title: str = "") -> str:
     n = user["reel_count"]
 
     if key == "m2_first_library":
-        head = f"Here is your library: {link}"
-        if title:
-            head = f"Saved it as {title}. Here is your library: {link}"
-        return head + " That is 1 of 5. Send a few more and shelves start appearing on your Home."
+        return f"Saved your first reel. Here is your library: {link}" + " That is 1 of 5. Send a few more and shelves start appearing on your Home."
     if key == "m3_quiet_nudge":
         return f"Still here whenever you find something worth keeping. Your library: {link}"
     if key == "m4_home_screen":
@@ -532,8 +519,11 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
     """
     link = library_link(user)
     n = user["reel_count"]
-    title = clean_title(title)
-    legacy = _legacy_text(key, user, title=title)
+    # Reel titles are never quoted back, by Shlok's decision (2026-10-14).
+    # Many are poor for random reels, and showing one teaches people to
+    # search by that exact name instead of by what they remember. The count
+    # is said instead. `title` is still accepted so callers need not change.
+    legacy = _legacy_text(key, user)
 
     def open_library(url: str = link) -> list[dict]:
         return [{"type": "web_url", "title": "Open my library", "url": url}] if link else []
@@ -560,9 +550,8 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
     if key == "m2_first_library":
         # No promise tied to a number: shelves appear when a few reels share
         # a subject, which five mixed reels may not.
-        head = f"Saved it as {title}." if title else "Saved your first reel."
         return _message(
-            f"{head} That is 1 of 5. Send a few more and shelves start appearing on your Home.",
+            "Saved your first reel. That is 1 of 5. Send a few more and shelves start appearing on your Home.",
             legacy, buttons=open_library(),
         )
     if key == "m3_quiet_nudge":
@@ -570,9 +559,7 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         # one specific small thing rather than describing the product. No
         # button until there is a library worth opening: the ask is to send.
         if n <= 1:
-            if title:
-                return _message(f"You saved {title} yesterday. Send me one more and I can start grouping them.")
-            return _message("Send me one more reel and I can start grouping them.")
+            return _message("You saved your first reel yesterday. Send me one more and I can start grouping them.")
         if n < HOME_SCREEN_AT:
             return _message(f"{n} saved so far. A few more and they sort themselves onto shelves.")
         return _message("Still here whenever you find something worth keeping.", legacy, buttons=open_library())
@@ -651,9 +638,7 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             chips=HOW_TO_SHARE_CHIP,
         )
     if key == "m17_already_saved":
-        text = "You already have that one. It is in your library"
-        text = f"{text} as {title}." if title else f"{text}."
-        return _message(text, buttons=open_library())
+        return _message("You already have that one. It is in your library.", buttons=open_library())
     if key == "m21_delete_ack":
         return _message("Got it. Your data will be deleted within 7 days. You will get a message here when it is done.")
     return _message("")
@@ -732,9 +717,8 @@ def fire(user_id: str, trigger: str, title: str = "", direct: bool = False) -> s
             log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
             return None
         message = render(key, user, title=title, trigger=trigger)
-        if title and _message_problems(message):
-            # The title is the only part of a message we did not write.
-            message = render(key, user, trigger=trigger)
+        if _message_problems(message):
+            log_event("nudge", igsid, "copy_problem", f"{key} :: {', '.join(_message_problems(message))}")
         if not message["text"] or (key in NEEDS_LINK and not library_link(user)):
             log_event("nudge", igsid, "skipped", f"{key} produced no usable text")
             return None

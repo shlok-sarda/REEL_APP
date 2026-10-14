@@ -356,11 +356,11 @@ run("Taps 'What does ClipNest do?' with a library", "tapped, so the answer carri
 
 uid15 = _fresh_guest("dupe")
 _add_reel(uid15, 1, TITLES[0])
-run("Sends a reel they already saved", "nothing queued or paid for; names it",
+run("Sends a reel they already saved", "nothing queued or paid for; the title is not quoted",
     lambda: nudge.fire(uid15, "already_saved", title=TITLES[0]))
 uid15b = _fresh_guest("dupe_untitled")
 _add_reel(uid15b, 1, "")
-run("Sends a reel they already saved, which has no title", "same reply without a name",
+run("Sends a reel they already saved, which has no title", "same reply: titles are never quoted",
     lambda: nudge.fire(uid15b, "already_saved"))
 
 uid16 = _fresh_guest("photo")
@@ -413,13 +413,6 @@ uid23 = _fresh_guest("refused_chips")
 run("Unreadable share, but Instagram rejects the chips", "same words go out as plain text",
     lambda: nudge.fire(uid23, "unreadable_share"))
 REFUSE_TEMPLATES = False
-
-# --- 7. A title the bot did not write ----------------------------------------
-uid24 = _fresh_guest("messy_title")
-_add_reel(uid24, 1, "x")
-run("First reel is titled 'Paneer Tikka \u2014 SO easy!! \U0001F525'", "the title is cleaned before it is quoted back",
-    lambda: nudge.fire(uid24, "reel_ready", title="Paneer Tikka \u2014 SO easy!! \U0001F525"))
-
 
 # --- checks ------------------------------------------------------------------
 def problems() -> list[str]:
