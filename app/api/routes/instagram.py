@@ -336,6 +336,11 @@ def _describe_ad_message(message_event: dict, referral: dict) -> str:
     return " ".join(parts)[:480]
 
 
+def _answer_ad(user_id: str, sender_id: str, sender_username: str) -> None:
+    if not nudge.fire(user_id, "ad_open"):
+        _log_needs_human(sender_id, sender_username, "ad")
+
+
 def _extract_link_code(message_event: dict) -> str:
     for text in _deep_strings(message_event.get("message", {})):
         match = LINK_CODE_RE.search(text or "")
@@ -610,11 +615,17 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 if user and _is_delete_request(tap_title or _typed_text(event), tap_payload):
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], "delete_request")
-                if sender_id not in ad_flagged:
-                    # Once per delivery: the preview and their words are one
-                    # message to answer, not two.
-                    ad_flagged.add(sender_id)
                     _log_needs_human(sender_id, sender_username, "ad")
+                elif sender_id not in ad_flagged:
+                    # Once per delivery: the preview and their words are one
+                    # message to answer, not two. The bot gives its one fixed
+                    # answer; if it cannot (already given, window, a failed
+                    # send) the message is left for Shlok instead.
+                    ad_flagged.add(sender_id)
+                    if user:
+                        _reply_later(_answer_ad, user["id"], sender_id, sender_username)
+                    else:
+                        _log_needs_human(sender_id, sender_username, "ad")
                 ignored_events += 1
                 continue
             if not user:

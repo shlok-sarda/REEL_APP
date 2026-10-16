@@ -43,6 +43,7 @@ WINDOW_HOURS = 24
 PRECEDENCE = [
     "m10_month_cap",
     "m21_delete_ack",
+    "m24_ad_hello",
     "m6_lock",
     "m5_heads_up",
     "m4_home_screen",
@@ -57,7 +58,7 @@ PRECEDENCE = [
     "m3_quiet_nudge",
 ]
 
-ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock"}
+ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock", "m24_ad_hello"}
 
 # Judged against the last time the SAME message went out, not against the
 # last DM of any kind. The failure reply usually follows the first-reel ack by
@@ -312,7 +313,7 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     `trigger` is what woke us: reel_saved, reel_returned (a reel after a
     week or more without one), reel_ready, reel_failed, reel_held,
     already_saved, photo_post, unreadable_share, delete_request, month_cap,
-    timer.
+    ad_open (they opened the chat from an ad), timer.
 
     Typed messages and taps never reach here (only "delete my data" does):
     Shlok answers people by hand, by decision on 2026-10-14. The bot does the
@@ -328,6 +329,13 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # Signed in or not: the data deletion page promises this message is
         # enough, to everyone.
         return "m21_delete_ack"
+
+    if trigger == "ad_open":
+        # Opened the chat from an ad, usually by tapping a question like
+        # "How does this work?". One fixed answer, once ever: a second ad
+        # visit is left for Shlok. Before the signed in check because the
+        # question is the same whoever asks it.
+        return None if "m24_ad_hello" in user["already_sent"] else "m24_ad_hello"
 
     if user["signed_in"]:
         # Converted. The bot already got what it was for, so it speaks only
@@ -579,6 +587,11 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message("You already have that one. It is in your library.", buttons=open_library())
     if key == "m23_welcome_back":
         return _message("Saved. Your library is where you left it.", buttons=open_library())
+    if key == "m24_ad_hello":
+        return _message(
+            "Send any reel to this chat and I save it for you. Later you find it by searching in plain words, "
+            "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick clipnest.in and send it now."
+        )
     if key == "m21_delete_ack":
         # Nothing more is promised: Instagram stops the bot 24 hours after
         # their last message, so "you will hear when it is done" could not be kept.

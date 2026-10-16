@@ -333,6 +333,12 @@ uid16 = _fresh_guest("photo")
 run("They share a post or a photo instead of a reel", "told reels only; a pasted /p/ link still saves, most were videos",
     lambda: nudge.fire(uid16, "photo_post"))
 
+uid16b = _fresh_guest("ad_visitor")
+run("They open the chat from the ad and tap 'How does this work?'", "one fixed answer, once ever; the ad reel is not saved",
+    lambda: nudge.fire(uid16b, "ad_open"))
+run("They come from the ad a second time", "already answered once: silent, left for Shlok",
+    lambda: nudge.fire(uid16b, "ad_open"))
+
 uid17 = _fresh_guest("fail_with_library")
 _add_reel(uid17, 1, TITLES[0])
 nudge.fire(uid17, "reel_ready", title=TITLES[0])

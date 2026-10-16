@@ -286,35 +286,42 @@ def main() -> None:
             with get_connection() as c:
                 return c.execute("SELECT COUNT(*) FROM reels WHERE user_id = ?", (row["id"],)).fetchone()[0]
 
+        AD_ANSWER = "Send any reel to this chat and I save it for you."
         for name, preview in (("ad_post", AD_PREVIEW_POST), ("ad_share", AD_PREVIEW_SHARE), ("ad_reel", AD_PREVIEW_REEL)):
             fired, sent = deliver(client, message(name, "How does this work?", referral=AD_REFERRAL, attachments=[preview]))
-            check(f"an ad message with a {preview['type']} preview gets no bot reply", fired == [] and sent == [], str(sent))
-            check(f"an ad message with a {preview['type']} preview is left for Shlok", "needs_human" in outcomes(name), str(outcomes(name)))
+            check(f"an ad message with a {preview['type']} preview gets the one ad answer", [f["trigger"] for f in fired] == ["ad_open"] and len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+            check(f"an ad message with a {preview['type']} preview is never told reels only", not any("not posts" in s["text"] for s in sent), str(sent))
             check(f"an ad message with a {preview['type']} preview saves nothing", reels_of(name) == 0, str(outcomes(name)))
             check(f"an ad message with a {preview['type']} preview logs its shape", "ad_referral" in outcomes(name), str(outcomes(name)))
+            check(f"an answered ad message is not left waiting for Shlok", "needs_human" not in outcomes(name), str(outcomes(name)))
         with get_connection() as c:
             shape = c.execute("SELECT detail FROM instagram_webhook_events WHERE sender_id = 'ad_post' AND outcome = 'ad_referral'").fetchone()[0]
         check("the logged ad shape keeps no text, ad id or link", "How does" not in shape and "120200000000000001" not in shape and "http" not in shape and "source=ADS" in shape, shape)
 
-        fired, sent = deliver(client, message("ad_quiet", referral=AD_REFERRAL, attachments=[AD_PREVIEW_POST]))
-        check("an ad preview with no words gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_quiet"), str(sent))
+        fired, sent = deliver(client, message("ad_post", "Is it really free?", referral=AD_REFERRAL))
+        check("a second ad message gets no second answer and waits for Shlok", sent == [] and "needs_human" in outcomes("ad_post"), str(sent))
 
-        fired, sent = deliver(client, message("ad_text", "How does this work?", referral=AD_REFERRAL))
-        check("an ad question with no preview gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_text"), str(sent))
+        fired, sent = deliver(client, message("ad_quiet", referral=AD_REFERRAL, attachments=[AD_PREVIEW_POST]))
+        check("an ad preview with no words gets the ad answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
 
         fired, sent = deliver_many(client, [
             message("ad_split", attachments=[AD_PREVIEW_REEL]),
             message("ad_split", "How does this work?", referral=AD_REFERRAL),
         ])
-        check("an ad preview split from the referral in one delivery gets no reply", fired == [] and sent == [], str(sent))
+        check("an ad preview split from the referral in one delivery gets one answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
         check("an ad preview split from the referral saves nothing", reels_of("ad_split") == 0, str(outcomes("ad_split")))
-        check("an ad delivery is flagged for Shlok once, not per event", outcomes("ad_split").count("needs_human") == 1, str(outcomes("ad_split")))
 
-        fired, sent = deliver(client, {"sender": {"id": "ad_tap"}, "postback": {"mid": "pb", "title": "How does this work?", "payload": "AD_Q"}, "referral": AD_REFERRAL})
-        check("a tapped ad question gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_tap"), str(sent))
+        fired, sent = deliver(client, {"sender": {"id": "ad_tap"}, "postback": {"mid": "pb", "title": "How does it work?", "payload": "AD_Q"}, "referral": AD_REFERRAL})
+        check("a tapped ad question gets the ad answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
 
         fired, sent = deliver(client, message("ad_post", attachments=[AD_PREVIEW_REEL]))
         check("a reel they share after the ad chat goes through the normal flow", [f["trigger"] for f in fired] == ["reel_saved"] and reels_of("ad_post") == 1, str(fired))
+
+        deliver(client, message("ad_member", "https://www.instagram.com/reel/ADMEMBER1/"))
+        with get_connection() as c:
+            c.execute("UPDATE users SET google_sub = 'g_ad_member', last_dm_at = '' WHERE instagram_user_id = 'ad_member'")
+        fired, sent = deliver(client, message("ad_member", "How does this work?", referral=AD_REFERRAL))
+        check("a signed in person who taps the ad gets the answer too", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
 
         # --- signed in users stay untouched --------------------------------
         deliver(client, message("member", "https://www.instagram.com/reel/MEMBER111/"))
