@@ -112,6 +112,37 @@ def deliver(client: TestClient, event: dict) -> tuple[list[dict], list[dict]]:
     return FIRED[fired_before:], SENT[sent_before:]
 
 
+def deliver_many(client: TestClient, events: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Several messaging events in one delivery, as Instagram batches them."""
+    fired_before, sent_before = len(FIRED), len(SENT)
+    body = {"object": "instagram", "entry": [{"id": "biz", "time": 1, "messaging": [
+        {"recipient": {"id": "biz"}, "timestamp": 1, **event} for event in events
+    ]}]}
+    response = client.post("/instagram/webhook", json=body)
+    assert response.status_code == 200, response.text
+    return FIRED[fired_before:], SENT[sent_before:]
+
+
+# The referral block Meta documents for a chat opened from an ad (click to
+# Instagram Direct). Values are made up; the keys are Meta's.
+AD_REFERRAL = {
+    "ref": "",
+    "ad_id": "120200000000000001",
+    "source": "ADS",
+    "type": "OPEN_THREAD",
+    "ads_context_data": {
+        "ad_title": "Save reels in one tap",
+        "photo_url": "https://scontent.cdninstagram.com/v/ad_thumb.jpg",
+        "video_url": "https://scontent.cdninstagram.com/v/ad_video.mp4",
+        "post_id": "17900000000000001",
+    },
+}
+# The ad's reel as Instagram may attach it to the chat ("sent you a post").
+AD_PREVIEW_POST = {"type": "ig_post", "payload": {"url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1", "title": "Save reels in one tap", "ig_post_media_id": "17900000000000001"}}
+AD_PREVIEW_SHARE = {"type": "share", "payload": {"url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=2"}}
+AD_PREVIEW_REEL = {"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "title": "Save reels in one tap", "url": "https://www.instagram.com/reel/ADREEL0001/"}}
+
+
 def message(sender: str, text: str = "", **extra) -> dict:
     body = {"mid": f"m_{len(FIRED)}_{len(SENT)}"}
     if text:
@@ -243,6 +274,47 @@ def main() -> None:
 
         fired, sent = deliver(client, message("native", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "1", "title": "x", "url": "https://www.instagram.com/reel/NATIVE777/"}}]))
         check("a native share with a permalink is saved", "saved" in outcomes("native"), str(outcomes("native")))
+
+        fired, sent = deliver(client, message("post_note", "is this one saved?", attachments=[{"type": "ig_post", "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
+        check("a post sent with their own words is left for Shlok, not told reels only", sent == [] and "needs_human" in outcomes("post_note"), str(sent))
+
+        # --- opened from an ad ---------------------------------------------
+        def reels_of(sender: str) -> int:
+            row = user_row(sender)
+            if not row:
+                return 0
+            with get_connection() as c:
+                return c.execute("SELECT COUNT(*) FROM reels WHERE user_id = ?", (row["id"],)).fetchone()[0]
+
+        for name, preview in (("ad_post", AD_PREVIEW_POST), ("ad_share", AD_PREVIEW_SHARE), ("ad_reel", AD_PREVIEW_REEL)):
+            fired, sent = deliver(client, message(name, "How does this work?", referral=AD_REFERRAL, attachments=[preview]))
+            check(f"an ad message with a {preview['type']} preview gets no bot reply", fired == [] and sent == [], str(sent))
+            check(f"an ad message with a {preview['type']} preview is left for Shlok", "needs_human" in outcomes(name), str(outcomes(name)))
+            check(f"an ad message with a {preview['type']} preview saves nothing", reels_of(name) == 0, str(outcomes(name)))
+            check(f"an ad message with a {preview['type']} preview logs its shape", "ad_referral" in outcomes(name), str(outcomes(name)))
+        with get_connection() as c:
+            shape = c.execute("SELECT detail FROM instagram_webhook_events WHERE sender_id = 'ad_post' AND outcome = 'ad_referral'").fetchone()[0]
+        check("the logged ad shape keeps no text, ad id or link", "How does" not in shape and "120200000000000001" not in shape and "http" not in shape and "source=ADS" in shape, shape)
+
+        fired, sent = deliver(client, message("ad_quiet", referral=AD_REFERRAL, attachments=[AD_PREVIEW_POST]))
+        check("an ad preview with no words gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_quiet"), str(sent))
+
+        fired, sent = deliver(client, message("ad_text", "How does this work?", referral=AD_REFERRAL))
+        check("an ad question with no preview gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_text"), str(sent))
+
+        fired, sent = deliver_many(client, [
+            message("ad_split", attachments=[AD_PREVIEW_REEL]),
+            message("ad_split", "How does this work?", referral=AD_REFERRAL),
+        ])
+        check("an ad preview split from the referral in one delivery gets no reply", fired == [] and sent == [], str(sent))
+        check("an ad preview split from the referral saves nothing", reels_of("ad_split") == 0, str(outcomes("ad_split")))
+        check("an ad delivery is flagged for Shlok once, not per event", outcomes("ad_split").count("needs_human") == 1, str(outcomes("ad_split")))
+
+        fired, sent = deliver(client, {"sender": {"id": "ad_tap"}, "postback": {"mid": "pb", "title": "How does this work?", "payload": "AD_Q"}, "referral": AD_REFERRAL})
+        check("a tapped ad question gets no bot reply and is flagged", sent == [] and "needs_human" in outcomes("ad_tap"), str(sent))
+
+        fired, sent = deliver(client, message("ad_post", attachments=[AD_PREVIEW_REEL]))
+        check("a reel they share after the ad chat goes through the normal flow", [f["trigger"] for f in fired] == ["reel_saved"] and reels_of("ad_post") == 1, str(fired))
 
         # --- signed in users stay untouched --------------------------------
         deliver(client, message("member", "https://www.instagram.com/reel/MEMBER111/"))

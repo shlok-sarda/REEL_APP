@@ -299,6 +299,43 @@ def _attachment_trigger(message_event: dict) -> str:
     return "needs_human"
 
 
+def _ad_referral(message_event: dict) -> dict:
+    """The referral block Instagram adds when someone opens the chat from an
+    ad, or {} when there is none. Meta documents it inside `message`; it is
+    read from the event too in case it arrives one level up.
+
+    The chat that opens from an ad shows the ad's reel, and Instagram can send
+    that preview along as an attachment (the phone says "sent you a post").
+    The person shared nothing, so it must never be read as a post or a reel.
+    """
+    message = message_event.get("message")
+    for holder in (message if isinstance(message, dict) else {}, message_event):
+        referral = holder.get("referral")
+        if isinstance(referral, dict) and (
+            str(referral.get("source") or "").strip().upper() == "ADS"
+            or referral.get("ad_id")
+            or isinstance(referral.get("ads_context_data"), dict)
+        ):
+            return referral
+    return {}
+
+
+def _describe_ad_message(message_event: dict, referral: dict) -> str:
+    """Shape of a message that came from an ad: key names, the referral's
+    source and type, and the attachment types. Never the text, the ad id or
+    any URL, so the next ad case can be read from the log, not guessed."""
+    ads_context = referral.get("ads_context_data")
+    parts = [
+        f"referral_keys={sorted(referral.keys())}",
+        f"source={str(referral.get('source') or '')[:20]}",
+        f"type={str(referral.get('type') or '')[:20]}",
+    ]
+    if isinstance(ads_context, dict):
+        parts.append(f"ads_context_keys={sorted(ads_context.keys())}")
+    parts.append(_describe_message(message_event))
+    return " ".join(parts)[:480]
+
+
 def _extract_link_code(message_event: dict) -> str:
     for text in _deep_strings(message_event.get("message", {})):
         match = LINK_CODE_RE.search(text or "")
@@ -463,6 +500,17 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
     pending_replies: dict[str, dict] = {}
 
     events = list(_iter_message_events(payload))
+    # Someone who opened the chat from an ad. Instagram may split the ad
+    # preview and their words into separate events in one delivery, with the
+    # referral on only one of them, so the whole delivery from that sender is
+    # treated as the ad conversation.
+    ad_senders = {
+        str((event.get("sender") or {}).get("id") or "").strip()
+        for event in events
+        if _ad_referral(event)
+    }
+    ad_senders.discard("")
+    ad_flagged: set[str] = set()
     # Always record that a delivery arrived, so an empty event list is
     # distinguishable from "Instagram never called us at all".
     _log_webhook_event(
@@ -546,6 +594,29 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     drained = _drain_buffered_reels(sender_id, sender_username, user["id"])
                     if drained:
                         reels_saved += drained
+            if sender_id in ad_senders:
+                # Opened from an ad. The ad's reel is a preview Instagram put
+                # there, not something they shared: nothing is saved and the
+                # posts line is never sent. What they wrote, or the ad question
+                # they tapped, is left for Shlok like any other message.
+                referral = _ad_referral(event)
+                if referral:
+                    _log_webhook_event(
+                        "ad", sender_id=sender_id, sender_username=sender_username,
+                        outcome="ad_referral", detail=_describe_ad_message(event, referral),
+                    )
+                if (event.get("message") or {}).get("is_deleted"):
+                    continue
+                if user and _is_delete_request(tap_title or _typed_text(event), tap_payload):
+                    _log_delete_request(sender_id, sender_username, user["id"])
+                    _reply_later(nudge.fire, user["id"], "delete_request")
+                if sender_id not in ad_flagged:
+                    # Once per delivery: the preview and their words are one
+                    # message to answer, not two.
+                    ad_flagged.add(sender_id)
+                    _log_needs_human(sender_id, sender_username, "ad")
+                ignored_events += 1
+                continue
             if not user:
                 # Buffer instead of drop: keep each URL so it can be replayed when
                 # this sender's link code arrives (possibly later in this same
@@ -608,6 +679,11 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # the message is still flagged for Shlok like any other.
                 if _has_attachment(event):
                     trigger = _attachment_trigger(event)
+                    if trigger == "photo_post" and _typed_text(event).strip():
+                        # A post that came with their own words is someone
+                        # talking, most likely asking about it: "I only save
+                        # reels" would answer the wrong thing. Left for Shlok.
+                        trigger = "needs_human"
                 else:
                     trigger = "delete_request" if _is_delete_request(_typed_text(event)) else "needs_human"
                 if trigger == "delete_request":
