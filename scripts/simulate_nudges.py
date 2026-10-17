@@ -347,6 +347,10 @@ run("They open the chat from the ad and tap 'How does it work?'", "how it works 
     lambda: nudge.fire(uid16c, "ad_q_how"))
 run("Then they share our own ad reel back", "not saved; one short line, since how it works was already said",
     lambda: nudge.fire(uid16c, "own_post"))
+_egg_tag = next(f"egg{i}" for i in range(500) if nudge.own_reel_group(f"sim_egg{i}") == "egg")
+uid16e = _fresh_guest(_egg_tag)
+run("Someone new in the one in five group shares our own reel", "the Easter egg: a higher monthly cap and the library button",
+    lambda: nudge.fire(uid16e, "own_post"))
 uid16d = _fresh_guest("ad_share")
 run("They tap 'I want to share a reel'", "the share steps",
     lambda: nudge.fire(uid16d, "ad_q_share"))

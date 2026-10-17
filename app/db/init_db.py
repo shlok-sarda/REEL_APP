@@ -558,6 +558,12 @@ USER_EXTRA_COLUMNS = {
     # When they last messaged us. The 24h reply window is measured from this,
     # and the last-call nudge fires at 23h against it.
     "last_inbound_at": "TEXT NOT NULL DEFAULT ''",
+    # A monthly reel cap of their own, in place of MONTHLY_REEL_CAP, when above
+    # 0. Set by the Easter egg for sharing our own reel back.
+    "monthly_cap_override": "INTEGER NOT NULL DEFAULT 0",
+    # "egg" or "plain": which answer they got for sharing our own reel back,
+    # so the two groups can be compared. Empty for everyone else.
+    "own_reel_group": "TEXT NOT NULL DEFAULT ''",
 }
 
 # Same migrate-by-ALTER pattern for reels: a long-lived production table was

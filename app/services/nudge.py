@@ -48,6 +48,7 @@ PRECEDENCE = [
     "m25_ad_how",
     "m27_ad_share",
     "m24_ad_hello",
+    "m29_own_reel_egg",
     "m28_own_post",
     "m6_lock",
     "m5_heads_up",
@@ -65,14 +66,14 @@ PRECEDENCE = [
 
 ONCE_EVER = {
     "m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock",
-    "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share",
+    "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg",
 }
 
 # The answers someone who opened the chat from the ad can get: the general one,
 # and one for each question the ad shows. Each goes out once ever, so asking
 # "Is it really free?" after "How does it work?" gets its own answer, and the
 # same question twice is left for Shlok.
-AD_ANSWERS = {"m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share"}
+AD_ANSWERS = {"m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg"}
 QUESTION_ANSWERS = {"ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_share": "m27_ad_share"}
 
 # Judged against the last time the SAME message went out, not against the
@@ -218,6 +219,32 @@ def _month_start() -> datetime:
     return datetime.now(_IST).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def monthly_cap_for(user_id: str) -> int:
+    """MONTHLY_REEL_CAP, or the account's own cap when it has one (the Easter
+    egg). An own cap never switches the cap off: 0 there means none set."""
+    cap = settings.monthly_reel_cap
+    if cap <= 0:
+        return 0
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT monthly_cap_override FROM users WHERE id = ? LIMIT 1", (user_id,)
+            ).fetchone()
+        override = int((row["monthly_cap_override"] if row else 0) or 0)
+    except Exception:
+        override = 0
+    return override if override > 0 else cap
+
+
+def own_reel_group(igsid: str) -> str:
+    """egg or plain, fixed per person: the same id always lands in the same
+    group, so asking twice cannot re-roll it."""
+    import hashlib
+
+    bucket = int(hashlib.sha256((igsid or "").strip().encode("utf-8")).hexdigest(), 16) % 100
+    return "egg" if bucket < settings.own_reel_egg_percent else "plain"
+
+
 def over_monthly_cap(user_id: str) -> bool:
     """Has this account already saved its reels for the month?
 
@@ -225,7 +252,7 @@ def over_monthly_cap(user_id: str) -> bool:
     Counted from the reels table, against whichever is later of the 1st of
     the month and the moment the cap went live.
     """
-    cap = settings.monthly_reel_cap
+    cap = monthly_cap_for(user_id)
     if cap <= 0:
         return False
     try:
@@ -403,8 +430,11 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
 
     if trigger == "own_post":
         # They shared our own ad or reel back. Never saved. Someone who has
-        # heard nothing yet is told how it works; after that, one short line.
-        return "m28_own_post" if user["already_sent"] & AD_ANSWERS else "m24_ad_hello"
+        # heard nothing yet is told how it works, or, for one in five, finds
+        # the Easter egg; after that, one short line.
+        if user["already_sent"] & AD_ANSWERS:
+            return "m28_own_post"
+        return "m29_own_reel_egg" if own_reel_group(user.get("instagram_user_id") or "") == "egg" else "m24_ad_hello"
 
     if user["signed_in"]:
         # Converted. The bot already got what it was for, so it speaks only
@@ -530,7 +560,7 @@ def _legacy_text(key: str, user: dict[str, Any]) -> str:
         text = "I could not read that one. If it is private, a photo post, or deleted, try another reel."
         return f"{text} Your library: {link}" if link else text
     if key == "m10_month_cap":
-        return f"You have hit this month's limit of {settings.monthly_reel_cap} reels. It resets on the 1st."
+        return f"You have hit this month's limit of {monthly_cap_for(user['id'])} reels. It resets on the 1st."
     return ""
 
 
@@ -648,7 +678,7 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message(text)
     if key == "m10_month_cap":
         return _message(
-            f"That is this month's {settings.monthly_reel_cap} reels. New reels save again from the 1st. "
+            f"That is this month's {monthly_cap_for(user['id'])} reels. New reels save again from the 1st. "
             "Everything already saved is still there.",
             legacy, buttons=open_library(),
         )
@@ -686,6 +716,15 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message(
             "Open the reel, tap the share arrow, pick clipnest.in and send. "
             "I save it for you, and later you find it by searching in plain words."
+        )
+    if key == "m29_own_reel_egg":
+        cap = settings.own_reel_egg_monthly_cap
+        usual = settings.monthly_reel_cap
+        more = ", double the usual" if usual and cap == 2 * usual else ""
+        return _message(
+            f"You found our reel. Easter egg unlocked: you can save up to {cap} reels a month free{more}. "
+            "Here is your library. Now send me a reel you want to keep.",
+            buttons=open_library(),
         )
     if key == "m28_own_post":
         return _message(
@@ -803,6 +842,19 @@ def _fire(user_id: str, trigger: str, title: str, direct: bool) -> str | None:
         if result["ok"]:
             now = _iso(_now())
             with get_connection() as connection:
+                if trigger == "own_post" and key in {"m24_ad_hello", "m29_own_reel_egg"}:
+                    # Their first answer for sharing our reel: which group
+                    # they are in, kept for comparing the two later.
+                    group = "egg" if key == "m29_own_reel_egg" else "plain"
+                    connection.execute(
+                        "UPDATE users SET own_reel_group = ? WHERE id = ? AND own_reel_group = ''",
+                        (group, user_id),
+                    )
+                if key == "m29_own_reel_egg":
+                    connection.execute(
+                        "UPDATE users SET monthly_cap_override = MAX(monthly_cap_override, ?) WHERE id = ?",
+                        (settings.own_reel_egg_monthly_cap, user_id),
+                    )
                 connection.execute(
                     "UPDATE users SET last_dm_at = ? WHERE id = ?", (now, user_id)
                 )

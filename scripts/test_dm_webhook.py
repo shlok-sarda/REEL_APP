@@ -403,23 +403,44 @@ def main() -> None:
         deliver(client, message("pic_q", "How does it work?", attachments=[AD_PICTURE]))
         check("the ad picture with a question and no referral gets the answer", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
 
+        # Pick test senders that land in each group, by the same fixed hash.
+        egg_ids = [f"egg_{i}" for i in range(200) if nudge.own_reel_group(f"egg_{i}") == "egg"]
+        plain_ids = [f"plain_{i}" for i in range(200) if nudge.own_reel_group(f"plain_{i}") == "plain"]
+        share_rate = len([i for i in range(1000) if nudge.own_reel_group(f"rate_{i}") == "egg"]) / 1000
+        check("about one in five land in the Easter egg group", 0.15 <= share_rate <= 0.25, str(share_rate))
+        check("the group never changes for a person", all(nudge.own_reel_group(egg_ids[0]) == "egg" for _ in range(5)))
+        own_reel = {"type": "ig_reel", "payload": {"reel_video_id": "1", "url": "https://www.instagram.com/reel/OURPOST01/"}}
+        egg = egg_ids[0]
         before = len(SENT)
-        fired, sent = deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "1", "url": "https://www.instagram.com/reel/OURPOST01/"}}]))
-        check("our own reel shared back is never saved", reels_of("own_share") == 0, str(outcomes("own_share")))
+        deliver(client, message(egg, attachments=[own_reel]))
+        check("the Easter egg group gets the Easter egg", len(SENT) == before + 1 and SENT[-1]["text"].startswith("You found our reel. Easter egg unlocked: you can save up to 100 reels a month free, double the usual."), str(SENT[before:]))
+        check("with the library button", SENT[-1]["labels"] == ["Open my library"], str(SENT[-1]))
+        check("and their monthly cap is now 100", nudge.monthly_cap_for(user_row(egg)["id"]) == 100 and user_row(egg)["own_reel_group"] == "egg", str(user_row(egg).get("monthly_cap_override")))
+        check("the egg reel is not saved", reels_of(egg) == 0)
+        plain = plain_ids[0]
+        deliver(client, message(plain, attachments=[own_reel]))
+        check("the plain group keeps the usual cap and is logged", nudge.monthly_cap_for(user_row(plain)["id"]) == nudge.settings.monthly_reel_cap and user_row(plain)["own_reel_group"] == "plain", str(user_row(plain)))
+        groups = client.get("/health").json()["queue_debug"].get("own_reel_groups") or {}
+        check("the health page counts both groups", groups.get("egg", {}).get("people", 0) >= 1 and groups.get("plain", {}).get("people", 0) >= 1, str(groups))
+
+        own_share = plain_ids[1]
+        before = len(SENT)
+        fired, sent = deliver(client, message(own_share, attachments=[own_reel]))
+        check("our own reel shared back is never saved", reels_of(own_share) == 0, str(outcomes(own_share)))
         check("our own reel shared back is told how it works", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
         check("with their library button", SENT[-1]["labels"] == ["Open my library"] and SENT[-1]["urls"][0].startswith("https://clipnest.in/g/"), str(SENT[-1]))
         with get_connection() as c:
-            c.execute("UPDATE nudge_log SET sent_at = '2026-01-01T00:00:00+00:00' WHERE user_id = ?", (user_row("own_share")["id"],))
+            c.execute("UPDATE nudge_log SET sent_at = '2026-01-01T00:00:00+00:00' WHERE user_id = ?", (user_row(own_share)["id"],))
         before = len(SENT)
-        deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "url": "https://lookaside.fbsbx.com/x"}}]))
+        deliver(client, message(own_share, attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "url": "https://lookaside.fbsbx.com/x"}}]))
         check("our own reel by id, a second time, gets the short line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("That one is our own reel."), str(SENT[before:]))
         check("also with the library button", SENT[-1]["labels"] == ["Open my library"], str(SENT[-1]))
         with get_connection() as c:
-            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = 'own_share'")
+            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = ?", (own_share,))
         before = len(SENT)
-        nudge.fire(user_row("own_share")["id"], "timer")
+        nudge.fire(user_row(own_share)["id"], "timer")
         check("the next day reminder reaches someone with no reels, with the library button", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Still here whenever you find a reel") and SENT[-1]["labels"] == ["Open my library"], str(SENT[before:]))
-        check("and is still not saved", reels_of("own_share") == 0)
+        check("and is still not saved", reels_of(own_share) == 0)
         before = len(SENT)
         deliver(client, message("own_link", "https://www.instagram.com/reel/OURPOST01/"))
         check("a pasted link to our own reel is not saved", reels_of("own_link") == 0 and len(SENT) == before + 1, str(SENT[before:]))

@@ -278,6 +278,25 @@ def _debug_authorized(token: str) -> bool:
     return bool(secret) and _secrets.compare_digest(token.strip().encode("utf-8"), secret.encode("utf-8"))
 
 
+def _own_reel_groups() -> dict:
+    """Shared our own reel back: plain answer or Easter egg, and how many in
+    each went on to save a reel of their own. Counts only, so public."""
+    try:
+        from app.db.database import get_connection
+
+        with get_connection() as connection:
+            groups = connection.execute(
+                """
+                SELECT own_reel_group AS grp, COUNT(*) AS people,
+                       SUM(CASE WHEN EXISTS (SELECT 1 FROM reels r WHERE r.user_id = users.id) THEN 1 ELSE 0 END) AS saved_a_reel
+                FROM users WHERE own_reel_group != '' GROUP BY own_reel_group
+                """
+            ).fetchall()
+        return {r["grp"]: {"people": int(r["people"] or 0), "saved_a_reel": int(r["saved_a_reel"] or 0)} for r in groups}
+    except Exception as exc:
+        return {"error": str(exc)[:200]}
+
+
 def _instagram_webhook_debug(limit: int = 15) -> dict:
     """Recent webhook rows, for diagnosing why an expected DM did nothing.
 
@@ -550,6 +569,7 @@ def health_check(fix: int = 0, token: str = "", reset_guest: str = ""):
         # OpenAI call) — not something the open internet gets to trigger.
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debug token required")
     debug = _queue_debug(full=authorized)
+    debug["own_reel_groups"] = _own_reel_groups()
     if authorized:
         debug["instagram_webhook"] = _instagram_webhook_debug()
     if fix:

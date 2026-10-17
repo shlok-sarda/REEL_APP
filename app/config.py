@@ -64,6 +64,17 @@ class Settings:
         monthly_reel_cap: int = max(int(os.getenv("MONTHLY_REEL_CAP", "50").strip() or 50), 0)
     except ValueError:
         monthly_reel_cap: int = 50
+    # Someone new who shares our own reel back: this share of them (by a fixed
+    # hash of their Instagram id, so it never changes for a person) find an
+    # Easter egg, a higher monthly cap. The rest get the plain answer.
+    try:
+        own_reel_egg_percent: int = min(max(int(os.getenv("OWN_REEL_EGG_PERCENT", "20").strip() or 20), 0), 100)
+    except ValueError:
+        own_reel_egg_percent: int = 20
+    try:
+        own_reel_egg_monthly_cap: int = max(int(os.getenv("OWN_REEL_EGG_MONTHLY_CAP", "100").strip() or 100), 0)
+    except ValueError:
+        own_reel_egg_monthly_cap: int = 100
     # Senders who get the full new-user experience: an account created for
     # them on their first DM, and replies. Accepts Instagram usernames or
     # IGSIDs, comma separated, so a test account can be named by handle
