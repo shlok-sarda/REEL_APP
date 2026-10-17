@@ -290,7 +290,7 @@ def main() -> None:
 
         for kind in ("share", "ig_post", "image"):
             fired, sent = deliver(client, message(f"post_{kind}", attachments=[{"type": kind, "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
-            check(f"a shared {kind} is told reels only", [f["trigger"] for f in fired] == ["photo_post"] and sent and sent[0]["text"].startswith("I only save reels for now, not posts"), str(sent))
+            check(f"a shared {kind} is told how to send the reel link", [f["trigger"] for f in fired] == ["photo_post"] and sent and sent[0]["text"].startswith("Instagram did not send me the link for that one."), str(sent))
         fired, sent = deliver(client, message("reel_no_link", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "9"}}]))
         check("a shared reel with no link still gets the copy link reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
 
@@ -447,7 +447,7 @@ def main() -> None:
 
         before = len(SENT)
         deliver(client, message("real_photo", attachments=[AD_PICTURE]))
-        check("a real photo, not from the ad, still gets the reels only line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("I only save reels for now, not posts or photos."), str(SENT[before:]))
+        check("a real photo, not from the ad, still gets the share line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Instagram did not send me the link for that one."), str(SENT[before:]))
 
         for sender, text, answer in (("q_free", "Is it really free?", FREE_ANSWER), ("q_how", "how does this work", HOW_ANSWER), ("q_share", "I want to share a reel", SHARE_ANSWER)):
             fired, sent = deliver(client, message(sender, text))

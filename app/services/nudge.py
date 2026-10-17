@@ -683,7 +683,14 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             legacy, buttons=open_library(),
         )
     if key == "m15_photo_post":
-        return _message("I only save reels for now, not posts or photos. Share a reel and I will add it.")
+        # Instagram sends many reels shared from the feed as "ig_post", with no
+        # reel link in the message, so this cannot tell a reel from a photo.
+        # The line has to be right for both: "only reels" told people who had
+        # just sent a reel that it was not one (2026-10-17).
+        return _message(
+            "Instagram did not send me the link for that one. If it is a reel, tap the three dots on it, "
+            "Copy link, and paste the link here. I do not save photos or posts yet."
+        )
     if key == "m16_unreadable_share":
         return _message(
             "I could not find the reel in that message. Open the reel, tap the three dots, Copy link, and paste it here."
