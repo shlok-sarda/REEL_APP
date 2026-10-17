@@ -21,7 +21,7 @@ from app.services.instagram_profile import (
     resolve_instagram_username,
 )
 from app.services.instagram_send import send_text
-from app.services import nudge, own_media
+from app.services import admin_stats, nudge, own_media
 from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_valid_instagram_url
 
 
@@ -82,6 +82,9 @@ def _log_webhook_event(
                 """,
                 (iso_now(), kind, sender_id, sender_username, link_code, outcome, detail[:500]),
             )
+            # One counter row per day for the admin dashboard, so the daily
+            # picture survives the 200-row trim just below.
+            admin_stats.record_bot_event(connection, kind, sender_id, outcome, iso_now())
             # Keep the table small — retain the most recent 200 rows. Except
             # buffered reels: this table doubles as the holding pen for reels
             # sent before an account existed or past the 20-reel wall, and

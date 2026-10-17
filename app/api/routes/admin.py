@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
-from app.services.auth import list_users_admin, require_admin
+from app.services.auth import current_user, list_users_admin, require_admin, user_is_admin
 from app.services.search_log import llm_usage_summary
 from app.services.instagram_profile import (
     backfill_usernames,
@@ -11,6 +12,46 @@ from app.services.instagram_profile import (
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _admin_or_not_found(request: Request) -> None:
+    """The dashboard does not exist for anyone but the admin: a logged-out
+    visitor and a signed-in non-admin both get a plain 404, never a hint
+    that there is something to sign in to."""
+    if not user_is_admin(current_user(request)):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+def _dashboard_page(request: Request, page: str) -> HTMLResponse:
+    from app.services.admin_stats import dashboard_data
+    from app.ui_ux.admin_dashboard import render
+
+    _admin_or_not_found(request)
+    return HTMLResponse(render(page, dashboard_data()), headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+@router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_today(request: Request):
+    return _dashboard_page(request, "today")
+
+
+@router.get("/dashboard/people", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_people(request: Request):
+    return _dashboard_page(request, "people")
+
+
+@router.get("/dashboard/bot", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_bot(request: Request):
+    return _dashboard_page(request, "bot")
+
+
+@router.get("/dashboard.json", include_in_schema=False)
+def admin_dashboard_json(request: Request):
+    """The same numbers as data, for a quick look or a future widget."""
+    from app.services.admin_stats import dashboard_data
+
+    _admin_or_not_found(request)
+    return dashboard_data()
 
 
 @router.get("/users")

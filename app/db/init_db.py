@@ -521,6 +521,21 @@ SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_llm_usage_created
         ON llm_usage(created_at)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS bot_daily (
+        day TEXT NOT NULL,
+        metric TEXT NOT NULL,
+        value INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, metric)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS bot_daily_senders (
+        day TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        PRIMARY KEY (day, sender_id)
+    )
+    """,
 ]
 
 # Migrate-by-ALTER pattern (see USER_EXTRA_COLUMNS below): folder_memberships

@@ -59,7 +59,7 @@ function createYou() {
           <button class="row has-icon pressable" type="button" data-how><span class="icon-tile is-neutral">${icon('info')}</span><span><span class="row-title">How ClipNest works</span></span>${icon('chev')}</button>
           <button class="row has-icon pressable" type="button" data-install><span class="icon-tile is-neutral">${icon('home')}</span><span><span class="row-title">Add to your home screen</span></span>${icon('chev')}</button>
         </div></section>
-      ${u.is_admin ? `<section class="you-sec" data-admin><h2 class="eyebrow is-quiet">People (admin)</h2><div class="group"><div class="row"><span class="sk sk-line" style="width:60%"></span></div></div></section>` : ''}
+      ${u.is_admin ? `<section class="you-sec" data-admin><h2 class="eyebrow is-quiet">People (admin)</h2><div class="group"><a class="row has-icon pressable" href="/admin/dashboard"><span class="icon-tile">${icon('chart')}</span><span><span class="row-title">Dashboard</span><span class="row-meta">People, reels, bot and ads, live</span></span>${icon('chev')}</a></div><div class="group" data-people><div class="row"><span class="sk sk-line" style="width:60%"></span></div></div></section>` : ''}
       <section class="you-sec"><button class="tech-toggle pressable" type="button" data-tech aria-expanded="${techOpen}">${icon('settings')}<span>Technical details</span>${icon(techOpen ? 'up' : 'down')}</button>
         <div class="tech" data-techbody ${techOpen ? '' : 'hidden'}></div></section>
       ${LIVE ? `<section class="you-sec"><div class="group"><a class="row has-icon pressable" href="/app?ui=classic"><span class="icon-tile is-neutral">${icon('undo')}</span><span><span class="row-title">Use the classic app</span><span class="row-meta">Come back any time from /app?ui=v2</span></span>${icon('chev')}</a></div></section>` : ''}
@@ -83,7 +83,7 @@ function createYou() {
   }
 
   async function loadAdmin() {
-    const box = $('[data-admin] .group');
+    const box = $('[data-admin] [data-people]');
     if (!box) return;
     try {
       const res = await api.getAdminUsers();
