@@ -334,7 +334,7 @@ run("They share a post or a photo instead of a reel", "told reels only; a pasted
     lambda: nudge.fire(uid16, "photo_post"))
 
 uid16b = _fresh_guest("ad_visitor")
-run("They open the chat from the ad with only the preview", "the general answer, once ever; the ad reel is not saved",
+run("They open the chat from the ad with only the preview", "the general answer, once ever, when no reel of ours could be saved",
     lambda: nudge.fire(uid16b, "ad_open"))
 run("They come from the ad a second time", "already answered once: silent, left for Shlok",
     lambda: nudge.fire(uid16b, "ad_open"))
@@ -345,7 +345,7 @@ run("They ask 'Is it really free?' again", "same question twice: silent, left fo
 uid16c = _fresh_guest("ad_how")
 run("They open the chat from the ad and tap 'How does it work?'", "how it works in two lines, then asks for a reel",
     lambda: nudge.fire(uid16c, "ad_q_how"))
-run("Then they share our own ad reel back", "not saved; one short line, since how it works was already said",
+run("Then they share our own ad reel back", "one short line with their library, since how it works was already said",
     lambda: nudge.fire(uid16c, "own_post"))
 _egg_tag = next(f"egg{i}" for i in range(500) if nudge.own_reel_group(f"sim_egg{i}") == "egg")
 uid16e = _fresh_guest(_egg_tag)

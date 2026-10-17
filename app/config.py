@@ -75,6 +75,9 @@ class Settings:
         own_reel_egg_monthly_cap: int = max(int(os.getenv("OWN_REEL_EGG_MONTHLY_CAP", "100").strip() or 100), 0)
     except ValueError:
         own_reel_egg_monthly_cap: int = 100
+    # Links of our own reels and ads, comma separated, on top of the list in
+    # app/services/own_media.py. The first is the reel the ad is built on.
+    own_reel_urls: str = os.getenv("OWN_REEL_URLS", "").strip()
     # Senders who get the full new-user experience: an account created for
     # them on their first DM, and replies. Accepts Instagram usernames or
     # IGSIDs, comma separated, so a test account can be named by handle

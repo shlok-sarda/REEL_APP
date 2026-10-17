@@ -110,12 +110,25 @@ def reel_is_finished(job: dict) -> bool:
         return False
 
 
+def _own_reel(reel_id: str) -> bool:
+    """One of our own reels (the ad) saved into someone's library. The bot
+    already answered it, so it is never announced as their reel."""
+    try:
+        from app.db.database import get_connection as _conn
+
+        with _conn() as c:
+            row = c.execute("SELECT source FROM reels WHERE id = ? LIMIT 1", (reel_id,)).fetchone()
+        return bool(row) and (row["source"] or "") == "clipnest_ad"
+    except Exception:
+        return False
+
+
 def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
     """Fail the job and tell the owner. A failed job is final (nothing retries
     it), and the owner was already told their reel is processing, so without
     this they wait on a reply that never comes."""
     fail_job(job["id"], message, claim_token)
-    if job.get("job_type") != "process_reel":
+    if job.get("job_type") != "process_reel" or _own_reel(job["reel_id"]):
         return
     try:
         from app.services import nudge
@@ -235,7 +248,7 @@ def process_job(job: dict):
     # Now that the reel has a title and media, tell the owner - this is the
     # first moment their library link would actually show them something.
     # Wrapped so a failed DM can never fail a completed job.
-    if job["job_type"] == "process_reel":
+    if job["job_type"] == "process_reel" and not _own_reel(job["reel_id"]):
         try:
             from app.db.database import get_connection as _conn
             from app.services import nudge

@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 
@@ -111,6 +112,10 @@ route._settle_then = _settle
 OWN_IDS = {"17900000000000001"}
 OWN_CODES = {"ADREEL0001", "OURPOST01"}
 route.own_media._known = lambda: (OWN_IDS, OWN_CODES)
+route.own_media._cache["by_id"] = {"17900000000000001": "ADREEL0001"}
+route.own_media._look_up = lambda media_id: ""
+# The ad's reel, for an ad visit that names no reel (a bare picture).
+route.own_media.OWN_REEL_URLS[:] = ["https://www.instagram.com/reel/ADREEL0001/"]
 
 CHECKS = 0
 FAILURES: list[str] = []
@@ -319,7 +324,7 @@ def main() -> None:
             fired, sent = deliver(client, message(name, "How does this work?", referral=AD_REFERRAL, attachments=[preview]))
             check(f"an ad message with a {preview['type']} preview gets the answer to its question", [f["trigger"] for f in fired] == ["ad_q_how"] and len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
             check(f"an ad message with a {preview['type']} preview is never told reels only", not any("not posts" in s["text"] for s in sent), str(sent))
-            check(f"an ad message with a {preview['type']} preview saves nothing", reels_of(name) == 0, str(outcomes(name)))
+            check(f"an ad message with a {preview['type']} preview saves our reel once", reels_of(name) == 1 and "own_saved" in outcomes(name), str(outcomes(name)))
             check(f"an ad message with a {preview['type']} preview logs its shape", "ad_referral" in outcomes(name), str(outcomes(name)))
             check(f"an answered ad message is not left waiting for Shlok", "needs_human" not in outcomes(name), str(outcomes(name)))
         with get_connection() as c:
@@ -333,20 +338,20 @@ def main() -> None:
         check("the same ad question twice gets no second answer and waits for Shlok", sent == [] and "needs_human" in outcomes("ad_post"), str(sent))
 
         fired, sent = deliver(client, message("ad_quiet", referral=AD_REFERRAL, attachments=[AD_PREVIEW_POST]))
-        check("an ad preview with no words gets the ad answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+        check("an ad preview with no words saves the ad and says so, with their library", len(sent) == 1 and sent[0]["text"].startswith("Saved that reel to your library.") and sent[0]["labels"] == ["Open my library"], str(sent))
 
         fired, sent = deliver_many(client, [
             message("ad_split", attachments=[AD_PREVIEW_REEL]),
             message("ad_split", "How does this work?", referral=AD_REFERRAL),
         ])
         check("an ad preview split from the referral in one delivery gets one answer", len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
-        check("an ad preview split from the referral saves nothing", reels_of("ad_split") == 0, str(outcomes("ad_split")))
+        check("an ad preview split from the referral saves our reel once", reels_of("ad_split") == 1, str(outcomes("ad_split")))
 
         fired, sent = deliver(client, {"sender": {"id": "ad_tap"}, "postback": {"mid": "pb", "title": "How does it work?", "payload": "AD_Q"}, "referral": AD_REFERRAL})
         check("a tapped ad question gets its answer", len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
 
         fired, sent = deliver(client, message("ad_post", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "555", "url": "https://www.instagram.com/reel/THEIRREEL1/"}}]))
-        check("a reel they share after the ad chat goes through the normal flow", [f["trigger"] for f in fired] == ["reel_saved"] and reels_of("ad_post") == 1, str(fired))
+        check("a reel they share after the ad chat goes through the normal flow", [f["trigger"] for f in fired] == ["reel_saved"] and reels_of("ad_post") == 2, str(fired))
 
         deliver(client, message("ad_member", "https://www.instagram.com/reel/ADMEMBER1/"))
         with get_connection() as c:
@@ -381,7 +386,7 @@ def main() -> None:
         deliver(client, {"sender": {"id": "ref_alone"}, "referral": AD_REFERRAL})
         before = len(SENT)
         release_held()
-        check("a referral alone gets the general answer after the wait", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
+        check("a referral alone saves the ad and says so after the wait", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Saved that reel to your library."), str(SENT[before:]))
 
         HOLD["on"] = True
         before = len(SENT)
@@ -390,7 +395,7 @@ def main() -> None:
         release_held()
         check("the ad as a picture, then the question: one answer", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
         check("the ad as a picture is never told reels only", no_posts_line(SENT[before:]), str(SENT[before:]))
-        check("the ad as a picture saves nothing", reels_of("pic_first") == 0)
+        check("the ad as a picture saves our reel once", reels_of("pic_first") == 1, str(outcomes("pic_first")))
 
         before = len(SENT)
         deliver(client, message("pic_after", "Is it really free?", referral=AD_REFERRAL))
@@ -413,10 +418,10 @@ def main() -> None:
         egg = egg_ids[0]
         before = len(SENT)
         deliver(client, message(egg, attachments=[own_reel]))
-        check("the Easter egg group gets the Easter egg", len(SENT) == before + 1 and SENT[-1]["text"].startswith("You found our reel. Easter egg unlocked: you can save up to 100 reels a month free, double the usual."), str(SENT[before:]))
+        check("the Easter egg group gets the Easter egg", len(SENT) == before + 1 and SENT[-1]["text"].startswith("You found our reel, so I saved it to your library. Easter egg unlocked: you can save up to 100 reels a month free, double the usual."), str(SENT[before:]))
         check("with the library button", SENT[-1]["labels"] == ["Open my library"], str(SENT[-1]))
         check("and their monthly cap is now 100", nudge.monthly_cap_for(user_row(egg)["id"]) == 100 and user_row(egg)["own_reel_group"] == "egg", str(user_row(egg).get("monthly_cap_override")))
-        check("the egg reel is not saved", reels_of(egg) == 0)
+        check("the egg reel is saved", reels_of(egg) == 1)
         plain = plain_ids[0]
         deliver(client, message(plain, attachments=[own_reel]))
         check("the plain group keeps the usual cap and is logged", nudge.monthly_cap_for(user_row(plain)["id"]) == nudge.settings.monthly_reel_cap and user_row(plain)["own_reel_group"] == "plain", str(user_row(plain)))
@@ -426,24 +431,53 @@ def main() -> None:
         own_share = plain_ids[1]
         before = len(SENT)
         fired, sent = deliver(client, message(own_share, attachments=[own_reel]))
-        check("our own reel shared back is never saved", reels_of(own_share) == 0, str(outcomes(own_share)))
-        check("our own reel shared back is told how it works", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
+        check("our own reel shared back is saved", reels_of(own_share) == 1 and "own_saved" in outcomes(own_share), str(outcomes(own_share)))
+        check("our own reel shared back is told it is saved", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Saved that reel to your library."), str(SENT[before:]))
+        check("the saved line never writes clipnest.in", "clipnest.in" not in SENT[-1]["text"], SENT[-1]["text"])
+        own_state = nudge.load_state(user_row(own_share)["id"])
+        check("our reel is not counted as one of theirs", own_state["reel_count"] == 0 and own_state["own_reel_saved"], str(own_state["reel_count"]))
+        with get_connection() as c:
+            own_row = c.execute("SELECT source, status FROM reels WHERE user_id = ?", (user_row(own_share)["id"],)).fetchone()
+            queued = c.execute("SELECT COUNT(*) FROM processing_jobs WHERE reel_id = (SELECT id FROM reels WHERE user_id = ?)", (user_row(own_share)["id"],)).fetchone()[0]
+        check("it is marked as ours and queued once", own_row["source"] == "clipnest_ad" and queued == 1, str(dict(own_row)))
         check("with their library button", SENT[-1]["labels"] == ["Open my library"] and SENT[-1]["urls"][0].startswith("https://clipnest.in/g/"), str(SENT[-1]))
         with get_connection() as c:
             c.execute("UPDATE nudge_log SET sent_at = '2026-01-01T00:00:00+00:00' WHERE user_id = ?", (user_row(own_share)["id"],))
         before = len(SENT)
         deliver(client, message(own_share, attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "url": "https://lookaside.fbsbx.com/x"}}]))
-        check("our own reel by id, a second time, gets the short line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("That one is our own reel."), str(SENT[before:]))
+        check("our own reel by id, a second time, gets the short line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("That reel is in your library."), str(SENT[before:]))
+        check("a different reel of ours is its own copy", reels_of(own_share) == 2, str(outcomes(own_share)))
         check("also with the library button", SENT[-1]["labels"] == ["Open my library"], str(SENT[-1]))
         with get_connection() as c:
             c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = ?", (own_share,))
         before = len(SENT)
         nudge.fire(user_row(own_share)["id"], "timer")
         check("the next day reminder reaches someone with no reels, with the library button", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Still here whenever you find a reel") and SENT[-1]["labels"] == ["Open my library"], str(SENT[before:]))
-        check("and is still not saved", reels_of(own_share) == 0)
+        check("and still the same two", reels_of(own_share) == 2)
         before = len(SENT)
         deliver(client, message("own_link", "https://www.instagram.com/reel/OURPOST01/"))
-        check("a pasted link to our own reel is not saved", reels_of("own_link") == 0 and len(SENT) == before + 1, str(SENT[before:]))
+        check("a pasted link to our own reel is saved, with one reply", reels_of("own_link") == 1 and len(SENT) == before + 1 and SENT[-1]["labels"] == ["Open my library"], str(SENT[before:]))
+        before = len(SENT)
+        deliver(client, message("own_link", "https://www.instagram.com/reel/OURPOST01/"))
+        check("the same link again is not a second copy but still gets the library", reels_of("own_link") == 1 and len(SENT) == before + 1 and SENT[-1]["text"].startswith("That reel is in your library.") and SENT[-1]["labels"] == ["Open my library"], str(SENT[before:]) + str(FIRED[-2:]) + str(outcomes("own_link")))
+
+        from app.services.reel_ingest import sync_reel_items_from_accumulated
+        import csv as _csv
+        own_uid = user_row("own_link")["id"]
+        with get_connection() as c:
+            own_url = c.execute("SELECT url FROM reels WHERE user_id = ?", (own_uid,)).fetchone()[0]
+        acc = os.path.join(_tmp, "acc.csv")
+        with open(acc, "w", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=["URL", "Item Name", "Primary Category"])
+            w.writeheader()
+            w.writerow({"URL": own_url, "Item Name": "Reel saving app demo", "Primary Category": "Tech"})
+        sync_reel_items_from_accumulated(own_uid, acc)
+        with get_connection() as c:
+            name = c.execute("SELECT item_name FROM reel_items WHERE reel_id = (SELECT id FROM reels WHERE user_id = ?)", (own_uid,)).fetchone()[0]
+        check("our reel is named ClipNest ad in the library", name == "ClipNest ad", name)
+
+        no_bare_site = [m["text"] for m in SENT if re.search(r"(?<!@)clipnest\.in", m["text"])]
+        check("no bot message writes the website as text", not no_bare_site, str(no_bare_site[:2]))
 
         before = len(SENT)
         deliver(client, message("real_photo", attachments=[AD_PICTURE]))

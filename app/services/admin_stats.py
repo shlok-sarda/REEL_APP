@@ -38,6 +38,8 @@ BUCKETS = ["0", "1", "2 to 4", "5 to 9", "10 to 19", "20 to 49", "50+"]
 # founder's own and testers, so the dashboard starts at the real users.
 PEOPLE = "id LIKE 'user_ig_%'"
 REELS = "user_id IN (SELECT id FROM users WHERE id LIKE 'user_ig_%')"
+# Our own reel (the ad) saved into someone's library is not a reel they saved.
+THEIRS = "COALESCE(source, '') <> 'clipnest_ad'"
 
 # Webhook outcomes worth a daily counter. Anything else is noise for this page.
 COUNTED_OUTCOMES = {"needs_human", "ad_referral", "created", "over_month_cap", "saved"}
@@ -220,7 +222,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         f"""
         SELECT COUNT(*) AS eligible,
                SUM(CASE WHEN
-                    EXISTS (SELECT 1 FROM reels r WHERE r.user_id = u.id
+                    EXISTS (SELECT 1 FROM reels r WHERE r.user_id = u.id AND COALESCE(r.source, '') <> 'clipnest_ad'
                             AND {_norm('r.received_at')} >= datetime({_norm('u.created_at')}, '+7 days'))
                  OR (COALESCE(u.last_login_at, '') <> ''
                      AND {_norm('u.last_login_at')} >= datetime({_norm('u.created_at')}, '+7 days'))
@@ -242,19 +244,19 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                SUM(CASE WHEN {r_day} >= ? THEN 1 ELSE 0 END) AS this_month,
                COUNT(DISTINCT CASE WHEN {r_day} = ? THEN user_id END) AS savers_today,
                COUNT(DISTINCT CASE WHEN {r_day} >= ? THEN user_id END) AS savers_7
-        FROM reels WHERE {REELS}
+        FROM reels WHERE {REELS} AND {THEIRS}
         """,
         (today, days7[0], first30, month_start, today, days7[0]),
     ).fetchone()
     reels_per_day = _series(
         c.execute(
-            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND {r_day} >= ? GROUP BY d", (first30,)
+            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND {THEIRS} AND {r_day} >= ? GROUP BY d", (first30,)
         ).fetchall(),
         days30,
     )
     failed_per_day = _series(
         c.execute(
-            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND status = 'failed' AND {r_day} >= ? GROUP BY d",
+            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND {THEIRS} AND status = 'failed' AND {r_day} >= ? GROUP BY d",
             (first30,),
         ).fetchall(),
         days30,
@@ -272,7 +274,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                  WHEN n < 50 THEN '20 to 49'
                  ELSE '50+' END AS bucket,
                COUNT(*) AS people
-        FROM (SELECT u.id, (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id) AS n FROM users u WHERE u.{PEOPLE})
+        FROM (SELECT u.id, (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id AND COALESCE(r.source, '') <> 'clipnest_ad') AS n FROM users u WHERE u.{PEOPLE})
         GROUP BY bucket
         """
     ).fetchall()
@@ -292,7 +294,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         own_cap = "CASE WHEN COALESCE(u.monthly_cap_override, 0) > 0 THEN u.monthly_cap_override ELSE ? END" if has_override else "?"
         rows = c.execute(
             f"""
-            SELECT (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id AND {_norm('r.received_at')} >= ?) AS n,
+            SELECT (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id AND COALESCE(r.source, '') <> 'clipnest_ad' AND {_norm('r.received_at')} >= ?) AS n,
                    {own_cap} AS cap
             FROM users u WHERE u.{PEOPLE}
             """,
@@ -312,7 +314,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         for row in c.execute(
             """
             SELECT own_reel_group AS grp, COUNT(*) AS people,
-                   SUM(CASE WHEN EXISTS (SELECT 1 FROM reels r WHERE r.user_id = users.id) THEN 1 ELSE 0 END) AS saved_a_reel
+                   SUM(CASE WHEN EXISTS (SELECT 1 FROM reels r WHERE r.user_id = users.id AND COALESCE(r.source, '') <> 'clipnest_ad') THEN 1 ELSE 0 END) AS saved_a_reel
             FROM users WHERE own_reel_group <> '' GROUP BY own_reel_group
             """
         ).fetchall():
@@ -383,7 +385,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
     older = c.execute(
         f"""
         SELECT COUNT(*) AS people,
-               (SELECT COUNT(*) FROM reels WHERE NOT ({REELS})) AS reels
+               (SELECT COUNT(*) FROM reels WHERE NOT ({REELS}) AND {THEIRS}) AS reels
         FROM users WHERE NOT ({PEOPLE})
         """
     ).fetchone()

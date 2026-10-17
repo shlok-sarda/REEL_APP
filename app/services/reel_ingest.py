@@ -724,6 +724,14 @@ def sync_reel_items_from_accumulated(user_id: str, accumulated_csv_path: str | P
     reels_by_url = {(row.get("url") or "").strip(): row["id"] for row in reel_rows if (row.get("url") or "").strip()}
 
     with get_connection() as connection:
+        # Our own reels (the ad) are called what they are, not what the model
+        # reads into them.
+        own_reel_ids = {
+            row["id"]
+            for row in connection.execute(
+                "SELECT id FROM reels WHERE user_id = ? AND source = 'clipnest_ad'", (normalized_user,)
+            ).fetchall()
+        }
         if reel_ids:
             placeholders = ",".join("?" for _ in reel_ids)
             item_ids = [
@@ -755,6 +763,10 @@ def sync_reel_items_from_accumulated(user_id: str, accumulated_csv_path: str | P
                 item_name = normalize(row.get("Item Name")) or fallback_item_name(row)
                 if not reel_id:
                     continue
+                if reel_id in own_reel_ids and item_name != "Processing Failed":
+                    from app.services.own_media import OWN_REEL_NAME
+
+                    item_name = OWN_REEL_NAME
 
                 connection.execute(
                     """

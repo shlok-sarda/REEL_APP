@@ -369,6 +369,16 @@ def _describe_ad_message(message_event: dict, referral: dict) -> str:
     return " ".join(parts)[:480]
 
 
+def _ad_referral_of(events: list, sender_id: str) -> dict:
+    """The referral on any event of this sender in the delivery."""
+    for event in events:
+        if str((event.get("sender") or {}).get("id") or "").strip() == sender_id:
+            referral = _ad_referral(event)
+            if referral:
+                return referral
+    return {}
+
+
 def _since(seconds: int) -> str:
     return (datetime.fromisoformat(iso_now()) - timedelta(seconds=seconds)).isoformat(timespec="seconds")
 
@@ -410,12 +420,24 @@ def _answer_question(user_id: str, sender_id: str, sender_username: str, trigger
         _log_needs_human(sender_id, sender_username, "question")
 
 
+def _answer_ad_visit(user_id: str, sender_id: str, sender_username: str) -> None:
+    """The ad arrival with no words, after AD_SETTLE_SECONDS: the answer for
+    our own reel once it is in their library, else the general answer."""
+    trigger = "own_post" if nudge.has_own_reel(user_id) else "ad_open"
+    _answer_ad(user_id, sender_id, sender_username, trigger, False)
+
+
 def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
     """The reply to a share with no reel to save: a post or photo, a reel with
     no link, or our own reel. Run after AD_SETTLE_SECONDS. Inside an ad visit
     the share is the ad's preview, which the ad answer already covers, so it
-    gets nothing: never "only reels" to someone who tapped the ad."""
-    if _in_ad_visit(sender_id, user_id):
+    gets nothing: never "only reels" to someone who tapped the ad.
+
+    Our own reel shared again outside an ad visit is answered (with their
+    library) even right after an earlier answer: only a real ad arrival in the
+    last few minutes makes it the ad's preview."""
+    own_again = trigger == "own_post" and not _ad_referral_since(sender_id, _since(AD_CONTEXT_SECONDS))
+    if not own_again and _in_ad_visit(sender_id, user_id):
         _log_webhook_event(
             "reel", sender_id=sender_id, sender_username=sender_username,
             outcome="ad_preview_ignored", detail=trigger,
@@ -424,21 +446,105 @@ def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: s
     nudge.fire(user_id, trigger)
 
 
-def _saveable_urls(message_event: dict) -> tuple[list[str], bool]:
-    """Reel links worth saving, and whether any link or attachment in the
-    message was our own reel or post, which is never saved."""
+# Where Instagram puts the media id of a shared reel (reel_video_id), of the
+# ad's preview (ig_post_media_id) and of anything else (id).
+_MEDIA_ID_KEYS = ("reel_video_id", "ig_post_media_id", "id")
+
+
+def _saveable_urls(message_event: dict, in_ad_visit: bool = False) -> tuple[list[str], bool, list[str]]:
+    """Reel links worth saving, whether any link or attachment in the message
+    was our own reel or ad, and the links of those of ours.
+
+    Our own reel goes into their library like any other (Shlok, 2026-10-17),
+    but on its own path: it is named for what it is and is not counted as one
+    of their reels. Inside an ad visit a media id the account list does not
+    show is asked about on its own, since the ad's reel can be one of those.
+    """
     urls = []
     own = False
+    own_urls: list[str] = []
     for url in _extract_candidate_urls(message_event):
         if own_media.is_own_url(url):
             own = True
+            own_urls.append(own_media.reel_url(own_media.shortcode(url)))
         else:
             urls.append(url)
     for att in (message_event.get("message") or {}).get("attachments") or []:
         payload = att.get("payload") if isinstance(att, dict) else None
-        if isinstance(payload, dict) and own_media.is_own_media_id(payload.get("reel_video_id") or payload.get("id") or ""):
-            own = True
-    return urls, own
+        if not isinstance(payload, dict):
+            continue
+        for key in _MEDIA_ID_KEYS:
+            media_id = str(payload.get(key) or "").strip()
+            if not media_id:
+                continue
+            url = own_media.url_for_media_id(media_id, ask=in_ad_visit)
+            if url:
+                own = True
+                own_urls.append(url)
+            elif own_media.is_own_media_id(media_id):
+                own = True
+            break
+    return urls, own, list(dict.fromkeys(u for u in own_urls if u))
+
+
+def _save_own_reels(
+    user_id: str, sender_id: str, sender_username: str, urls: list[str],
+    event: dict | None = None, referral: dict | None = None,
+) -> None:
+    """Save our reels into their library: `urls`, else the reel of an ad
+    visit (`referral`) or of the ad's preview (`event`)."""
+    if not urls and event is not None:
+        urls = _ad_reel_urls(event, referral)[:1] if referral is not None else _saveable_urls(event, in_ad_visit=True)[2]
+    saved = 0
+    for url in urls:
+        try:
+            saved += _save_own_reel(user_id, sender_id, sender_username, url)
+        except Exception as exc:
+            _log_webhook_event(
+                "reel", sender_id=sender_id, sender_username=sender_username,
+                outcome="own_save_failed", detail=f"{url} :: {exc!r}"[:400],
+            )
+    if saved:
+        ensure_background_progress()
+
+
+def _ad_reel_urls(message_event: dict, referral: dict) -> list[str]:
+    """Which of our reels an ad visit is about: the preview in the message,
+    else the ad's post id, else the ad reel set in own_media."""
+    urls = _saveable_urls(message_event, in_ad_visit=True)[2]
+    if urls:
+        return urls
+    ads_context = referral.get("ads_context_data") if isinstance(referral.get("ads_context_data"), dict) else {}
+    url = own_media.url_for_media_id(ads_context.get("post_id") or "", ask=True)
+    if url:
+        return [url]
+    fallback = own_media.ad_reel_url()
+    return [fallback] if fallback else []
+
+
+def _save_own_reel(user_id: str, sender_id: str, sender_username: str, url: str) -> bool:
+    """Put one of our reels in their library. True when it was not there yet.
+
+    No lock and no monthly cap: it is not counted as one of their reels."""
+    shortcode = own_media.shortcode(url)
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id FROM reels WHERE user_id = ? AND shortcode = ? LIMIT 1", (user_id, shortcode)
+        ).fetchone()
+    if row:
+        _log_webhook_event(
+            "reel", sender_id=sender_id, sender_username=sender_username,
+            outcome="own_already_saved", detail=url,
+        )
+        return False
+    reel = append_reel(url, user_id=user_id, source=own_media.OWN_SOURCE)
+    if reel.get("status") != "completed":
+        enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+    _log_webhook_event(
+        "reel", sender_id=sender_id, sender_username=sender_username,
+        outcome="own_saved", detail=url,
+    )
+    return True
 
 
 def _extract_link_code(message_event: dict) -> str:
@@ -616,6 +722,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
     }
     ad_senders.discard("")
     ad_flagged: set[str] = set()
+    ad_own_saved: set[str] = set()
     # What each of them said in this delivery: the tapped question or their
     # words, from whichever event carries them. The ad answer is chosen from
     # this, so a preview that comes first does not get the general answer
@@ -725,6 +832,15 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     )
                 if (event.get("message") or {}).get("is_deleted"):
                     continue
+                if user and sender_id not in ad_own_saved:
+                    # The ad is our own reel: it goes into their library, so
+                    # the link they get back opens on something. Off the
+                    # webhook path, since finding which reel can ask Meta.
+                    ad_own_saved.add(sender_id)
+                    _reply_later(
+                        _save_own_reels, user["id"], sender_id, sender_username, [],
+                        event, referral or _ad_referral_of(events, sender_id),
+                    )
                 if user and _is_delete_request(tap_title or _typed_text(event), tap_payload):
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], "delete_request")
@@ -742,7 +858,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                             nudge.ad_question(words) or "ad_open", True,
                         )
                     elif user:
-                        _settle_then(_answer_ad, user["id"], sender_id, sender_username, "ad_open", False)
+                        _settle_then(_answer_ad_visit, user["id"], sender_id, sender_username)
                     else:
                         _log_needs_human(sender_id, sender_username, "ad")
                 ignored_events += 1
@@ -786,7 +902,15 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
 
             # The wall. Hold the reel rather than process it, and rather than
             # reject it: signing in then saves everything waiting in one go.
-            urls, own_shared = _saveable_urls(event)
+            urls, own_shared, own_urls = _saveable_urls(event)
+            in_ad_preview = not own_urls and _has_attachment(event) and _in_ad_visit(sender_id, user["id"])
+            if own_urls or in_ad_preview:
+                # Our reel, or what may be the ad's preview: saved off the
+                # webhook path, since the preview's reel can need asking Meta.
+                _reply_later(
+                    _save_own_reels, user["id"], sender_id, sender_username, own_urls,
+                    event if in_ad_preview else None, None,
+                )
             if nudge.is_locked(user["id"]):
                 held = urls
                 for url in held:
@@ -813,7 +937,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # the message is still flagged for Shlok like any other.
                 question = nudge.ad_question(_typed_text(event))
                 if own_shared:
-                    # Our own ad or reel shared back: never saved.
+                    # Our own ad or reel shared back: saved above, and
+                    # answered with their library.
                     trigger = "own_post"
                 elif _has_attachment(event):
                     trigger = _attachment_trigger(event)

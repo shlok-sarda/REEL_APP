@@ -202,7 +202,7 @@ def is_locked(user_id: str) -> bool:
         with get_connection() as connection:
             row = connection.execute(
                 "SELECT COALESCE(google_sub, '') AS g, "
-                "(SELECT COUNT(*) FROM reels WHERE user_id = users.id) AS n "
+                "(SELECT COUNT(*) FROM reels WHERE user_id = users.id AND COALESCE(source, '') != 'clipnest_ad') AS n "
                 "FROM users WHERE id = ? LIMIT 1",
                 (user_id,),
             ).fetchone()
@@ -234,6 +234,18 @@ def monthly_cap_for(user_id: str) -> int:
     except Exception:
         override = 0
     return override if override > 0 else cap
+
+
+def has_own_reel(user_id: str) -> bool:
+    """Is one of our own reels (the ad's) in this library?"""
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM reels WHERE user_id = ? AND source = 'clipnest_ad' LIMIT 1", (user_id,)
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
 
 
 def own_reel_group(igsid: str) -> str:
@@ -271,7 +283,7 @@ def over_monthly_cap(user_id: str) -> bool:
                     (MONTH_CAP_FLAG, live_since),
                 )
             n = connection.execute(
-                "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND received_at >= ?",
+                "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND received_at >= ? AND COALESCE(source, '') != 'clipnest_ad'",
                 (user_id, max(month_start, live_since)),
             ).fetchone()["n"]
         return int(n or 0) >= cap
@@ -291,7 +303,10 @@ def load_state(user_id: str) -> dict[str, Any] | None:
         if not row:
             return None
         reel_count = connection.execute(
-            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ?", (user_id,)
+            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND COALESCE(source, '') != 'clipnest_ad'", (user_id,)
+        ).fetchone()["n"]
+        own_reels = connection.execute(
+            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND source = 'clipnest_ad'", (user_id,)
         ).fetchone()["n"]
         last_sent = {
             r["message_key"]: r["last_at"]
@@ -303,7 +318,7 @@ def load_state(user_id: str) -> dict[str, Any] | None:
         }
         sent = set(last_sent)
         completed_count = connection.execute(
-            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND status = 'completed'", (user_id,)
+            "SELECT COUNT(*) AS n FROM reels WHERE user_id = ? AND status = 'completed' AND COALESCE(source, '') != 'clipnest_ad'", (user_id,)
         ).fetchone()["n"]
         # Reels waiting behind the sign-in wall live in the webhook log.
         held_count = connection.execute(
@@ -314,6 +329,7 @@ def load_state(user_id: str) -> dict[str, Any] | None:
     user = dict(row)
     user["reel_count"] = int(reel_count or 0)
     user["completed_count"] = int(completed_count or 0)
+    user["own_reel_saved"] = bool(own_reels)
     user["held_count"] = int(held_count or 0)
     user["already_sent"] = sent
     user["last_sent_at"] = last_sent
@@ -699,43 +715,65 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message("You already have that one. It is in your library.", buttons=open_library())
     if key == "m23_welcome_back":
         return _message("Saved. Your library is where you left it.", buttons=open_library())
-    # Someone who shared our own ad reel back gets their library button with
-    # the answer, so they can open it and see the app straight away (Shlok,
-    # 2026-10-17).
-    own_share_buttons = open_library() if trigger == "own_post" else []
+    # Every ad answer carries their own library button, never the website:
+    # "clipnest.in" written as text turns into a link to clipnest.in, which
+    # shows them nothing of theirs (Shlok, 2026-10-17). The handle is written
+    # @clipnest.in so it opens our profile instead.
+    saved_own = bool(user.get("own_reel_saved"))
+    if key == "m24_ad_hello" and trigger == "own_post":
+        # Our own reel or the ad, shared or opened: it is in their library now.
+        if saved_own:
+            return _message(
+                "Saved that reel to your library. Here it is. "
+                "Send me any reel you want to keep and it goes in there too.",
+                buttons=open_library(),
+            )
+        return _message(
+            "Here is your library. Send me any reel you want to keep and it goes in there.",
+            buttons=open_library(),
+        )
     if key == "m24_ad_hello":
         return _message(
             "Send any reel to this chat and I save it for you. Later you find it by searching in plain words, "
-            "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick clipnest.in and send it now.",
-            buttons=own_share_buttons,
+            "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick @clipnest.in and send it now.",
+            buttons=open_library(),
         )
     if key == "m25_ad_how":
         return _message(
             "You send me a reel and I save it for you. Later you search in plain words, like cafe in goa, "
-            "and it comes up. Open any reel, tap share, pick clipnest.in and send it."
+            "and it comes up. Open any reel, tap share, pick @clipnest.in and send it.",
+            buttons=open_library(),
         )
     if key == "m26_ad_free":
         return _message(
             "Yes, it is free. No app and no sign up to start. "
-            "Open any reel, tap share, pick clipnest.in and send it to me."
+            "Open any reel, tap share, pick @clipnest.in and send it to me.",
+            buttons=open_library(),
         )
     if key == "m27_ad_share":
         return _message(
-            "Open the reel, tap the share arrow, pick clipnest.in and send. "
-            "I save it for you, and later you find it by searching in plain words."
+            "Open the reel, tap the share arrow, pick @clipnest.in and send. "
+            "I save it for you, and later you find it by searching in plain words.",
+            buttons=open_library(),
         )
     if key == "m29_own_reel_egg":
         cap = settings.own_reel_egg_monthly_cap
         usual = settings.monthly_reel_cap
         more = ", double the usual" if usual and cap == 2 * usual else ""
+        opening = "You found our reel, so I saved it to your library." if saved_own else "You found our reel."
         return _message(
-            f"You found our reel. Easter egg unlocked: you can save up to {cap} reels a month free{more}. "
-            "Here is your library. Now send me a reel you want to keep.",
+            f"{opening} Easter egg unlocked: you can save up to {cap} reels a month free{more}. "
+            "Now send me a reel you want to keep.",
             buttons=open_library(),
         )
     if key == "m28_own_post":
+        if saved_own:
+            return _message(
+                "That reel is in your library. Send me any reel you want to keep and it goes in there too.",
+                buttons=open_library(),
+            )
         return _message(
-            "That one is our own reel. Share a reel you want to keep and I will save it for you.",
+            "That one is our own reel. Send me any reel you want to keep and I save it for you.",
             buttons=open_library(),
         )
     if key == "m21_delete_ack":
