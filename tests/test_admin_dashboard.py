@@ -62,7 +62,8 @@ PEOPLE = [
     ("user_ig_6", "", 50, 30),
     ("user_ig_7", "", 0, 1),
 ]
-EXPECTED_BUCKETS = {"0": 2, "1": 1, "2 to 4": 2, "5 to 9": 1, "10 to 19": 1, "20 to 49": 1, "50+": 1}
+# Only bot accounts (user_ig_*) count; admin and plain are "older accounts".
+EXPECTED_BUCKETS = {"0": 1, "1": 1, "2 to 4": 1, "5 to 9": 1, "10 to 19": 1, "20 to 49": 1, "50+": 1}
 
 def seed() -> None:
     with get_connection() as c:
@@ -141,15 +142,16 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     got = {b["label"]: b["people"] for b in data["buckets"]}
     check("bucket counts are exactly right", got == EXPECTED_BUCKETS, f"{got}")
     p = data["people"]
-    check("people total", p["total"] == 9, str(p["total"]))
-    check("guests vs signed in", (p["guests"], p["signed_in"]) == (7, 2), f"{p['guests']}/{p['signed_in']}")
+    check("people total counts bot accounts only", p["total"] == 7, str(p["total"]))
+    check("older accounts reported", data["older"] == {"people": 2, "reels": 3}, str(data["older"]))
+    check("guests vs signed in", (p["guests"], p["signed_in"]) == (7, 0), f"{p['guests']}/{p['signed_in']}")
     check("new today counts the guest who joined today", p["today"] == 1, str(p["today"]))
     check("new in last 7 days", p["last_7"] == 3, str(p["last_7"]))
     r = data["reels"]
-    check("reels total", r["total"] == 102, str(r["total"]))
+    check("reels total, bot accounts only", r["total"] == 99, str(r["total"]))
     check("failed reels", r["failed"] == 2, str(r["failed"]))
     check("cap: the 50-reel person is at the cap", data["cap"]["at_cap"] == 1, str(data["cap"]))
-    check("cost at Rs 0.82", abs(data["cost"]["total"] - round(102 * 0.82, 2)) < 0.01, str(data["cost"]["total"]))
+    check("cost at Rs 0.82", abs(data["cost"]["total"] - round(99 * 0.82, 2)) < 0.01, str(data["cost"]["total"]))
     ad = data["bot"]["ad"]
     check("ad question counted", ad["m26_ad_free"]["total"] == 1 and ad["m24_ad_hello"]["total"] == 1)
     check("waiting for a human", data["bot"]["waiting_for_human_7d"] == 1)

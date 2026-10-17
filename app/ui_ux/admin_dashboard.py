@@ -163,10 +163,12 @@ def _page_today(d: dict[str, Any]) -> str:
 <tr><td>Last 30 days</td><td>{_n(p["last_30"])}</td><td>{_n(r["last_30"])}</td><td>{_rs(r["last_30"] * c["per_reel"])}</td></tr>
 <tr><td>This month</td><td>{_n(p["this_month"])}</td><td>{_n(r["this_month"])}</td><td>{_rs(c["this_month"])}</td></tr>
 <tr><td>All time</td><td>{_n(p["total"])}</td><td>{_n(r["total"])}</td><td>{_rs(c["total"])}</td></tr></table>"""
+    older = d["older"]
+    older_note = f'Counting people who came through the bot. Not counted: {_n(older["people"])} older accounts with {_n(older["reels"])} reels (you and testers).'
     return tiles + '<div class="grid">' + "".join([
         card("New people per day", f"Last 30 days. <b>{_n(sum(p['per_day']))}</b> joined, <b>{_n(sum(p['ig_per_day']))}</b> of them through the bot.", bars(p["per_day"], days)),
         card("Reels saved per day", f"Last 30 days. <b>{_n(sum(r['per_day']))}</b> reels, <b>{_n(sum(r['failed_per_day']))}</b> failed.", bars(r["per_day"], days)),
-    ]) + "</div>" + card("The windows side by side", "", strips, f"Cost is an estimate at Rs {c['per_reel']} per reel read. The real bill is on the usage page.")
+    ]) + "</div>" + card("The windows side by side", "", strips, f"Cost is an estimate at Rs {c['per_reel']} per reel read. {older_note}")
 
 
 def _page_people(d: dict[str, Any]) -> str:
@@ -180,7 +182,8 @@ def _page_people(d: dict[str, Any]) -> str:
         tile(_n(p["guests_who_signed_in"]), "Guests who later signed in", f'of {_n(p["from_instagram"])} who came through the bot'),
     ]) + "</div>"
     bucket_items = [(x["label"] + (" reel" if x["label"] == "1" else " reels"), x["people"]) for x in d["buckets"]]
-    bucket_card = card("Reels per person", f"How many reels each of the <b>{_n(p['total'])}</b> people has saved.", hrows(bucket_items))
+    bucket_card = card("Reels per person", f"How many reels each of the <b>{_n(p['total'])}</b> people has saved.", hrows(bucket_items),
+                       f'Not counted: {_n(d["older"]["people"])} older accounts (you and testers) with {_n(d["older"]["reels"])} reels.')
     reels_card = card(
         "Reels",
         f'<b>{_n(r["total"])}</b> saved, <b>{_n(r["failed"])}</b> failed, <b>{_n(r["in_progress"])}</b> in progress right now.',

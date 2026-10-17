@@ -34,6 +34,11 @@ SEED_FLAG = "bot_daily_seeded_v1"
 
 BUCKETS = ["0", "1", "2 to 4", "5 to 9", "10 to 19", "20 to 49", "50+"]
 
+# Only accounts made by the bot count as people. The older accounts are the
+# founder's own and testers, so the dashboard starts at the real users.
+PEOPLE = "id LIKE 'user_ig_%'"
+REELS = "user_id IN (SELECT id FROM users WHERE id LIKE 'user_ig_%')"
+
 # Webhook outcomes worth a daily counter. Anything else is noise for this page.
 COUNTED_OUTCOMES = {"needs_human", "ad_referral", "created", "over_month_cap", "saved"}
 # Outbound rows: the bot talking, not a person.
@@ -194,13 +199,13 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                SUM(CASE WHEN {u_day} >= ? THEN 1 ELSE 0 END) AS last_7,
                SUM(CASE WHEN {u_day} >= ? THEN 1 ELSE 0 END) AS last_30,
                SUM(CASE WHEN {u_day} >= ? THEN 1 ELSE 0 END) AS this_month
-        FROM users
+        FROM users WHERE {PEOPLE}
         """,
         (today, days7[0], first30, month_start),
     ).fetchone()
     people_per_day = _series(
         c.execute(
-            f"SELECT {u_day} AS d, COUNT(*) FROM users WHERE {u_day} >= ? GROUP BY d", (first30,)
+            f"SELECT {u_day} AS d, COUNT(*) FROM users WHERE {PEOPLE} AND {u_day} >= ? GROUP BY d", (first30,)
         ).fetchall(),
         days30,
     )
@@ -221,7 +226,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                      AND {_norm('u.last_login_at')} >= datetime({_norm('u.created_at')}, '+7 days'))
                THEN 1 ELSE 0 END) AS returned
         FROM users u
-        WHERE {_norm('u.created_at')} <= datetime('now', '-7 days')
+        WHERE u.{PEOPLE} AND {_norm('u.created_at')} <= datetime('now', '-7 days')
         """
     ).fetchone()
 
@@ -237,19 +242,19 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                SUM(CASE WHEN {r_day} >= ? THEN 1 ELSE 0 END) AS this_month,
                COUNT(DISTINCT CASE WHEN {r_day} = ? THEN user_id END) AS savers_today,
                COUNT(DISTINCT CASE WHEN {r_day} >= ? THEN user_id END) AS savers_7
-        FROM reels
+        FROM reels WHERE {REELS}
         """,
         (today, days7[0], first30, month_start, today, days7[0]),
     ).fetchone()
     reels_per_day = _series(
         c.execute(
-            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {r_day} >= ? GROUP BY d", (first30,)
+            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND {r_day} >= ? GROUP BY d", (first30,)
         ).fetchall(),
         days30,
     )
     failed_per_day = _series(
         c.execute(
-            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE status = 'failed' AND {r_day} >= ? GROUP BY d",
+            f"SELECT {r_day} AS d, COUNT(*) FROM reels WHERE {REELS} AND status = 'failed' AND {r_day} >= ? GROUP BY d",
             (first30,),
         ).fetchall(),
         days30,
@@ -257,7 +262,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
 
     # ---- reels per person, in buckets -----------------------------------
     bucket_rows = c.execute(
-        """
+        f"""
         SELECT CASE
                  WHEN n = 0 THEN '0'
                  WHEN n = 1 THEN '1'
@@ -267,7 +272,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
                  WHEN n < 50 THEN '20 to 49'
                  ELSE '50+' END AS bucket,
                COUNT(*) AS people
-        FROM (SELECT u.id, (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id) AS n FROM users u)
+        FROM (SELECT u.id, (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id) AS n FROM users u WHERE u.{PEOPLE})
         GROUP BY bucket
         """
     ).fetchall()
@@ -289,7 +294,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             f"""
             SELECT (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id AND {_norm('r.received_at')} >= ?) AS n,
                    {own_cap} AS cap
-            FROM users u
+            FROM users u WHERE u.{PEOPLE}
             """,
             (cap_since, cap),
         ).fetchall()
@@ -374,6 +379,15 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         f"SELECT COUNT(*) FROM instagram_webhook_events WHERE outcome = 'needs_human' AND {_norm('received_at')} >= datetime('now', '-7 days')"
     ).fetchone()[0]
 
+    # ---- older accounts, reported once and left out of everything above ----
+    older = c.execute(
+        f"""
+        SELECT COUNT(*) AS people,
+               (SELECT COUNT(*) FROM reels WHERE NOT ({REELS})) AS reels
+        FROM users WHERE NOT ({PEOPLE})
+        """
+    ).fetchone()
+
     # ---- cost -------------------------------------------------------------
     def rupees(n: int) -> float:
         return round(n * REEL_COST_RUPEES, 2)
@@ -395,6 +409,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             "failed_per_day": failed_per_day,
         },
         "buckets": buckets,
+        "older": {"people": int(older["people"] or 0), "reels": int(older["reels"] or 0)},
         "cap": {"cap": cap, "at_cap": at_cap, "near_cap": near_cap, "since": cap_since, "refused": metric_totals.get("over_month_cap", 0)},
         "cost": {
             "per_reel": REEL_COST_RUPEES,
