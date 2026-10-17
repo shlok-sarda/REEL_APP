@@ -31,3 +31,5 @@ technology_reels_*
 *.pkl
 
 .claude/launch.json
+cache.json.lock
+cache.json.*.tmp

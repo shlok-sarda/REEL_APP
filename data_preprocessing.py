@@ -21,17 +21,77 @@ CACHE_FILE = BASE_DIR / "cache.json"
 
 client = get_openai_client()
 
+CACHE_LOCK_FILE = BASE_DIR / "cache.json.lock"
+
+
+def read_cache_file():
+    """The cache as a dict, never an exception.
+
+    The cache is only a shortcut, so a damaged file must not stop a reel. A
+    file with junk after a whole JSON object (two writers once overlapped)
+    keeps the whole part; anything else unreadable counts as empty.
+    """
+    try:
+        text = CACHE_FILE.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(text.lstrip())
+        except ValueError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
 # Load cache
-if CACHE_FILE.exists():
-    with open(CACHE_FILE, "r") as f:
-        cache = json.load(f)
-else:
-    cache = {}
+cache = read_cache_file()
 
 
-def save_cache():
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+class _CacheLock:
+    """Only one process writes the cache at a time.
+
+    Two reels are read at once (WORKER_COUNT=2), each in its own process, and
+    both write this one file. Without the lock their writes interleaved and
+    left a file no reel could load, which failed every reel after it.
+    """
+
+    def __enter__(self):
+        self._handle = None
+        try:
+            import fcntl
+
+            self._handle = open(CACHE_LOCK_FILE, "a")
+            fcntl.flock(self._handle, fcntl.LOCK_EX)
+        except Exception:
+            # No lock available: the atomic rename below still keeps the file whole.
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if self._handle is not None:
+            self._handle.close()
+        return False
+
+
+def save_cache(shortcode=None):
+    with _CacheLock():
+        if shortcode:
+            # Start from what is on disk so another process's new entries survive.
+            on_disk = read_cache_file()
+            on_disk[shortcode] = cache.get(shortcode)
+            cache.update(on_disk)
+        # Write a private copy and swap it in: a reader sees the old file or the
+        # new one, never half of each.
+        tmp_file = CACHE_FILE.with_name(f"{CACHE_FILE.name}.{os.getpid()}.tmp")
+        try:
+            with open(tmp_file, "w") as f:
+                json.dump(cache, f)
+            os.replace(tmp_file, CACHE_FILE)
+        finally:
+            if tmp_file.exists():
+                tmp_file.unlink()
 
 
 def save_cache_entry(shortcode, payload):
@@ -41,7 +101,13 @@ def save_cache_entry(shortcode, payload):
     merged = dict(existing)
     merged.update(payload or {})
     cache[shortcode] = merged
-    save_cache()
+    try:
+        save_cache(shortcode)
+    except OSError as exc:
+        # The reel itself is fine; only the shortcut for next time is lost.
+        import sys
+
+        print(f"[cache] could not save {shortcode}: {exc}", file=sys.stderr, flush=True)
 
 
 def is_cache_entry_usable(entry):

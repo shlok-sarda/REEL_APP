@@ -2,6 +2,8 @@ import os
 import cv2
 import json
 import base64
+import shutil
+import tempfile
 import argparse
 from collections import Counter
 from urllib.parse import quote_plus
@@ -159,7 +161,17 @@ def extract_visual_data(result, video_path):
     if not video_path or not os.path.exists(video_path):
         return visual_data
 
-    keyframes = extract_scene_keyframes(video_path)
+    # A folder of its own per reel. Two reels are read at once, and with one
+    # shared folder each overwrote and deleted the other's frame_N.jpg before
+    # they were sent, so a reel could be described from another reel's pictures.
+    frames_root = BASE_DIR / "keyframes"
+    os.makedirs(frames_root, exist_ok=True)
+    frames_dir = tempfile.mkdtemp(prefix=f"{os.getpid()}_", dir=str(frames_root))
+    try:
+        keyframes = extract_scene_keyframes(video_path, output_dir=frames_dir)
+        encoded_frames = [b64 for b64 in (encode_keyframe(path) for path in keyframes) if b64]
+    finally:
+        shutil.rmtree(frames_dir, ignore_errors=True)
 
     prompt = f"""
 You are analyzing Instagram reel keyframes together with textual context.
@@ -196,11 +208,7 @@ OUTPUT STRICT JSON:
 
     content = [{"type": "text", "text": prompt}]
 
-    for frame_path in keyframes:
-        b64 = encode_keyframe(frame_path)
-        if not b64:
-            continue
-
+    for b64 in encoded_frames:
         content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
@@ -216,9 +224,6 @@ OUTPUT STRICT JSON:
 
     # cleanup
     os.remove(video_path)
-    for f in keyframes:
-        if os.path.exists(f):
-            os.remove(f)
 
     return visual_data
 
