@@ -598,6 +598,12 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         # one specific small thing rather than describing the product. Every
         # version carries the library button: reels 2 to 4 are silent, so
         # this is often the first time since reel 1 that the link comes back.
+        if n == 0:
+            # Came from the ad or shared our own reel, and never sent one.
+            return _message(
+                "Still here whenever you find a reel worth keeping. Share it to this chat and I save it for you.",
+                buttons=open_library(),
+            )
         if n <= 1:
             return _message(
                 "You saved your first reel yesterday. Send me one more and I can start grouping them.",
@@ -656,10 +662,15 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message("You already have that one. It is in your library.", buttons=open_library())
     if key == "m23_welcome_back":
         return _message("Saved. Your library is where you left it.", buttons=open_library())
+    # Someone who shared our own ad reel back gets their library button with
+    # the answer, so they can open it and see the app straight away (Shlok,
+    # 2026-10-17).
+    own_share_buttons = open_library() if trigger == "own_post" else []
     if key == "m24_ad_hello":
         return _message(
             "Send any reel to this chat and I save it for you. Later you find it by searching in plain words, "
-            "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick clipnest.in and send it now."
+            "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick clipnest.in and send it now.",
+            buttons=own_share_buttons,
         )
     if key == "m25_ad_how":
         return _message(
@@ -677,7 +688,10 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             "I save it for you, and later you find it by searching in plain words."
         )
     if key == "m28_own_post":
-        return _message("That one is our own reel. Share a reel you want to keep and I will save it for you.")
+        return _message(
+            "That one is our own reel. Share a reel you want to keep and I will save it for you.",
+            buttons=open_library(),
+        )
     if key == "m21_delete_ack":
         # Nothing more is promised: Instagram stops the bot 24 hours after
         # their last message, so "you will hear when it is done" could not be kept.

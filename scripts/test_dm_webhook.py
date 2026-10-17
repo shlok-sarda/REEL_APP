@@ -407,11 +407,18 @@ def main() -> None:
         fired, sent = deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "1", "url": "https://www.instagram.com/reel/OURPOST01/"}}]))
         check("our own reel shared back is never saved", reels_of("own_share") == 0, str(outcomes("own_share")))
         check("our own reel shared back is told how it works", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
+        check("with their library button", SENT[-1]["labels"] == ["Open my library"] and SENT[-1]["urls"][0].startswith("https://clipnest.in/g/"), str(SENT[-1]))
         with get_connection() as c:
             c.execute("UPDATE nudge_log SET sent_at = '2026-01-01T00:00:00+00:00' WHERE user_id = ?", (user_row("own_share")["id"],))
         before = len(SENT)
         deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "url": "https://lookaside.fbsbx.com/x"}}]))
         check("our own reel by id, a second time, gets the short line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("That one is our own reel."), str(SENT[before:]))
+        check("also with the library button", SENT[-1]["labels"] == ["Open my library"], str(SENT[-1]))
+        with get_connection() as c:
+            c.execute("UPDATE users SET last_dm_at = '' WHERE instagram_user_id = 'own_share'")
+        before = len(SENT)
+        nudge.fire(user_row("own_share")["id"], "timer")
+        check("the next day reminder reaches someone with no reels, with the library button", len(SENT) == before + 1 and SENT[-1]["text"].startswith("Still here whenever you find a reel") and SENT[-1]["labels"] == ["Open my library"], str(SENT[before:]))
         check("and is still not saved", reels_of("own_share") == 0)
         before = len(SENT)
         deliver(client, message("own_link", "https://www.instagram.com/reel/OURPOST01/"))
