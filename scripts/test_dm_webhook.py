@@ -86,6 +86,31 @@ route._reply_later = _sync  # replies run inline so each post can be checked str
 route.fill_username_for_sender = lambda sender_id: None  # a network lookup
 route.ensure_background_progress = lambda: None  # would start the reel worker
 route.send_text = _text
+# A preview waits a few seconds before it is answered; here the wait is
+# skipped unless a test holds it to deliver something in between.
+HELD: list = []
+HOLD = {"on": False}
+
+
+def _settle(func, *args):
+    if HOLD["on"]:
+        HELD.append((func, args))
+    else:
+        func(*args)
+
+
+def release_held() -> None:
+    HOLD["on"] = False
+    while HELD:
+        func, args = HELD.pop(0)
+        func(*args)
+
+
+route._settle_then = _settle
+# Our own reels, as the Graph API would list them. No network in tests.
+OWN_IDS = {"17900000000000001"}
+OWN_CODES = {"ADREEL0001", "OURPOST01"}
+route.own_media._known = lambda: (OWN_IDS, OWN_CODES)
 
 CHECKS = 0
 FAILURES: list[str] = []
@@ -174,7 +199,7 @@ def user_row(sender: str) -> dict:
 def main() -> None:
     with TestClient(app) as client:
         # --- taps and typed text are left for a person ----------------------
-        fired, sent = deliver(client, postback("tap_how", "ICE_HOW", "How do I save a reel here?"))
+        fired, sent = deliver(client, postback("tap_how", "ICE_HOW", "Can you show examples?"))
         check("an ice breaker tap gets no bot reply", fired == [] and sent == [], str(sent))
         check("an ice breaker tap is flagged for Shlok", "needs_human" in outcomes("tap_how"), str(outcomes("tap_how")))
         check("the tap is still counted", "tap:ICE_HOW" in outcomes("tap_how"), str(outcomes("tap_how")))
@@ -193,7 +218,7 @@ def main() -> None:
         check("a read receipt gets no reply", fired == [] and sent == [])
 
         # --- typed text -----------------------------------------------------
-        for sender, text in (("typed_a", "hi"), ("typed_b", "how do i save one?"), ("typed_c", "Is it free?"), ("typed_d", "\U0001F44B")):
+        for sender, text in (("typed_a", "hi"), ("typed_b", "how do i save one?"), ("typed_c", "Save this to recepie"), ("typed_d", "\U0001F44B")):
             fired, sent = deliver(client, message(sender, text))
             check(f"typed {text!r} gets no bot reply", fired == [] and sent == [], str(sent))
             check(f"typed {text!r} is flagged for Shlok", "needs_human" in outcomes(sender), str(outcomes(sender)))
@@ -287,9 +312,12 @@ def main() -> None:
                 return c.execute("SELECT COUNT(*) FROM reels WHERE user_id = ?", (row["id"],)).fetchone()[0]
 
         AD_ANSWER = "Send any reel to this chat and I save it for you."
+        HOW_ANSWER = "You send me a reel and I save it for you."
+        FREE_ANSWER = "Yes, it is free. No app and no sign up to start."
+        SHARE_ANSWER = "Open the reel, tap the share arrow"
         for name, preview in (("ad_post", AD_PREVIEW_POST), ("ad_share", AD_PREVIEW_SHARE), ("ad_reel", AD_PREVIEW_REEL)):
             fired, sent = deliver(client, message(name, "How does this work?", referral=AD_REFERRAL, attachments=[preview]))
-            check(f"an ad message with a {preview['type']} preview gets the one ad answer", [f["trigger"] for f in fired] == ["ad_open"] and len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+            check(f"an ad message with a {preview['type']} preview gets the answer to its question", [f["trigger"] for f in fired] == ["ad_q_how"] and len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
             check(f"an ad message with a {preview['type']} preview is never told reels only", not any("not posts" in s["text"] for s in sent), str(sent))
             check(f"an ad message with a {preview['type']} preview saves nothing", reels_of(name) == 0, str(outcomes(name)))
             check(f"an ad message with a {preview['type']} preview logs its shape", "ad_referral" in outcomes(name), str(outcomes(name)))
@@ -299,7 +327,10 @@ def main() -> None:
         check("the logged ad shape keeps no text, ad id or link", "How does" not in shape and "120200000000000001" not in shape and "http" not in shape and "source=ADS" in shape, shape)
 
         fired, sent = deliver(client, message("ad_post", "Is it really free?", referral=AD_REFERRAL))
-        check("a second ad message gets no second answer and waits for Shlok", sent == [] and "needs_human" in outcomes("ad_post"), str(sent))
+        check("a second ad question gets its own answer", len(sent) == 1 and sent[0]["text"].startswith(FREE_ANSWER), str(sent))
+        check("is it really free starts with yes", sent and sent[0]["text"].startswith("Yes, it is free."), str(sent))
+        fired, sent = deliver(client, message("ad_post", "Is it really free?", referral=AD_REFERRAL))
+        check("the same ad question twice gets no second answer and waits for Shlok", sent == [] and "needs_human" in outcomes("ad_post"), str(sent))
 
         fired, sent = deliver(client, message("ad_quiet", referral=AD_REFERRAL, attachments=[AD_PREVIEW_POST]))
         check("an ad preview with no words gets the ad answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
@@ -308,20 +339,109 @@ def main() -> None:
             message("ad_split", attachments=[AD_PREVIEW_REEL]),
             message("ad_split", "How does this work?", referral=AD_REFERRAL),
         ])
-        check("an ad preview split from the referral in one delivery gets one answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+        check("an ad preview split from the referral in one delivery gets one answer", len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
         check("an ad preview split from the referral saves nothing", reels_of("ad_split") == 0, str(outcomes("ad_split")))
 
         fired, sent = deliver(client, {"sender": {"id": "ad_tap"}, "postback": {"mid": "pb", "title": "How does it work?", "payload": "AD_Q"}, "referral": AD_REFERRAL})
-        check("a tapped ad question gets the ad answer", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+        check("a tapped ad question gets its answer", len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
 
-        fired, sent = deliver(client, message("ad_post", attachments=[AD_PREVIEW_REEL]))
+        fired, sent = deliver(client, message("ad_post", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "555", "url": "https://www.instagram.com/reel/THEIRREEL1/"}}]))
         check("a reel they share after the ad chat goes through the normal flow", [f["trigger"] for f in fired] == ["reel_saved"] and reels_of("ad_post") == 1, str(fired))
 
         deliver(client, message("ad_member", "https://www.instagram.com/reel/ADMEMBER1/"))
         with get_connection() as c:
             c.execute("UPDATE users SET google_sub = 'g_ad_member', last_dm_at = '' WHERE instagram_user_id = 'ad_member'")
         fired, sent = deliver(client, message("ad_member", "How does this work?", referral=AD_REFERRAL))
-        check("a signed in person who taps the ad gets the answer too", len(sent) == 1 and sent[0]["text"].startswith(AD_ANSWER), str(sent))
+        check("a signed in person who taps the ad gets the answer too", len(sent) == 1 and sent[0]["text"].startswith(HOW_ANSWER), str(sent))
+
+        # --- ad layouts seen on 16 and 17 Oct ---------------------------------
+        AD_PICTURE = {"type": "image", "payload": {"url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=9"}}
+
+        def no_posts_line(items):
+            return not any("not posts" in s["text"] for s in items)
+
+        fired, sent = deliver(client, {"sender": {"id": "pb_ref"}, "postback": {"mid": "pb2", "title": "Is it really free?", "payload": "AD_Q2", "referral": AD_REFERRAL}})
+        check("a tapped question with the referral inside the tap gets its answer", len(sent) == 1 and sent[0]["text"].startswith(FREE_ANSWER), str(sent))
+        check("that tap is not left waiting for Shlok", "needs_human" not in outcomes("pb_ref"), str(outcomes("pb_ref")))
+
+        def keys_sent(sender: str) -> list[str]:
+            with get_connection() as c:
+                return [r[0] for r in c.execute("SELECT message_key FROM nudge_log WHERE user_id = ? ORDER BY id", (user_row(sender)["id"],))]
+
+        HOLD["on"] = True
+        before = len(SENT)
+        deliver(client, {"sender": {"id": "ref_only"}, "referral": AD_REFERRAL})
+        deliver(client, message("ref_only", "How does it work?"))
+        release_held()
+        check("a referral with no message is not dropped", "ad_referral" in outcomes("ref_only"), str(outcomes("ref_only")))
+        check("a referral then its question in another delivery get one reply", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
+        check("and nothing more after the wait", keys_sent("ref_only") == ["m25_ad_how"], str(keys_sent("ref_only")))
+
+        HOLD["on"] = True
+        deliver(client, {"sender": {"id": "ref_alone"}, "referral": AD_REFERRAL})
+        before = len(SENT)
+        release_held()
+        check("a referral alone gets the general answer after the wait", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
+
+        HOLD["on"] = True
+        before = len(SENT)
+        deliver(client, message("pic_first", attachments=[AD_PICTURE]))
+        deliver(client, message("pic_first", "How does it work?", referral=AD_REFERRAL))
+        release_held()
+        check("the ad as a picture, then the question: one answer", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
+        check("the ad as a picture is never told reels only", no_posts_line(SENT[before:]), str(SENT[before:]))
+        check("the ad as a picture saves nothing", reels_of("pic_first") == 0)
+
+        before = len(SENT)
+        deliver(client, message("pic_after", "Is it really free?", referral=AD_REFERRAL))
+        deliver(client, message("pic_after", attachments=[AD_PICTURE]))
+        deliver(client, message("pic_after", "Is it really free?", referral=AD_REFERRAL, attachments=[AD_PICTURE]))
+        check("question, then the ad picture, then the same again: one answer only", len(SENT) == before + 1 and SENT[-1]["text"].startswith(FREE_ANSWER), str(SENT[before:]))
+        check("the ad picture after the answer is marked as the ad preview", "ad_preview_ignored" in outcomes("pic_after"), str(outcomes("pic_after")))
+
+        before = len(SENT)
+        deliver(client, message("pic_q", "How does it work?", attachments=[AD_PICTURE]))
+        check("the ad picture with a question and no referral gets the answer", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
+
+        before = len(SENT)
+        fired, sent = deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "1", "url": "https://www.instagram.com/reel/OURPOST01/"}}]))
+        check("our own reel shared back is never saved", reels_of("own_share") == 0, str(outcomes("own_share")))
+        check("our own reel shared back is told how it works", len(SENT) == before + 1 and SENT[-1]["text"].startswith(AD_ANSWER), str(SENT[before:]))
+        with get_connection() as c:
+            c.execute("UPDATE nudge_log SET sent_at = '2026-01-01T00:00:00+00:00' WHERE user_id = ?", (user_row("own_share")["id"],))
+        before = len(SENT)
+        deliver(client, message("own_share", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "17900000000000001", "url": "https://lookaside.fbsbx.com/x"}}]))
+        check("our own reel by id, a second time, gets the short line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("That one is our own reel."), str(SENT[before:]))
+        check("and is still not saved", reels_of("own_share") == 0)
+        before = len(SENT)
+        deliver(client, message("own_link", "https://www.instagram.com/reel/OURPOST01/"))
+        check("a pasted link to our own reel is not saved", reels_of("own_link") == 0 and len(SENT) == before + 1, str(SENT[before:]))
+
+        before = len(SENT)
+        deliver(client, message("real_photo", attachments=[AD_PICTURE]))
+        check("a real photo, not from the ad, still gets the reels only line", len(SENT) == before + 1 and SENT[-1]["text"].startswith("I only save reels for now, not posts or photos."), str(SENT[before:]))
+
+        for sender, text, answer in (("q_free", "Is it really free?", FREE_ANSWER), ("q_how", "how does this work", HOW_ANSWER), ("q_share", "I want to share a reel", SHARE_ANSWER)):
+            fired, sent = deliver(client, message(sender, text))
+            check(f"typed {text!r} gets its fixed answer", len(sent) == 1 and sent[0]["text"].startswith(answer), str(sent))
+            fired, sent = deliver(client, message(sender, text))
+            check(f"typed {text!r} again waits for Shlok", sent == [] and "needs_human" in outcomes(sender), str(sent))
+        fired, sent = deliver(client, postback("q_tap", "ICE_SHARE", "I want to share a reel"))
+        check("a tapped share question gets the share steps", len(sent) == 1 and sent[0]["text"].startswith(SHARE_ANSWER), str(sent))
+        fired, sent = deliver(client, message("q_free", "Can you show examples?"))
+        check("other words after an answer still wait for Shlok", sent == [] and outcomes("q_free")[-1] == "needs_human", str(sent))
+
+        import threading as _threading
+
+        deliver(client, message("racer", "hi"))
+        racer = user_row("racer")["id"]
+        before = len(SENT)
+        threads = [_threading.Thread(target=nudge.fire, args=(racer, "ad_q_free")) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        check("six replies racing for one person send one answer", len(SENT) == before + 1, str(SENT[before:]))
 
         # --- signed in users stay untouched --------------------------------
         deliver(client, message("member", "https://www.instagram.com/reel/MEMBER111/"))

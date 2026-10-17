@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 import hashlib
 import hmac
 import json
 import re
+import threading
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request, status
@@ -19,7 +21,7 @@ from app.services.instagram_profile import (
     resolve_instagram_username,
 )
 from app.services.instagram_send import send_text
-from app.services import nudge
+from app.services import nudge, own_media
 from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_valid_instagram_url
 
 
@@ -41,6 +43,23 @@ def _reply_later(func, *args) -> None:
             print(f"[instagram] reply task failed: {exc}", flush=True)
 
     _reply_pool.submit(run)
+
+
+# How long an ad visit colours what else the person sends. Instagram can
+# deliver the ad's preview (a picture or the ad reel) and the question they
+# tapped as separate deliveries, seconds apart and in either order, and the
+# preview carries no sign of the ad. Within this window a preview is not a
+# post they shared and is not answered on its own.
+AD_CONTEXT_SECONDS = 180
+# A preview with nothing else waits this long before it is answered, so the
+# question that belongs with it can arrive first and get the one reply.
+AD_SETTLE_SECONDS = 8
+
+
+def _settle_then(func, *args) -> None:
+    timer = threading.Timer(AD_SETTLE_SECONDS, _reply_later, args=(func, *args))
+    timer.daemon = True
+    timer.start()
 
 
 def _log_webhook_event(
@@ -71,15 +90,16 @@ def _log_webhook_event(
             # delete data are kept for the same reason: each one is a promise
             # that is acted on by hand, days later, from the health page.
             # Messages waiting for a person are kept for 30 days, so the
-            # health page count is not wiped by a busy hour.
+            # health page count is not wiped by a busy hour. So are ad
+            # arrivals: a preview delivered on its own is recognised by them.
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human')
+                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human', 'ad_referral')
                   AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
                   ))
-                  OR (outcome = 'needs_human' AND received_at < ?)
+                  OR (outcome IN ('needs_human', 'ad_referral') AND received_at < ?)
                 """,
                 (_thirty_days_ago(),),
             )
@@ -199,6 +219,10 @@ def _iter_message_events(payload: Any):
                 or isinstance(current.get("postback"), dict)
                 or isinstance(current.get("reaction"), dict)
                 or isinstance(current.get("read"), dict)
+                # Opening the chat from an ad can arrive as a referral on its
+                # own, with no message. Dropping it left the person's tapped
+                # question looking like a stranger's text, unanswered.
+                or isinstance(current.get("referral"), dict)
             ):
                 # Skip echoes. When the app account sends a DM, Instagram
                 # delivers a copy back with the business account as `sender`,
@@ -302,14 +326,20 @@ def _attachment_trigger(message_event: dict) -> str:
 def _ad_referral(message_event: dict) -> dict:
     """The referral block Instagram adds when someone opens the chat from an
     ad, or {} when there is none. Meta documents it inside `message`; it is
-    read from the event too in case it arrives one level up.
+    read from a tapped question (`postback`) and from the event itself too,
+    where a referral with no message arrives.
 
     The chat that opens from an ad shows the ad's reel, and Instagram can send
     that preview along as an attachment (the phone says "sent you a post").
     The person shared nothing, so it must never be read as a post or a reel.
     """
     message = message_event.get("message")
-    for holder in (message if isinstance(message, dict) else {}, message_event):
+    postback = message_event.get("postback")
+    for holder in (
+        message if isinstance(message, dict) else {},
+        postback if isinstance(postback, dict) else {},
+        message_event,
+    ):
         referral = holder.get("referral")
         if isinstance(referral, dict) and (
             str(referral.get("source") or "").strip().upper() == "ADS"
@@ -336,9 +366,76 @@ def _describe_ad_message(message_event: dict, referral: dict) -> str:
     return " ".join(parts)[:480]
 
 
-def _answer_ad(user_id: str, sender_id: str, sender_username: str) -> None:
-    if not nudge.fire(user_id, "ad_open"):
+def _since(seconds: int) -> str:
+    return (datetime.fromisoformat(iso_now()) - timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+
+def _ad_referral_since(sender_id: str, since: str) -> bool:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM instagram_webhook_events WHERE sender_id = ? AND kind = 'ad' "
+                "AND outcome = 'ad_referral' AND received_at >= ? LIMIT 1",
+                (sender_id, since),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _in_ad_visit(sender_id: str, user_id: str) -> bool:
+    """Did this person open the chat from the ad, or get an ad answer, in the
+    last few minutes?"""
+    since = _since(AD_CONTEXT_SECONDS)
+    return _ad_referral_since(sender_id, since) or nudge.ad_answer_sent_since(user_id, since)
+
+
+def _answer_ad(user_id: str, sender_id: str, sender_username: str, trigger: str, has_words: bool) -> None:
+    """The one reply to an ad arrival. `trigger` is the question they asked,
+    or ad_open. A preview with no words waits (see AD_SETTLE_SECONDS) and is
+    answered only if nothing else of that visit was."""
+    if not has_words and nudge.ad_answer_sent_since(user_id, _since(AD_CONTEXT_SECONDS)):
+        return
+    if not nudge.fire(user_id, trigger) and has_words:
         _log_needs_human(sender_id, sender_username, "ad")
+
+
+def _answer_question(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
+    """One of the ad's questions, asked outside the ad. Its fixed answer, or,
+    when that answer was already given, left for Shlok."""
+    if not nudge.fire(user_id, trigger):
+        _log_needs_human(sender_id, sender_username, "question")
+
+
+def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
+    """The reply to a share with no reel to save: a post or photo, a reel with
+    no link, or our own reel. Run after AD_SETTLE_SECONDS. Inside an ad visit
+    the share is the ad's preview, which the ad answer already covers, so it
+    gets nothing: never "only reels" to someone who tapped the ad."""
+    if _in_ad_visit(sender_id, user_id):
+        _log_webhook_event(
+            "reel", sender_id=sender_id, sender_username=sender_username,
+            outcome="ad_preview_ignored", detail=trigger,
+        )
+        return
+    nudge.fire(user_id, trigger)
+
+
+def _saveable_urls(message_event: dict) -> tuple[list[str], bool]:
+    """Reel links worth saving, and whether any link or attachment in the
+    message was our own reel or post, which is never saved."""
+    urls = []
+    own = False
+    for url in _extract_candidate_urls(message_event):
+        if own_media.is_own_url(url):
+            own = True
+        else:
+            urls.append(url)
+    for att in (message_event.get("message") or {}).get("attachments") or []:
+        payload = att.get("payload") if isinstance(att, dict) else None
+        if isinstance(payload, dict) and own_media.is_own_media_id(payload.get("reel_video_id") or payload.get("id") or ""):
+            own = True
+    return urls, own
 
 
 def _extract_link_code(message_event: dict) -> str:
@@ -516,6 +613,18 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
     }
     ad_senders.discard("")
     ad_flagged: set[str] = set()
+    # What each of them said in this delivery: the tapped question or their
+    # words, from whichever event carries them. The ad answer is chosen from
+    # this, so a preview that comes first does not get the general answer
+    # when "Is it really free?" is right behind it.
+    ad_words: dict[str, str] = {}
+    for event in events:
+        ad_sender = str((event.get("sender") or {}).get("id") or "").strip()
+        if ad_sender not in ad_senders:
+            continue
+        said = (_tap(event)[2] or _typed_text(event)).strip()
+        if said and (not ad_words.get(ad_sender) or (nudge.ad_question(said) and not nudge.ad_question(ad_words[ad_sender]))):
+            ad_words[ad_sender] = said
     # Always record that a delivery arrived, so an empty event list is
     # distinguishable from "Instagram never called us at all".
     _log_webhook_event(
@@ -602,8 +711,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             if sender_id in ad_senders:
                 # Opened from an ad. The ad's reel is a preview Instagram put
                 # there, not something they shared: nothing is saved and the
-                # posts line is never sent. What they wrote, or the ad question
-                # they tapped, is left for Shlok like any other message.
+                # posts line is never sent. One reply for the whole visit:
+                # the answer to the question they tapped or typed, else the
+                # general answer. What it cannot answer is left for Shlok.
                 referral = _ad_referral(event)
                 if referral:
                     _log_webhook_event(
@@ -622,8 +732,14 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     # answer; if it cannot (already given, window, a failed
                     # send) the message is left for Shlok instead.
                     ad_flagged.add(sender_id)
-                    if user:
-                        _reply_later(_answer_ad, user["id"], sender_id, sender_username)
+                    words = ad_words.get(sender_id, "")
+                    if user and words:
+                        _reply_later(
+                            _answer_ad, user["id"], sender_id, sender_username,
+                            nudge.ad_question(words) or "ad_open", True,
+                        )
+                    elif user:
+                        _settle_then(_answer_ad, user["id"], sender_id, sender_username, "ad_open", False)
                     else:
                         _log_needs_human(sender_id, sender_username, "ad")
                 ignored_events += 1
@@ -632,7 +748,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # Buffer instead of drop: keep each URL so it can be replayed when
                 # this sender's link code arrives (possibly later in this same
                 # webhook delivery — event order within a payload is arbitrary).
-                buffered_urls = _extract_candidate_urls(event)
+                buffered_urls = _saveable_urls(event)[0]
                 for url in buffered_urls:
                     _log_webhook_event(
                         "reel", sender_id=sender_id, sender_username=sender_username,
@@ -653,6 +769,10 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 if _is_delete_request(tap_title, tap_payload):
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], "delete_request")
+                elif nudge.ad_question(tap_title):
+                    # One of the ad's questions: its fixed answer.
+                    _reply_later(_answer_question, user["id"], sender_id, sender_username, nudge.ad_question(tap_title))
+                    continue
                 _log_needs_human(sender_id, sender_username, "tap")
                 continue
 
@@ -663,8 +783,9 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
 
             # The wall. Hold the reel rather than process it, and rather than
             # reject it: signing in then saves everything waiting in one go.
+            urls, own_shared = _saveable_urls(event)
             if nudge.is_locked(user["id"]):
-                held = _extract_candidate_urls(event)
+                held = urls
                 for url in held:
                     _log_webhook_event(
                         "reel", sender_id=sender_id, sender_username=sender_username,
@@ -675,7 +796,6 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     ignored_events += 1
                     continue
 
-            urls = _extract_candidate_urls(event)
             if not urls:
                 _log_webhook_event(
                     "reel", sender_id=sender_id, sender_username=sender_username,
@@ -688,15 +808,23 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # hand (decided 2026-10-14). "delete my data" is the exception:
                 # the data deletion page promises the reply, so it is sent, and
                 # the message is still flagged for Shlok like any other.
-                if _has_attachment(event):
+                question = nudge.ad_question(_typed_text(event))
+                if own_shared:
+                    # Our own ad or reel shared back: never saved.
+                    trigger = "own_post"
+                elif _has_attachment(event):
                     trigger = _attachment_trigger(event)
                     if trigger == "photo_post" and _typed_text(event).strip():
                         # A post that came with their own words is someone
                         # talking, most likely asking about it: "I only save
-                        # reels" would answer the wrong thing. Left for Shlok.
-                        trigger = "needs_human"
+                        # reels" would answer the wrong thing. One of the ad's
+                        # questions is answered; anything else is for Shlok.
+                        trigger = question or "needs_human"
+                elif _is_delete_request(_typed_text(event)):
+                    trigger = "delete_request"
                 else:
-                    trigger = "delete_request" if _is_delete_request(_typed_text(event)) else "needs_human"
+                    # The ad's questions typed later get their fixed answer.
+                    trigger = question or "needs_human"
                 if trigger == "delete_request":
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], trigger)
@@ -708,8 +836,13 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         if isinstance(att, dict)
                     )
                     _log_needs_human(sender_id, sender_username, ",".join(kinds) or "text")
+                elif trigger in nudge.QUESTION_ANSWERS:
+                    _reply_later(_answer_question, user["id"], sender_id, sender_username, trigger)
                 elif sender_id not in pending_replies:
-                    _reply_later(nudge.fire, user["id"], trigger)
+                    # A post, a photo, a reel with no link or our own reel.
+                    # Answered after a short wait, and not at all when it turns
+                    # out to be the preview of an ad visit.
+                    _settle_then(_answer_share, user["id"], sender_id, sender_username, trigger)
             saved_here = 0
             already_saved = 0
             held_here = 0

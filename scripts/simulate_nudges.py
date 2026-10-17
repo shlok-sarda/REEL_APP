@@ -334,10 +334,22 @@ run("They share a post or a photo instead of a reel", "told reels only; a pasted
     lambda: nudge.fire(uid16, "photo_post"))
 
 uid16b = _fresh_guest("ad_visitor")
-run("They open the chat from the ad and tap 'How does this work?'", "one fixed answer, once ever; the ad reel is not saved",
+run("They open the chat from the ad with only the preview", "the general answer, once ever; the ad reel is not saved",
     lambda: nudge.fire(uid16b, "ad_open"))
 run("They come from the ad a second time", "already answered once: silent, left for Shlok",
     lambda: nudge.fire(uid16b, "ad_open"))
+run("Then they tap 'Is it really free?'", "a different question gets its own answer, starting with yes",
+    lambda: nudge.fire(uid16b, "ad_q_free"))
+run("They ask 'Is it really free?' again", "same question twice: silent, left for Shlok",
+    lambda: nudge.fire(uid16b, "ad_q_free"))
+uid16c = _fresh_guest("ad_how")
+run("They open the chat from the ad and tap 'How does it work?'", "how it works in two lines, then asks for a reel",
+    lambda: nudge.fire(uid16c, "ad_q_how"))
+run("Then they share our own ad reel back", "not saved; one short line, since how it works was already said",
+    lambda: nudge.fire(uid16c, "own_post"))
+uid16d = _fresh_guest("ad_share")
+run("They tap 'I want to share a reel'", "the share steps",
+    lambda: nudge.fire(uid16d, "ad_q_share"))
 
 uid17 = _fresh_guest("fail_with_library")
 _add_reel(uid17, 1, TITLES[0])

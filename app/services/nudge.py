@@ -16,6 +16,7 @@ reel ingest and inside the job worker and must never cost someone their reel.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -43,7 +44,11 @@ WINDOW_HOURS = 24
 PRECEDENCE = [
     "m10_month_cap",
     "m21_delete_ack",
+    "m26_ad_free",
+    "m25_ad_how",
+    "m27_ad_share",
     "m24_ad_hello",
+    "m28_own_post",
     "m6_lock",
     "m5_heads_up",
     "m4_home_screen",
@@ -58,7 +63,17 @@ PRECEDENCE = [
     "m3_quiet_nudge",
 ]
 
-ONCE_EVER = {"m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock", "m24_ad_hello"}
+ONCE_EVER = {
+    "m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock",
+    "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share",
+}
+
+# The answers someone who opened the chat from the ad can get: the general one,
+# and one for each question the ad shows. Each goes out once ever, so asking
+# "Is it really free?" after "How does it work?" gets its own answer, and the
+# same question twice is left for Shlok.
+AD_ANSWERS = {"m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share"}
+QUESTION_ANSWERS = {"ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_share": "m27_ad_share"}
 
 # Judged against the last time the SAME message went out, not against the
 # last DM of any kind. The failure reply usually follows the first-reel ack by
@@ -72,6 +87,7 @@ SELF_COOLDOWN = {
     "m16_unreadable_share",
     "m17_already_saved",
     "m21_delete_ack",
+    "m28_own_post",
 }
 
 # Messages that are nothing without the person's own link. With no link to
@@ -307,17 +323,57 @@ def library_link(user: dict[str, Any]) -> str:
     return f"{base}/g/{token}"
 
 
+_QUESTION_WORDS_MAX = 10
+_SHARE_Q_RE = re.compile(r"\b(?:share|send|save)\b.*\breels?\b")
+_FREE_Q_RE = re.compile(r"\b(?:free|cost|costs|price|paid|charge|charges)\b")
+_HOW_Q_RE = re.compile(r"\bhow\b.*\b(?:work|works|working|use|does)\b")
+
+
+def ad_question(text: str) -> str:
+    """ad_q_share, ad_q_free or ad_q_how when a short message is one of the
+    questions the ad shows ("I want to share a reel", "Is it really free?",
+    "How does it work?") or plainly the same question in other words, else "".
+    A long message is someone saying more than that, and is left for Shlok."""
+    words = re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower()).split()
+    if not words or len(words) > _QUESTION_WORDS_MAX:
+        return ""
+    plain = " ".join(words)
+    if _SHARE_Q_RE.search(plain):
+        return "ad_q_share"
+    if _FREE_Q_RE.search(plain):
+        return "ad_q_free"
+    if _HOW_Q_RE.search(plain):
+        return "ad_q_how"
+    return ""
+
+
+def ad_answer_sent_since(user_id: str, since: str) -> bool:
+    """Has this person had any ad answer since `since` (an ISO time)?"""
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                f"SELECT 1 FROM nudge_log WHERE user_id = ? AND sent_at >= ? "
+                f"AND message_key IN ({', '.join('?' for _ in AD_ANSWERS)}) LIMIT 1",
+                (user_id, since, *sorted(AD_ANSWERS)),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
 def decide(user: dict[str, Any], trigger: str) -> str | None:
     """Which message, if any. Pure: no sends, no writes, no model.
 
     `trigger` is what woke us: reel_saved, reel_returned (a reel after a
     week or more without one), reel_ready, reel_failed, reel_held,
     already_saved, photo_post, unreadable_share, delete_request, month_cap,
-    ad_open (they opened the chat from an ad), timer.
+    ad_open (they opened the chat from an ad), ad_q_how / ad_q_free /
+    ad_q_share (one of the ad's three questions, see ad_question), own_post
+    (our own reel shared back), timer.
 
-    Typed messages and taps never reach here (only "delete my data" does):
-    Shlok answers people by hand, by decision on 2026-10-14. The bot does the
-    reel job and nothing else.
+    Other typed messages and taps never reach here (only "delete my data"
+    and the ad's three questions do): Shlok answers people by hand, by
+    decision on 2026-10-14. The bot does the reel job and nothing else.
     """
     if trigger == "month_cap":
         # Said once a month, to signed-in accounts too: without it their
@@ -330,12 +386,25 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # enough, to everyone.
         return "m21_delete_ack"
 
-    if trigger == "ad_open":
-        # Opened the chat from an ad, usually by tapping a question like
-        # "How does this work?". One fixed answer, once ever: a second ad
-        # visit is left for Shlok. Before the signed in check because the
+    if trigger in QUESTION_ANSWERS:
+        # One of the questions the ad shows, tapped or typed, from the ad or
+        # later. Each has its own answer, once ever; the same question asked
+        # again is left for Shlok. Before the signed in check because the
         # question is the same whoever asks it.
-        return None if "m24_ad_hello" in user["already_sent"] else "m24_ad_hello"
+        key = QUESTION_ANSWERS[trigger]
+        return None if key in user["already_sent"] else key
+
+    if trigger == "ad_open":
+        # Opened the chat from an ad with no question we know, or only the
+        # ad's preview. The general answer, and only to someone who has had
+        # no ad answer yet: after "Is it really free?" it would be a second
+        # reply to the same visit.
+        return None if user["already_sent"] & AD_ANSWERS else "m24_ad_hello"
+
+    if trigger == "own_post":
+        # They shared our own ad or reel back. Never saved. Someone who has
+        # heard nothing yet is told how it works; after that, one short line.
+        return "m28_own_post" if user["already_sent"] & AD_ANSWERS else "m24_ad_hello"
 
     if user["signed_in"]:
         # Converted. The bot already got what it was for, so it speaks only
@@ -592,6 +661,23 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
             "Send any reel to this chat and I save it for you. Later you find it by searching in plain words, "
             "like cafe in goa. It is free and there is no app. Open a reel, tap share, pick clipnest.in and send it now."
         )
+    if key == "m25_ad_how":
+        return _message(
+            "You send me a reel and I save it for you. Later you search in plain words, like cafe in goa, "
+            "and it comes up. Open any reel, tap share, pick clipnest.in and send it."
+        )
+    if key == "m26_ad_free":
+        return _message(
+            "Yes, it is free. No app and no sign up to start. "
+            "Open any reel, tap share, pick clipnest.in and send it to me."
+        )
+    if key == "m27_ad_share":
+        return _message(
+            "Open the reel, tap the share arrow, pick clipnest.in and send. "
+            "I save it for you, and later you find it by searching in plain words."
+        )
+    if key == "m28_own_post":
+        return _message("That one is our own reel. Share a reel you want to keep and I will save it for you.")
     if key == "m21_delete_ack":
         # Nothing more is promised: Instagram stops the bot 24 hours after
         # their last message, so "you will hear when it is done" could not be kept.
@@ -638,13 +724,34 @@ def _deliver(igsid: str, key: str, message: dict[str, Any]) -> tuple[dict, bool]
     return result, True
 
 
+_fire_locks: dict[str, threading.Lock] = {}
+_fire_locks_guard = threading.Lock()
+
+
+def _lock_for(user_id: str) -> threading.Lock:
+    with _fire_locks_guard:
+        lock = _fire_locks.get(user_id)
+        if lock is None:
+            lock = _fire_locks[user_id] = threading.Lock()
+        return lock
+
+
 def fire(user_id: str, trigger: str, title: str = "", direct: bool = False) -> str | None:
     """Decide, send, record. Returns the message key actually sent, or None.
 
     The only entry point. Callers say what happened, never what to send.
     `direct` marks an answer to a tap: it is judged against the last time the
     same answer went out, so tapping two questions in a row gets two answers.
+
+    One person at a time: replies run on several threads, and two messages
+    arriving together each read "not sent yet" before either was recorded, so
+    a once ever answer went out twice.
     """
+    with _lock_for(user_id):
+        return _fire(user_id, trigger, title, direct)
+
+
+def _fire(user_id: str, trigger: str, title: str, direct: bool) -> str | None:
     try:
         user = load_state(user_id)
         if not user:
