@@ -609,7 +609,10 @@ def main() -> None:
             with get_connection() as c:
                 row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
                 reels = [tuple(r) for r in c.execute("SELECT * FROM reels WHERE user_id = ? ORDER BY id", (user_id,))]
-            return {"row": dict(row) if row else None, "reels": reels}
+            # When they last wrote or heard from the bot moves with any
+            # message; everything that makes up the account must not.
+            account = {k: v for k, v in dict(row).items() if k not in ("last_inbound_at", "last_dm_at")} if row else None
+            return {"row": account, "reels": reels}
 
         # Onir's case: DM account with a reel, then an empty Google account.
         deliver(client, message("joiner", "https://www.instagram.com/reel/JOIN0001/"))

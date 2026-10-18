@@ -566,6 +566,8 @@ def copy_problems(text: str) -> list[str]:
     again at send time, before anything goes out.
     """
     problems = []
+    # A library link is a random token and can hold "--"; it is not copy.
+    text = re.sub(r"https?://\S+", "", text)
     if _EM_DASH in text:
         problems.append("em dash")
     if _EN_DASH in text:
