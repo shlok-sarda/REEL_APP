@@ -157,6 +157,44 @@ def seed_bot_daily(connection: sqlite3.Connection) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Who stays: join-day cohorts
+# --------------------------------------------------------------------------
+
+def cohorts(active_days: dict[str, set[str]], today: str, max_rows: int = 30) -> dict[str, Any]:
+    """Join-day cohorts from each person's set of local days with a reel.
+
+    Joined = the day of their first reel. Day 1 = sent a reel on any day after
+    the join day. Day 3 = sent one on the third day after joining or later.
+    A row shows a day's number once that day has started (marked so far while
+    it is still running); the overall numbers only take a cohort once that day
+    is over, so yesterday's people do not drag day 1 down this morning."""
+    today_d = datetime.strptime(today, "%Y-%m-%d").date()
+    by_join: dict[str, list[set[str]]] = {}
+    for days in active_days.values():
+        if days:
+            by_join.setdefault(min(days), []).append(days)
+    rows = []
+    totals = {"d1_people": 0, "d1_stayed": 0, "d3_people": 0, "d3_stayed": 0}
+    for join in sorted(by_join, reverse=True):
+        group = by_join[join]
+        join_d = datetime.strptime(join, "%Y-%m-%d").date()
+        age = (today_d - join_d).days
+        d1_cut = (join_d + timedelta(days=1)).strftime("%Y-%m-%d")
+        d3_cut = (join_d + timedelta(days=3)).strftime("%Y-%m-%d")
+        d1 = sum(1 for days in group if max(days) >= d1_cut) if age >= 1 else None
+        d3 = sum(1 for days in group if max(days) >= d3_cut) if age >= 3 else None
+        if d1 is not None and age > 1:
+            totals["d1_people"] += len(group)
+            totals["d1_stayed"] += d1
+        if d3 is not None and age > 3:
+            totals["d3_people"] += len(group)
+            totals["d3_stayed"] += d3
+        rows.append({"day": join, "joined": len(group), "day1": d1, "day3": d3,
+                     "day1_so_far": age == 1, "day3_so_far": age == 3})
+    return {"rows": rows[:max_rows], **totals}
+
+
+# --------------------------------------------------------------------------
 # The numbers
 # --------------------------------------------------------------------------
 
@@ -278,8 +316,29 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         GROUP BY bucket
         """
     ).fetchall()
+    ad_items = int(
+        c.execute(f"SELECT COUNT(*) FROM reels WHERE {REELS} AND NOT ({THEIRS})").fetchone()[0] or 0
+    )
+    # People with no reel saved who sent a post we could not save.
+    zero_post_only = int(
+        c.execute(
+            f"""
+            SELECT COUNT(DISTINCT n.user_id) FROM nudge_log n JOIN users u ON u.id = n.user_id
+            WHERE u.{PEOPLE} AND n.message_key = 'm15_photo_post'
+              AND NOT EXISTS (SELECT 1 FROM reels r WHERE r.user_id = u.id AND COALESCE(r.source, '') <> 'clipnest_ad')
+            """
+        ).fetchone()[0] or 0
+    )
     bucket_map = {row["bucket"]: int(row["people"] or 0) for row in bucket_rows}
     buckets = [{"label": b, "people": bucket_map.get(b, 0)} for b in BUCKETS]
+
+    # ---- who stays --------------------------------------------------------
+    active: dict[str, set[str]] = {}
+    for row in c.execute(
+        f"SELECT DISTINCT user_id, {r_day} AS d FROM reels WHERE {REELS} AND {THEIRS}"
+    ).fetchall():
+        active.setdefault(row["user_id"], set()).add(str(row["d"]))
+    stays = cohorts(active, today)
 
     # ---- monthly cap ----------------------------------------------------
     cap = int(settings.monthly_reel_cap or 0)
@@ -411,6 +470,9 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             "failed_per_day": failed_per_day,
         },
         "buckets": buckets,
+        "stays": stays,
+        "ad_items": ad_items,
+        "zero_post_only": zero_post_only,
         "older": {"people": int(older["people"] or 0), "reels": int(older["reels"] or 0)},
         "cap": {"cap": cap, "at_cap": at_cap, "near_cap": near_cap, "since": cap_since, "refused": metric_totals.get("over_month_cap", 0)},
         "cost": {

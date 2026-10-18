@@ -182,8 +182,12 @@ def _page_people(d: dict[str, Any]) -> str:
         tile(_n(p["guests_who_signed_in"]), "Guests who later signed in", f'of {_n(p["from_instagram"])} who came through the bot'),
     ]) + "</div>"
     bucket_items = [(x["label"] + (" reel" if x["label"] == "1" else " reels"), x["people"]) for x in d["buckets"]]
-    bucket_card = card("Reels per person", f"How many reels each of the <b>{_n(p['total'])}</b> people has saved.", hrows(bucket_items),
-                       f'Not counted: {_n(d["older"]["people"])} older accounts (you and testers) with {_n(d["older"]["reels"])} reels.')
+    bucket_card = card("Reels per person", f"How many reels each of the <b>{_n(p['total'])}</b> people has sent us.", hrows(bucket_items),
+                       f'Counts every reel that reached us, failed ones included ({_n(r["failed"])} failed). '
+                       f'0 reels is mostly people from the ad who only asked a question; {_n(d.get("zero_post_only", 0))} of them sent a post we could not save. '
+                       f'Not counted: {_n(d.get("ad_items", 0))} copies of our own ad saved as ClipNest ad, and '
+                       f'{_n(d["older"]["people"])} older accounts (you and testers) with {_n(d["older"]["reels"])} reels.')
+    stays_card = _stays_card(d["stays"])
     reels_card = card(
         "Reels",
         f'<b>{_n(r["total"])}</b> saved, <b>{_n(r["failed"])}</b> failed, <b>{_n(r["in_progress"])}</b> in progress right now.',
@@ -208,7 +212,38 @@ def _page_people(d: dict[str, Any]) -> str:
         )
         egg_body = f"<table><tr><th>Group</th><th>People</th><th>Saved a reel</th><th>Rate</th></tr>{rows}</table>"
     egg_card = card("Easter egg test", "People who shared our own reel back, split 20 / 80.", egg_body)
-    return tiles + '<div class="grid">' + bucket_card + reels_card + cap_card + egg_card + "</div>"
+    return tiles + stays_card + '<div class="grid">' + bucket_card + reels_card + cap_card + egg_card + "</div>"
+
+
+def _stays_card(st: dict[str, Any]) -> str:
+    d1 = _pct(st["d1_stayed"], st["d1_people"]) if st["d1_people"] else "not yet"
+    d3 = _pct(st["d3_stayed"], st["d3_people"]) if st["d3_people"] else "not yet"
+    head = '<div class="tiles" style="margin-bottom:12px">' + "".join([
+        tile(d1, "Back after 1 day", f'{_n(st["d1_stayed"])} of {_n(st["d1_people"])} people'),
+        tile(d3, "Back after 3 days", f'{_n(st["d3_stayed"])} of {_n(st["d3_people"])} people'),
+    ]) + "</div>"
+
+    def cell(stayed: Any, joined: int, so_far: bool) -> str:
+        if stayed is None:
+            return '<td style="color:var(--faint)">not yet</td>'
+        tail = " so far" if so_far else ""
+        return f"<td>{_pct(stayed, joined)} <span style=\"color:var(--faint)\">({_n(stayed)}){tail}</span></td>"
+
+    if st["rows"]:
+        rows = "".join(
+            f'<tr><td>{_pretty_day(x["day"])}</td><td>{_n(x["joined"])}</td>{cell(x["day1"], x["joined"], x["day1_so_far"])}{cell(x["day3"], x["joined"], x["day3_so_far"])}</tr>'
+            for x in st["rows"]
+        )
+        table = f"<table><tr><th>Joined</th><th>People</th><th>After 1 day</th><th>After 3 days</th></tr>{rows}</table>"
+    else:
+        table = '<p class="empty">No one has sent a reel yet.</p>'
+    return card(
+        "Who stays",
+        "People grouped by the day of their first reel, and how many sent another reel later.",
+        head + table,
+        "After 1 day: sent a reel on any later day. After 3 days: sent one on the third day after joining or later. "
+        "The two big numbers only use groups whose day is fully over; rows still running say so far. Days in India time. Our own ad is not counted as a reel.",
+    )
 
 
 def _page_bot(d: dict[str, Any]) -> str:

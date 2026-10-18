@@ -96,6 +96,10 @@ def seed() -> None:
             "INSERT INTO instagram_webhook_events (received_at, kind, sender_id, outcome, detail) VALUES (?, ?, ?, ?, ?)",
             (iso(NOW), "human", "sender_today", "needs_human", "hi"),
         )
+        c.execute(
+            "INSERT INTO reels (id, user_id, url, shortcode, received_at, status, source, created_at, updated_at) VALUES ('ad_r', 'user_ig_7', 'https://www.instagram.com/reel/ADx/', 'ADx', ?, 'completed', 'clipnest_ad', ?, ?)",
+            (iso(NOW), iso(NOW), iso(NOW)),
+        )
         c.execute("INSERT INTO nudge_log (user_id, message_key, sent_at) VALUES ('user_ig_1', 'm24_ad_hello', ?)", (iso(NOW),))
         c.execute("INSERT INTO nudge_log (user_id, message_key, sent_at) VALUES ('user_ig_1', 'm26_ad_free', ?)", (iso(NOW),))
 
@@ -155,6 +159,36 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     ad = data["bot"]["ad"]
     check("ad question counted", ad["m26_ad_free"]["total"] == 1 and ad["m24_ad_hello"]["total"] == 1)
     check("waiting for a human", data["bot"]["waiting_for_human_7d"] == 1)
+
+    res = client.get("/admin/dashboard/people")
+    check("people page shows Who stays", "Who stays" in res.text and "After 3 days" in res.text)
+    check("people page says failed and ad copies are handled", "failed ones included" in res.text and "ClipNest ad" in res.text)
+    check("ad copies counted separately", data["ad_items"] == 1, str(data["ad_items"]))
+
+    # 4b. Who stays: cohort math on hand-made days.
+    from app.services.admin_stats import cohorts
+
+    today = "2026-10-18"
+    st = cohorts(
+        {
+            "a": {"2026-10-14", "2026-10-15"},          # joined 14th, back on day 1 only
+            "b": {"2026-10-14", "2026-10-17"},          # joined 14th, back on day 3
+            "c": {"2026-10-14"},                         # joined 14th, never back
+            "d": {"2026-10-17", "2026-10-18"},          # joined yesterday, back today
+            "e": {"2026-10-18"},                         # joined today
+            "f": set(),                                  # never sent a reel
+        },
+        today,
+    )
+    rows = {x["day"]: x for x in st["rows"]}
+    check("cohort: day-1 return counts", rows["2026-10-14"]["day1"] == 2, str(rows["2026-10-14"]))
+    check("cohort: day-3 return counts only day 3 or later", rows["2026-10-14"]["day3"] == 1, str(rows["2026-10-14"]))
+    check("cohort: yesterday has day 1 but no day 3 yet", rows["2026-10-17"]["day1"] == 1 and rows["2026-10-17"]["day3"] is None, str(rows["2026-10-17"]))
+    check("cohort: joined today is in neither", rows["2026-10-18"]["day1"] is None and rows["2026-10-18"]["day3"] is None, str(rows["2026-10-18"]))
+    check("cohort: no reel means no cohort", sum(x["joined"] for x in st["rows"]) == 5)
+    check("cohort: yesterday's day 1 is marked so far", rows["2026-10-17"]["day1_so_far"] is True)
+    check("cohort: overall day 1 only uses finished days, 2 of 3", (st["d1_stayed"], st["d1_people"]) == (2, 3), str(st))
+    check("cohort: overall day 3 is 1 of 3", (st["d3_stayed"], st["d3_people"]) == (1, 3), str(st))
 
     # 5. The daily bot history was seeded from the log, before any trim.
     wrote_5_days_ago = data["bot"]["wrote_per_day"][-6]
