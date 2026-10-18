@@ -22,7 +22,7 @@ from app.services.instagram_profile import (
 )
 from app.services.instagram_send import send_text
 from app.services import admin_stats, nudge, own_media
-from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_valid_instagram_url
+from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_post_url, is_valid_instagram_url
 
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
@@ -326,7 +326,9 @@ def _has_attachment(message_event: dict) -> bool:
 
 
 # A reel the bot could not find a link in: the fix is to copy the link.
-_REEL_TYPES = {"ig_reel", "reel", "video"}
+# unsupported_type: a share Instagram will not describe, nine times a reel
+# that people were left waiting on (to 2026-10-18).
+_REEL_TYPES = {"ig_reel", "reel", "video", "unsupported_type"}
 # A post or a photo: not something ClipNest saves, and telling those people
 # to copy the link would send them in a loop.
 _POST_TYPES = {"share", "ig_post", "post", "image", "photo", "carousel", "album"}
@@ -989,6 +991,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     # out to be the preview of an ad visit.
                     _settle_then(_answer_share, user["id"], sender_id, sender_username, trigger)
             saved_here = 0
+            saved_reels_here = 0
             already_saved = 0
             held_here = 0
             capped_here = 0
@@ -1028,6 +1031,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 saved_reel_ids.append(reel["id"])
                 reels_saved += 1
                 saved_here += 1
+                if not is_post_url(url):
+                    saved_reels_here += 1
                 _log_webhook_event(
                     "reel", sender_id=sender_id, sender_username=sender_username,
                     outcome="saved", detail=url,
@@ -1039,7 +1044,12 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # Only the first-ever reel gets an immediate word. Five minutes of
                 # silence on a stranger's first message reads as broken, not as
                 # processing. Every later reel waits for its title.
-                _reply_later(nudge.fire, user["id"], "reel_returned" if returning else "reel_saved")
+                # Only /p/ links, which may be photos: never called a reel.
+                if not saved_reels_here:
+                    ack_trigger = "post_saved"
+                else:
+                    ack_trigger = "reel_returned" if returning else "reel_saved"
+                _reply_later(nudge.fire, user["id"], ack_trigger)
             if held_here:
                 _reply_later(nudge.fire, user["id"], "reel_held")
             elif capped_here:

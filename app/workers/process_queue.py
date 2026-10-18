@@ -129,6 +129,22 @@ def reel_was_unreachable(message: str) -> bool:
     return "Reel unavailable" in (message or "")
 
 
+def _failed_trigger(job: dict, message: str) -> str:
+    """reel_failed_ours when it broke on our side; otherwise post_failed for
+    a /p/ link (almost always a photo) and reel_failed for a reel."""
+    if not reel_was_unreachable(message):
+        return "reel_failed_ours"
+    try:
+        from app.services.reel_ingest import is_post_url
+
+        reel = get_reel_by_id(job["reel_id"]) or {}
+        if is_post_url(reel.get("url") or ""):
+            return "post_failed"
+    except Exception:
+        pass
+    return "reel_failed"
+
+
 def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
     """Fail the job and tell the owner. A failed job is final (nothing retries
     it), and the owner was already told their reel is processing, so without
@@ -139,7 +155,7 @@ def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
     try:
         from app.services import nudge
 
-        nudge.fire(job["user_id"], "reel_failed" if reel_was_unreachable(message) else "reel_failed_ours")
+        nudge.fire(job["user_id"], _failed_trigger(job, message))
     except Exception:
         pass
 

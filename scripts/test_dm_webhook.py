@@ -307,7 +307,27 @@ def main() -> None:
         check("a shared reel with no link still gets the copy link reply", [f["trigger"] for f in fired] == ["unreadable_share"], str(fired))
 
         fired, sent = deliver(client, message("poster", "https://www.instagram.com/p/POST12345/"))
-        check("a /p/ link is still saved, not refused", [f["trigger"] for f in fired] == ["reel_saved"] and "saved" in outcomes("poster"), str(fired))
+        check("a /p/ link is still saved, not refused", [f["trigger"] for f in fired] == ["post_saved"] and "saved" in outcomes("poster"), str(fired))
+        check("and is never called a reel", sent and "reel" not in sent[0]["text"].lower() and "post" in sent[0]["text"], str(sent))
+
+        # --- Anay, 2026-10-18: a photo post shared, then its link pasted ----
+        # The exact shape production logged for his share.
+        photo_share = {"type": "ig_post", "payload": {"ig_post_media_id": "17966985714191050", "title": "mentalistaaaaa Publicacao 120", "url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1"}}
+        fired, sent = deliver(client, message("anay", attachments=[photo_share]))
+        check("his shared photo gets the copy link line", [f["trigger"] for f in fired] == ["photo_post"] and sent and "reel or a video" in sent[0]["text"] and "cannot save photos" in sent[0]["text"], str(sent))
+        fired, sent = deliver(client, message("anay", "https://www.instagram.com/p/DeLHyr-B_Di/?rpxt=MW1ncXdsY2xydG1jaQ=="))
+        check("the pasted photo link is not called a reel", [f["trigger"] for f in fired] == ["post_saved"] and sent and "reel" not in sent[0]["text"].lower(), str(sent))
+        from app.workers import process_queue
+        with get_connection() as c:
+            job = dict(c.execute("SELECT * FROM processing_jobs WHERE user_id = ? ORDER BY rowid DESC LIMIT 1", (user_row("anay")["id"],)).fetchone())
+        before = len(SENT)
+        process_queue.fail_job = lambda *a, **k: None
+        process_queue.fail_reel_job(job, "Processing error: Reel unavailable: no video, caption, or transcript could be fetched", None)
+        check("and when it turns out a photo, he is told so", len(SENT) == before + 1 and SENT[-1]["text"].startswith("I could not save that post. It is most likely a photo"), str(SENT[before:]))
+        fired, sent = deliver(client, message("unsupported", attachments=[{"type": "unsupported_type", "payload": {"url": "https://lookaside.fbsbx.com/x"}}]))
+        check("a share Instagram will not describe gets the copy link reply", [f["trigger"] for f in fired] == ["unreadable_share"] and sent and "Copy link" in sent[0]["text"], str(sent))
+        fired, sent = deliver(client, message("mixed", "https://www.instagram.com/p/MIXP1111/ https://www.instagram.com/reel/MIXR2222/"))
+        check("a reel next to a post link is still treated as a reel", [f["trigger"] for f in fired] == ["reel_saved"], str(fired))
 
         fired, sent = deliver(client, message("native", attachments=[{"type": "ig_reel", "payload": {"reel_video_id": "1", "title": "x", "url": "https://www.instagram.com/reel/NATIVE777/"}}]))
         check("a native share with a permalink is saved", "saved" in outcomes("native"), str(outcomes("native")))

@@ -90,7 +90,8 @@ SELF_COOLDOWN = {
 
 # reel_failed: the reel itself could not be fetched (private, deleted).
 # reel_failed_ours: it broke on our side, so the reel is not blamed.
-FAILED_TRIGGERS = {"reel_failed", "reel_failed_ours"}
+# post_failed: a pasted /p/ link that could not be read, almost always a photo.
+FAILED_TRIGGERS = {"reel_failed", "reel_failed_ours", "post_failed"}
 
 # The replies to a reel that did not save. Never held back by a cooldown.
 ALWAYS_ANSWERED = {"m9_could_not_read", "m15_photo_post", "m16_unreadable_share"}
@@ -466,7 +467,9 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     sent = user["already_sent"]
     candidates: list[str] = []
 
-    if trigger in {"reel_saved", "reel_returned"}:
+    if trigger in {"reel_saved", "reel_returned", "post_saved"}:
+        # post_saved: a pasted /p/ link. It may be a video, which saves, or a
+        # photo, which fails, so it is never welcomed back with "Saved".
         if n <= 1 and "m1_first_ack" not in sent:
             candidates.append("m1_first_ack")
         elif trigger == "reel_returned":
@@ -633,6 +636,15 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
                 f"Got it. A few reels are ahead of yours, so this one takes about {minutes} minutes. "
                 "I will message you here the moment it is ready."
             )
+        if trigger == "post_saved":
+            # A /p/ link can be a video or a photo, and only the download
+            # tells which. Calling a photo a reel, right after saying photos
+            # are not saved, is what Anay got (2026-10-18). Either way the
+            # next message settles it: the library link or the failure line.
+            return _message(
+                "Got it. I am opening that post now. If it is a video, your library link comes back here "
+                "in a few minutes. If it is a photo, I will tell you, as I cannot save photos yet."
+            )
         # No button: there is nothing to open yet, and a button to an empty
         # page is worse than none.
         return _message("Got it. I am watching that reel now. Your library link comes back here in a few minutes.")
@@ -692,6 +704,8 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         )
     if key == "m9_could_not_read":
         text = "I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel."
+        if trigger == "post_failed":
+            text = "I could not save that post. It is most likely a photo, and I can only save reels and videos for now. Send me a reel and it goes in your library."
         if trigger == "reel_failed_ours":
             # Our fault, not theirs: telling them the reel was private sent
             # people away from reels that were fine (2026-10-17).
@@ -712,8 +726,8 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         # The line has to be right for both: "only reels" told people who had
         # just sent a reel that it was not one (2026-10-17).
         return _message(
-            "Instagram did not send me the link for that one. If it is a reel, tap the three dots on it, "
-            "Copy link, and paste the link here. I do not save photos or posts yet."
+            "Instagram did not send me the link for that one. If it is a reel or a video, tap the three dots on it, "
+            "Copy link, and paste the link here. If it is a photo, I cannot save photos yet."
         )
     if key == "m16_unreadable_share":
         return _message(

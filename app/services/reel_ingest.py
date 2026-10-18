@@ -47,6 +47,13 @@ def canonical_reel_url(url: str) -> str:
     return f"https://www.instagram.com/{match.group(1).lower()}/{match.group(2)}/"
 
 
+def is_post_url(url: str) -> bool:
+    """An instagram.com/p/ link: a video post or a photo, never known to be
+    a reel until it is downloaded."""
+    match = _CANONICAL_URL_RE.match(normalize(url or ""))
+    return bool(match) and match.group(1).lower() == "p"
+
+
 def extract_shortcode(url: str) -> str:
     path_parts = [part for part in urlparse(normalize(url)).path.split("/") if part]
     return path_parts[-1] if path_parts else ""
