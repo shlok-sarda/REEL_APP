@@ -70,6 +70,12 @@ HITS = [
     ("comment mein PLAN likho, DM mein bhej dunga", "PLAN", "file"),
     ("Comment LIST to get all 10 cafes", "LIST", "list"),
     ("Comment for the recipe", "ANY", "recipe"),
+    ("and if you comment emergent, I'll send you the link", "EMERGENT", "link"),
+    ("Comment Breakfast to receive the recipe in DMs!", "BREAKFAST", "recipe"),
+    ("Comment down prompt and I'll send you the link in your DM", "PROMPT", "file"),
+    ("Poori list chahiye? Comment karo LIST mai PDF bhej dunga", "LIST", "list"),
+    ("Comment „MILAN“ for a free Milan Guide", "MILAN", "file"),
+    ("Comment \"WHATSAPP\" aur full setup guide DM mein bhejta hoon", "WHATSAPP", "file"),
 ]
 for text, trigger, promise in HITS:
     got = hit(text)
@@ -95,6 +101,9 @@ MISSES = [
     "Comment who you'd take here",
     "FOLLOW FOR MORE RECIPES. COMMENT BELOW YOUR FAVOURITE",
     "send me your photos",
+    "comment and I'll reply to everyone",
+    "comment something nice and I'll send love",
+    "I comment daily and I'll send a story",
     "",
 ]
 for text in MISSES:

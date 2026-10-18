@@ -21,7 +21,7 @@ from datetime import datetime
 
 from app.db.database import get_connection
 
-DETECTOR_VERSION = "v1"
+DETECTOR_VERSION = "v2"
 
 # --- Word lists. Edit here, then bump DETECTOR_VERSION. ----------------------
 
@@ -73,12 +73,23 @@ PROMISE_CUES = [
     r"you(?:'|’)?ll\s+(?:get|receive)",
     r"(?:in|to|into)\s+(?:your|ur)\s+(?:dm|dms|inbox)",
     r"straight\s+to\s+your",
-    r"for\s+(?:the|my|a|free)\s+(?:\w+\s+)?(?:" + "|".join(w for ws in PROMISES.values() for w in ws) + r")\b",
+    r"for\s+(?:the|my|a|free)\s+(?:\w+\s+){0,2}(?:" + "|".join(w for ws in PROMISES.values() for w in ws) + r")\b",
     r"bhej\s*(?:dunga|dungi|doonga|denge|deta|deti|du|dun)",
+    r"bhej(?:ta|ti|\s+raha|\s+rahi)\s+(?:hoon|hu|hun)",
     r"send\s+kar\s*(?:dunga|dungi|denge|du)",
     r"dm\s+kar\s*(?:dunga|dungi|denge|du)",
     r"(?:mil|milega|milegi|mil\s+jayega|mil\s+jaegi|mil\s+jayegi)\b",
     r"inbox\s+(?:me|mein)",
+]
+
+# Right after a plain, unquoted word, one of these makes it a trigger anyway:
+# "comment emergent, I'll send you the link", "Comment Breakfast to receive
+# the recipe". It has to follow within a few words, or it is ordinary speech.
+STRONG_CUES = [
+    r"(?:i|we)(?:'|’)?ll\s+(?:send|dm|share|slide|message)",
+    r"(?:i|we)\s+will\s+(?:send|dm|share|message)",
+    r"to\s+(?:get|receive|unlock)\s+(?:the|my|a|your|free|it)\b",
+    r"for\s+(?:the|a|my)\s+(?:complete\s+|full\s+|free\s+)?(?:recipe|link|links|pdf|guide|list|code)\b",
 ]
 
 # Never a trigger word, even in capitals or quotes.
@@ -96,14 +107,16 @@ STOP_TRIGGERS = {
 
 _PROMISE_OF = {w: kind for kind, words in PROMISES.items() for w in words}
 _EMOJI = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200d]")
-_QUOTES = "\"'“”‘’«»`*"
+_QUOTES = "\"'“”‘’«»„`*"
 # The word to send: quoted, or a bare word. Quotes may be any of _QUOTES.
-_WORD = r"[\"'“”‘’«»`*]{0,2}\s*([A-Za-z][A-Za-z0-9\-]{1,24})\s*[\"'“”‘’«»`*]{0,2}"
-_THE_WORD = r"(?:the\s+word\s+|word\s+|with\s+)?"
+_WORD = r"[\"'“”‘’«»„`*]{0,2}\s*([A-Za-z][A-Za-z0-9\-]{1,24})\s*[\"'“”‘’«»„`*]{0,2}"
+# "comment the word X", "comment below X", "comment karo X".
+_THE_WORD = r"(?:(?:down\s+below|below|down|karo|kardo|kar\s+do)\s+)?(?:the\s+word\s+|word\s+|with\s+)?"
 _AFTER_COMMENT_CONTEXT = re.compile(
     r"^[\s,.!:]*(?:below|down\s+below|in\s+(?:the\s+)?comments?|in\s+comments?|as\s+a\s+comment|comment)",
     re.I,
 )
+_STRONG_RE = re.compile(r"^[\s,.!:\-]{0,4}(?:and\s+|&\s+|aur\s+)?(?:" + "|".join(STRONG_CUES) + r")", re.I)
 _CUE_RE = re.compile("|".join(f"(?:{c})" for c in PROMISE_CUES), re.I)
 _NOUN_BEFORE = re.compile(r"(?:^|\W)(?:" + "|".join(NOUN_BEFORE_COMMENT) + r")\s*$", re.I)
 
@@ -182,6 +195,12 @@ def _judge(text: str, m: re.Match, word_group: int, kind: str) -> dict | None:
         return None
     # A lowercase, unquoted word only counts when it names the thing itself
     # ("comment link"); otherwise it is ordinary speech ("comment below").
+    # Only as an instruction to the viewer: "I comment daily and I'll..." is not.
+    said_by_someone = re.search(r"(?:^|\W)(?:i|we|they|he|she|people|everyone)\s+$",
+                                text[max(0, m.start() - 12): m.start()], re.I)
+    if not marked and not names_promise and not said_by_someone and not low.endswith("ly") \
+            and _STRONG_RE.search(after):
+        marked = True
     if not marked and not names_promise:
         return None
 
