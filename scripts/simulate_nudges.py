@@ -244,7 +244,7 @@ uid10 = _fresh_guest("first_fails")
 nudge.fire(uid10, "reel_saved")
 run("Their first reel fails two minutes after the ack", "must not be eaten by the cooldown the ack just started",
     lambda: nudge.fire(uid10, "reel_failed"))
-run("A second reel fails right after", "one failure reply per cooldown, not one per reel",
+run("A second reel fails right after", "each failed reel gets its own reply, never silence",
     lambda: nudge.fire(uid10, "reel_failed"))
 
 uid11 = _fresh_guest("unreadable")
@@ -347,6 +347,13 @@ run("They open the chat from the ad and tap 'How does it work?'", "how it works 
     lambda: nudge.fire(uid16c, "ad_q_how"))
 run("Then they share our own ad reel back", "one short line with their library, since how it works was already said",
     lambda: nudge.fire(uid16c, "own_post"))
+uid16d = _fresh_guest("asks_time")
+run("They ask 'How long does it take?'", "a minute or two, then it is in the library",
+    lambda: nudge.fire(uid16d, "ad_q_time"))
+run("Then 'Is it free forever?'", "free right now, and they hear first if that changes",
+    lambda: nudge.fire(uid16d, "ad_q_forever"))
+run("They send the link code from the website", "linked, with their library",
+    lambda: nudge.fire(uid16d, "linked"))
 _egg_tag = next(f"egg{i}" for i in range(500) if nudge.own_reel_group(f"sim_egg{i}") == "egg")
 uid16e = _fresh_guest(_egg_tag)
 run("Someone new in the one in five group shares our own reel", "the Easter egg: a higher monthly cap and the library button",

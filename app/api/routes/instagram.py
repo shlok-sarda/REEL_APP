@@ -574,6 +574,15 @@ def _extract_link_code(message_event: dict) -> str:
     return ""
 
 
+def _link_failed_text(status_code: int) -> str:
+    if status_code == status.HTTP_409_CONFLICT:
+        return (
+            "This Instagram is already linked to another ClipNest account, so I could not link it. "
+            "Sign in with the Google account you used before, or send your reels here and they save as usual."
+        )
+    return "That code has expired. Get a new one on clipnest.in and send it here."
+
+
 def _is_ping(message_event: dict) -> bool:
     """True when the message is the bare word PING, the outbound-DM probe."""
     for text in _deep_strings(message_event.get("message", {})):
@@ -803,16 +812,22 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     linked_accounts += 1
                     _log_webhook_event(
                         "link", sender_id=sender_id, sender_username=sender_username,
-                        link_code=link_code, outcome="linked",
+                        link_code=link_code, outcome="joined" if linked_user.get("joined") else "linked",
+                        detail=linked_user.get("id", ""),
                     )
                     if linked_user.get("id"):
                         reels_saved += _drain_buffered_reels(sender_id, sender_username, linked_user["id"])
+                        # A brand new link had no row to stamp before it.
+                        nudge.record_inbound(sender_id)
+                        _reply_later(nudge.fire, linked_user["id"], "linked")
                 except HTTPException as exc:
                     ignored_events += 1
                     _log_webhook_event(
                         "link", sender_id=sender_id, sender_username=sender_username,
                         link_code=link_code, outcome="link_failed", detail=str(exc.detail),
                     )
+                    # Never silence: they did what the website told them to.
+                    _reply_later(send_text, sender_id, _link_failed_text(exc.status_code))
                 continue
 
             user = get_user_by_instagram_user_id(sender_id)

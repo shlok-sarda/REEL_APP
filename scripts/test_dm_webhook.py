@@ -31,6 +31,7 @@ os.environ["APP_ENV"] = "development"
 os.environ["INSTAGRAM_APP_SECRET"] = ""
 os.environ["INSTAGRAM_ACCESS_TOKEN"] = ""
 os.environ["OPENAI_API_KEY"] = "test-key-not-real"
+os.environ["INSTAGRAM_APP_USERNAME"] = "clipnest.in"
 
 _tmp = tempfile.mkdtemp(prefix="clipnest_dm_webhook_")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
@@ -600,6 +601,82 @@ def main() -> None:
         check("the 5 reel button opens the home screen card", '"claimStage": "home"' in prompted.text)
         landing = client.get("/")
         check("the landing page keeps its own title", '<meta property="og:title" content="ClipNest" />' in landing.text)
+
+        # --- a link code from a second account (2026-10-18) ----------------
+        from app.services import auth as auth_service
+
+        def full_row(user_id: str) -> dict:
+            with get_connection() as c:
+                row = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+                reels = [tuple(r) for r in c.execute("SELECT * FROM reels WHERE user_id = ? ORDER BY id", (user_id,))]
+            return {"row": dict(row) if row else None, "reels": reels}
+
+        # Onir's case: DM account with a reel, then an empty Google account.
+        deliver(client, message("joiner", "https://www.instagram.com/reel/JOIN0001/"))
+        guest_id = user_row("joiner")["id"]
+        newcomer = auth_service.login_or_create_google_user({"sub": "g-joiner", "email": "joiner@example.com", "name": "Joiner"})
+        code = auth_service.create_instagram_link_code(newcomer["id"])["code"]
+        before = len(SENT)
+        deliver(client, message("joiner", code))
+        joined = full_row(guest_id)["row"]
+        check("a code from the empty second account joins the two", "joined" in outcomes("joiner") and joined["google_sub"] == "g-joiner" and joined["email"] == "joiner@example.com", str(outcomes("joiner")))
+        check("the reel stays where it was", len(full_row(guest_id)["reels"]) == 1)
+        check("the empty account gives up its Google sign in", not full_row(newcomer["id"])["row"]["google_sub"])
+        check("the bot says it is linked, with the library", len(SENT) == before + 1 and SENT[-1]["text"] == "Linked. Your reels are in your library." and SENT[-1]["labels"], str(SENT[before:]))
+        check("signing in with that Google again opens the joined account", auth_service.login_or_create_google_user({"sub": "g-joiner", "email": "joiner@example.com"})["id"] == guest_id)
+
+        class _Req:
+            def __init__(self, user_id):
+                self.session = {auth_service.SESSION_USER_KEY: user_id}
+
+        req = _Req(newcomer["id"])
+        check("the browser still signed in to the empty account follows it", (auth_service.current_user(req) or {}).get("id") == guest_id and req.session[auth_service.SESSION_USER_KEY] == guest_id)
+
+        # Early users have Google and Instagram both. Nothing may touch them.
+        prime = {}
+        for name in ("vedant", "rohan", "saatwik"):
+            deliver(client, message(f"prime_{name}", f"https://www.instagram.com/reel/PRIME{name.upper()[:4]}/"))
+            prime_id = user_row(f"prime_{name}")["id"]
+            with get_connection() as c:
+                c.execute("UPDATE users SET google_sub = ?, email = ? WHERE id = ?", (f"g-{name}", f"{name}@example.com", prime_id))
+            prime[name] = (prime_id, full_row(prime_id))
+        stranger = auth_service.login_or_create_google_user({"sub": "g-stranger", "email": "stranger@example.com", "name": "S"})
+        stranger_before = full_row(stranger["id"])
+        before = len(SENT)
+        deliver(client, message("prime_vedant", auth_service.create_instagram_link_code(stranger["id"])["code"]))
+        check("a new account cannot take an early user's Instagram", "link_failed" in outcomes("prime_vedant"))
+        check("and is told so, not left in silence", len(SENT) == before + 1 and "already linked" in SENT[-1]["text"], str(SENT[before:]))
+        check("the new account is untouched", full_row(stranger["id"]) == stranger_before)
+        rohan_id = prime["rohan"][0]
+        deliver(client, message("join_target", "https://www.instagram.com/reel/JOINT001/"))
+        target_before = full_row(user_row("join_target")["id"])
+        deliver(client, message("join_target", auth_service.create_instagram_link_code(rohan_id)["code"]))
+        check("an early user's code cannot pull in someone else's DM account", "link_failed" in outcomes("join_target"))
+        check("that DM account is untouched", full_row(user_row("join_target")["id"]) == target_before)
+        for name, (prime_id, snapshot) in prime.items():
+            check(f"{name} is byte for byte unchanged", full_row(prime_id) == snapshot)
+            check(f"{name} cannot be a join target", auth_service.join_accounts(prime_id, stranger["id"]) == "" and full_row(prime_id) == snapshot)
+
+        before = len(SENT)
+        deliver(client, message("joiner", "REEL-123456"))
+        check("an unknown or expired code gets told to get a new one", len(SENT) == before + 1 and "expired" in SENT[-1]["text"], str(SENT[before:]))
+
+        # --- two more questions it answers by itself ------------------------
+        for text, trigger in (
+            ("How long does it take?", "ad_q_time"), ("how long", "ad_q_time"),
+            ("Is it free forever?", "ad_q_forever"), ("Is it really free?", "ad_q_free"),
+            ("How does it work?", "ad_q_how"), ("I want to share a reel", "ad_q_share"),
+        ):
+            check(f"{text!r} is read as {trigger}", nudge.ad_question(text) == trigger, nudge.ad_question(text))
+        deliver(client, message("asker", "https://www.instagram.com/reel/ASK00001/"))
+        before = len(SENT)
+        deliver(client, message("asker", "How long does it take?"))
+        deliver(client, message("asker", "Is it free forever?"))
+        check("how long gets its answer", any(m["text"].startswith("Usually a minute or two") for m in SENT[before:]), str(SENT[before:]))
+        check("free forever gets its answer", any(m["text"] == "Yes, it is free right now. If that ever changes I will tell you first." for m in SENT[before:]), str(SENT[before:]))
+        before = len(SENT)
+        deliver(client, message("asker", "How long does it take?"))
+        check("the same question twice is left for Shlok", len(SENT) == before and "needs_human" in outcomes("asker"), str(SENT[before:]))
 
         # --- the old text switch -------------------------------------------
         object.__setattr__(nudge.settings, "dm_rich_messages", False)

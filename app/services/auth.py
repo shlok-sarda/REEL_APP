@@ -249,7 +249,33 @@ def current_user(request: Request) -> dict[str, Any] | None:
     user_id = normalize(request.session.get(SESSION_USER_KEY))
     if not user_id:
         return None
-    return get_user_by_id(user_id)
+    user = get_user_by_id(user_id)
+    if user and not _has_identity(user) and normalize(user.get("email")):
+        # An empty Google account that was joined to its owner's Instagram
+        # account (see join_code_account) gave its Google identity away. The
+        # browser that was signed in to it follows that identity, rather than
+        # landing on an empty library or being signed out mid-step.
+        joined = _google_account_by_email(normalize(user["email"]))
+        if joined:
+            request.session[SESSION_USER_KEY] = joined["id"]
+            return joined
+    return user
+
+
+def _has_identity(user: dict[str, Any]) -> bool:
+    return any(
+        normalize(user.get(key))
+        for key in ("google_sub", "instagram_user_id", "telegram_user_id")
+    )
+
+
+def _google_account_by_email(email: str) -> dict[str, Any] | None:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id FROM users WHERE email = ? AND COALESCE(google_sub, '') != '' LIMIT 1",
+            (email,),
+        ).fetchone()
+    return get_user_by_id(row["id"]) if row else None
 
 
 def require_user(request: Request) -> dict[str, Any]:
@@ -623,7 +649,18 @@ def complete_instagram_link(code: str, instagram_user_id: str, instagram_usernam
             (normalized_ig_id,),
         ).fetchone()
         if existing_owner and normalize(existing_owner["id"]) != normalize(token["user_id"]):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This Instagram account is already linked to another user")
+            joined_id = join_code_account(connection, normalize(existing_owner["id"]), normalize(token["user_id"]))
+            if not joined_id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This Instagram account is already linked to another user")
+            connection.execute(
+                """
+                UPDATE instagram_link_tokens
+                SET used_at = ?, instagram_user_id = ?, instagram_username = ?
+                WHERE code = ?
+                """,
+                (iso_now(), normalized_ig_id, normalized_ig_username, normalized_code),
+            )
+            return {**(get_user_by_id_in(connection, joined_id) or {}), "joined": True}
 
         now = iso_now()
         connection.execute(
@@ -643,6 +680,69 @@ def complete_instagram_link(code: str, instagram_user_id: str, instagram_usernam
             (now, normalized_ig_id, normalized_ig_username, normalized_code),
         )
     return get_user_by_id(token["user_id"]) or {}
+
+
+def join_code_account(connection, instagram_owner_id: str, code_account_id: str) -> str:
+    """Someone with a DM-only account (made by the bot, Instagram only) signed
+    in with Google somewhere other than their library link, got a second,
+    empty account, and typed its link code into the DM. Join the two: the
+    Google identity moves onto the Instagram account, where their reels are.
+    Returns that account's id, or "" when the two are not exactly that case.
+
+    Nothing moves except the Google identity, and only between these shapes:
+    the Instagram account has no Google of its own, and the code's account
+    has Google and nothing else (no Instagram, no Telegram, no reels). An
+    account that already has both, like every early user's, never matches
+    either side, so it is never touched. Anything else is refused and left
+    for a person to sort out, as before.
+    """
+    owner = connection.execute(
+        "SELECT id, google_sub, email FROM users WHERE id = ?", (instagram_owner_id,)
+    ).fetchone()
+    newcomer = connection.execute(
+        "SELECT id, google_sub, email, display_name, picture_url, instagram_user_id, telegram_user_id "
+        "FROM users WHERE id = ?",
+        (code_account_id,),
+    ).fetchone()
+    if not owner or not newcomer:
+        return ""
+    if normalize(owner["google_sub"]) or normalize(owner["email"]):
+        return ""
+    if not normalize(newcomer["google_sub"]) or normalize(newcomer["instagram_user_id"]) or normalize(newcomer["telegram_user_id"]):
+        return ""
+    if connection.execute("SELECT 1 FROM reels WHERE user_id = ? LIMIT 1", (code_account_id,)).fetchone():
+        return ""
+    now = iso_now()
+    # The Google id is unique, so it leaves the empty account first. Its
+    # email stays there, which is how a browser still signed in to it finds
+    # its way to the joined account (see current_user).
+    connection.execute(
+        "UPDATE users SET google_sub = NULL, updated_at = ? WHERE id = ?", (now, code_account_id)
+    )
+    connection.execute(
+        """
+        UPDATE users
+        SET google_sub = ?, email = ?, display_name = ?, picture_url = ?, last_login_at = ?, updated_at = ?
+        WHERE id = ? AND COALESCE(google_sub, '') = ''
+        """,
+        (
+            normalize(newcomer["google_sub"]), normalize(newcomer["email"]),
+            normalize(newcomer["display_name"]) or "User", normalize(newcomer["picture_url"]),
+            now, now, instagram_owner_id,
+        ),
+    )
+    return instagram_owner_id
+
+
+def join_accounts(instagram_owner_id: str, code_account_id: str) -> str:
+    """join_code_account in its own transaction, for a repair by hand."""
+    with get_connection() as connection:
+        return join_code_account(connection, normalize(instagram_owner_id), normalize(code_account_id))
+
+
+def get_user_by_id_in(connection, user_id: str) -> dict[str, Any] | None:
+    row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def disconnect_instagram(user_id: str) -> dict[str, Any]:

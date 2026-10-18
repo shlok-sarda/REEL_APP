@@ -50,6 +50,9 @@ PRECEDENCE = [
     "m24_ad_hello",
     "m29_own_reel_egg",
     "m28_own_post",
+    "m30_linked",
+    "m31_how_long",
+    "m32_free_forever",
     "m6_lock",
     "m5_heads_up",
     "m4_home_screen",
@@ -67,14 +70,22 @@ PRECEDENCE = [
 ONCE_EVER = {
     "m1_first_ack", "m2_first_library", "m4_home_screen", "m5_heads_up", "m6_lock",
     "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg",
+    "m31_how_long", "m32_free_forever",
 }
 
 # The answers someone who opened the chat from the ad can get: the general one,
 # and one for each question the ad shows. Each goes out once ever, so asking
 # "Is it really free?" after "How does it work?" gets its own answer, and the
 # same question twice is left for Shlok.
-AD_ANSWERS = {"m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg"}
-QUESTION_ANSWERS = {"ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_share": "m27_ad_share"}
+AD_ANSWERS = {
+    "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg",
+    "m31_how_long", "m32_free_forever",
+}
+QUESTION_ANSWERS = {
+    "ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_share": "m27_ad_share",
+    # Asked often enough by hand to answer by themselves (Shlok, 2026-10-18).
+    "ad_q_time": "m31_how_long", "ad_q_forever": "m32_free_forever",
+}
 
 # Judged against the last time the SAME message went out, not against the
 # last DM of any kind. The failure reply usually follows the first-reel ack by
@@ -83,6 +94,7 @@ QUESTION_ANSWERS = {"ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_
 # itself still stops ten bad links producing ten replies.
 SELF_COOLDOWN = {
     "m10_month_cap",
+    "m30_linked",
     "m17_already_saved",
     "m21_delete_ack",
     "m28_own_post",
@@ -375,6 +387,8 @@ _QUESTION_WORDS_MAX = 10
 _SHARE_Q_RE = re.compile(r"\b(?:share|send|save)\b.*\breels?\b")
 _FREE_Q_RE = re.compile(r"\b(?:free|cost|costs|price|paid|charge|charges)\b")
 _HOW_Q_RE = re.compile(r"\bhow\b.*\b(?:work|works|working|use|does)\b")
+_TIME_Q_RE = re.compile(r"\bhow (?:long|much time|fast|quick)\b|\btakes? (?:long|time)\b")
+_FOREVER_Q_RE = re.compile(r"\bfree\b.*\b(?:forever|always|lifetime)\b|\b(?:forever|always)\b.*\bfree\b")
 
 
 def ad_question(text: str) -> str:
@@ -386,6 +400,10 @@ def ad_question(text: str) -> str:
     if not words or len(words) > _QUESTION_WORDS_MAX:
         return ""
     plain = " ".join(words)
+    if _TIME_Q_RE.search(plain):
+        return "ad_q_time"
+    if _FOREVER_Q_RE.search(plain):
+        return "ad_q_forever"
     if _SHARE_Q_RE.search(plain):
         return "ad_q_share"
     if _FREE_Q_RE.search(plain):
@@ -433,6 +451,10 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # Signed in or not: the data deletion page promises this message is
         # enough, to everyone.
         return "m21_delete_ack"
+
+    if trigger == "linked":
+        # They sent the code the website gave them. Signed in by definition.
+        return "m30_linked"
 
     if trigger in QUESTION_ANSWERS:
         # One of the questions the ad shows, tapped or typed, from the ad or
@@ -776,6 +798,18 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message(
             "Open the reel, tap the share arrow, pick @clipnest.in and send. "
             "I save it for you, and later you find it by searching in plain words.",
+            buttons=open_library(),
+        )
+    if key == "m30_linked":
+        return _message("Linked. Your reels are in your library.", buttons=open_library())
+    if key == "m31_how_long":
+        return _message(
+            "Usually a minute or two after you send it. Then it is in your library, ready to search.",
+            buttons=open_library(),
+        )
+    if key == "m32_free_forever":
+        return _message(
+            "Yes, it is free right now. If that ever changes I will tell you first.",
             buttons=open_library(),
         )
     if key == "m29_own_reel_egg":
