@@ -67,7 +67,13 @@ def rerun_outage_reels() -> list[str]:
 
 def run_all() -> dict:
     result = {}
-    for name, repair in (("join_onir", join_onir), ("rerun_outage_reels", rerun_outage_reels)):
+    from app.services.comment_bait import backfill_once
+
+    for name, repair in (
+        ("join_onir", join_onir),
+        ("rerun_outage_reels", rerun_outage_reels),
+        ("comment_bait_backfill", backfill_once),
+    ):
         try:
             result[name] = repair()
         except Exception as exc:  # a repair must never stop the app starting

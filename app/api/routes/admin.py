@@ -54,6 +54,39 @@ def admin_dashboard_json(request: Request):
     return dashboard_data()
 
 
+@router.get("/comment-reels", response_class=HTMLResponse, include_in_schema=False)
+def admin_comment_reels(request: Request):
+    """Reels that say "comment LINK to get the link". No user data."""
+    from app.services.comment_bait import list_tagged
+    from app.ui_ux.admin_dashboard import render_comment_reels
+
+    _admin_or_not_found(request)
+    return HTMLResponse(render_comment_reels(list_tagged()), headers={"Cache-Control": "no-store"})
+
+
+@router.get("/comment-reels.csv", include_in_schema=False)
+def admin_comment_reels_csv(request: Request):
+    import csv
+    import io
+
+    from fastapi.responses import Response
+
+    from app.services.comment_bait import list_tagged
+
+    _admin_or_not_found(request)
+    out = io.StringIO()
+    fields = ["reel_id", "title", "url", "trigger", "promise", "source", "snippet", "tagged_at", "saves"]
+    writer = csv.DictWriter(out, fieldnames=fields)
+    writer.writeheader()
+    for row in list_tagged():
+        writer.writerow({k: row[k] for k in fields})
+    return Response(
+        out.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="comment_reels.csv"', "Cache-Control": "no-store"},
+    )
+
+
 @router.get("/users")
 def admin_users(request: Request):
     require_admin(request)

@@ -265,6 +265,16 @@ def process_job(job: dict):
         except Exception:
             pass
 
+    # Quietly note reels that say "comment LINK to get the link". Text only,
+    # no AI call; tag_reel never raises, so it cannot fail the job.
+    if job["job_type"] == "process_reel":
+        try:
+            from app.services.comment_bait import tag_reel
+
+            tag_reel(job["reel_id"])
+        except Exception:
+            pass
+
     complete_job(job["id"], claim_token, note=late_failure)
 
     # Now that the reel has a title and media, tell the owner - this is the

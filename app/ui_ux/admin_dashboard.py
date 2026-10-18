@@ -290,7 +290,52 @@ def render(page: str, d: dict[str, Any]) -> str:
 <style>{CSS}</style></head>
 <body><div class="wrap">
 <header><h1>ClipNest <em>numbers</em></h1><a class="back" href="/app">Back to app</a></header>
-<p class="stamp">{escape(stamp)}</p>
+<p class="stamp">{escape(stamp)} <a href="/admin/comment-reels">Comment-to-get reels</a></p>
 <nav class="tabs">{tabs}</nav>
 {body}
+</div></body></html>"""
+
+
+PROMISE_LABELS = {"link": "Link", "recipe": "Recipe", "file": "File or PDF", "code": "Code or discount",
+                  "list": "List", "product": "Product", "other": "Something else"}
+
+
+def render_comment_reels(rows: list[dict[str, Any]]) -> str:
+    """Reels where the creator says "comment LINK to get the link". Admin only."""
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["promise"]] = counts.get(r["promise"], 0) + 1
+    summary = " ".join(
+        f'<span class="pill">{escape(PROMISE_LABELS.get(k, k))} {v}</span>'
+        for k, v in sorted(counts.items(), key=lambda kv: -kv[1])
+    )
+    body = "".join(
+        f"""<tr><td><a href="{escape(r['url'])}" target="_blank" rel="noopener noreferrer">{escape(r['title'] or r['reel_id'])}</a>
+<div class="cb-id">{escape(r['reel_id'])}{f" · saved {r['saves']} times" if r['saves'] > 1 else ""}</div></td>
+<td><b>{escape(r['trigger'])}</b></td><td>{escape(PROMISE_LABELS.get(r['promise'], r['promise']))}</td>
+<td class="cb-snip">{escape(r['snippet'])}</td><td class="cb-id">{escape(r['tagged_at'][:10])}</td></tr>"""
+        for r in rows
+    ) or '<tr><td colspan="5">No reels tagged yet.</td></tr>'
+    extra = """
+.cb-table{width:100%;border-collapse:collapse;font-size:.875rem;margin-top:14px}
+.cb-table th{text-align:left;color:var(--muted);font-weight:500;padding:8px 8px;border-bottom:1px solid var(--line-strong)}
+.cb-table td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.cb-table a{text-decoration:none;border-bottom:1px solid var(--line-strong)}
+.cb-table a:hover,.cb-table a:focus-visible{color:var(--accent);border-color:var(--accent)}
+.cb-snip{color:var(--muted);max-width:420px}.cb-id{color:var(--faint);font-size:.75rem;margin-top:2px}
+.pill{display:inline-block;padding:3px 10px;margin:0 6px 6px 0;border-radius:999px;background:var(--accent-tint);color:var(--accent);font-size:.8125rem}
+.cb-wrap{overflow-x:auto;background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:4px 12px;box-shadow:var(--sh)}
+"""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Comment-to-get reels</title>
+<style>{CSS}{extra}</style></head>
+<body><div class="wrap">
+<header><h1>Comment <em>to get</em></h1><a class="back" href="/admin/dashboard">Back to numbers</a></header>
+<p class="stamp">{len(rows)} reels where the creator asks for a comment or DM to send something back. <a href="/admin/comment-reels.csv">Download CSV</a></p>
+<p>{summary}</p>
+<div class="cb-wrap"><table class="cb-table"><thead><tr><th>Reel</th><th>Word</th><th>Promised</th><th>What it says</th><th>Tagged</th></tr></thead>
+<tbody>{body}</tbody></table></div>
 </div></body></html>"""

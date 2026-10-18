@@ -281,6 +281,20 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(reel_id) REFERENCES reels(id)
     )
     """,
+    # Reels whose creator says "comment LINK to get the link". Admin-only
+    # dataset, written by app/services/comment_bait.py from extracted text.
+    """
+    CREATE TABLE IF NOT EXISTS comment_bait_reels (
+        reel_id TEXT PRIMARY KEY,
+        trigger_word TEXT NOT NULL DEFAULT '',
+        promise TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        snippet TEXT NOT NULL DEFAULT '',
+        detector_version TEXT NOT NULL DEFAULT '',
+        tagged_at TEXT NOT NULL,
+        FOREIGN KEY(reel_id) REFERENCES reels(id)
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS maintenance_flags (
         flag TEXT PRIMARY KEY,
