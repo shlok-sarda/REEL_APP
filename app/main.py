@@ -147,6 +147,15 @@ def startup_event():
             print(f"[startup] purged failed reels: {result}")
     except Exception as exc:
         print(f"[startup] failed-reel purge skipped: {exc}")
+    # After the purge, so the reels it re-queues are not swept up by it.
+    try:
+        from app.services import one_time_repairs
+
+        repaired = one_time_repairs.run_all()
+        if any(repaired.values()):
+            print(f"[startup] one-time repairs: {repaired}")
+    except Exception as exc:
+        print(f"[startup] one-time repairs skipped: {exc}")
     import os
 
     if os.getenv("QUEUE_JANITOR", "on").strip().lower() != "off":
