@@ -319,7 +319,8 @@ def render_comment_reels(rows: list[dict[str, Any]]) -> str:
     extra = """
 .cb-table{width:100%;border-collapse:collapse;font-size:.875rem;margin-top:14px}
 .cb-table th{text-align:left;color:var(--muted);font-weight:500;padding:8px 8px;border-bottom:1px solid var(--line-strong)}
-.cb-table td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.cb-table td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+.cb-table td:last-child{white-space:nowrap}
 .cb-table a{text-decoration:none;border-bottom:1px solid var(--line-strong)}
 .cb-table a:hover,.cb-table a:focus-visible{color:var(--accent);border-color:var(--accent)}
 .cb-snip{color:var(--muted);max-width:420px}.cb-id{color:var(--faint);font-size:.75rem;margin-top:2px}
