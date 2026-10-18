@@ -195,6 +195,13 @@ def outcomes(sender: str) -> list[str]:
         )]
 
 
+def details(sender: str) -> list[str]:
+    with get_connection() as connection:
+        return [r[0] for r in connection.execute(
+            "SELECT detail FROM instagram_webhook_events WHERE sender_id = ? ORDER BY id", (sender,)
+        )]
+
+
 def user_row(sender: str) -> dict:
     with get_connection() as c:
         row = c.execute("SELECT * FROM users WHERE instagram_user_id = ?", (sender,)).fetchone()
@@ -407,6 +414,34 @@ def main() -> None:
         before = len(SENT)
         deliver(client, message("pic_q", "How does it work?", attachments=[AD_PICTURE]))
         check("the ad picture with a question and no referral gets the answer", len(SENT) == before + 1 and SENT[-1]["text"].startswith(HOW_ANSWER), str(SENT[before:]))
+
+        # --- a reel shared after the ad answer is theirs (2026-10-17) ---------
+        FEED_REEL = {"type": "ig_post", "payload": {"ig_post_media_id": "3712345678901234567", "title": "x", "url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=7"}}
+        deliver(client, postback("after_ad", "AD_Q1", "How does it work?"))
+        before = len(SENT)
+        deliver(client, message("after_ad", attachments=[FEED_REEL]))
+        check("a reel shared right after an ad answer is not dropped as the ad", "ad_preview_ignored" not in outcomes("after_ad"), str(outcomes("after_ad")))
+        check("and it gets a reply", len(SENT) == before + 1 and "Copy link" in SENT[-1]["text"], str(SENT[before:]))
+        before = len(SENT)
+        deliver(client, message("after_ad", attachments=[FEED_REEL]))
+        check("a second one inside the cooldown is answered too", len(SENT) == before + 1, str(SENT[before:]))
+        check("the post id is kept in the log for checking", any("media_ids=['3712345678901234567']" in r for r in details("after_ad")), str(details("after_ad")))
+
+        deliver(client, message("ref_then_reel", "Is it really free?", referral=AD_REFERRAL))
+        with get_connection() as c:
+            c.execute(
+                "UPDATE instagram_webhook_events SET received_at = ? WHERE sender_id = 'ref_then_reel' AND outcome = 'ad_referral'",
+                (route._since(route.AD_PREVIEW_SECONDS + 30),),
+            )
+        before = len(SENT)
+        deliver(client, message("ref_then_reel", attachments=[FEED_REEL]))
+        check("a reel a minute after opening from the ad gets a reply", len(SENT) == before + 1 and "Copy link" in SENT[-1]["text"], str(SENT[before:]))
+
+        failer = user_row("after_ad")["id"]
+        before = len(SENT)
+        nudge.fire(failer, "reel_failed_ours")
+        nudge.fire(failer, "reel_failed_ours")
+        check("a reel that broke on our side is not blamed on the reel", len(SENT) == before + 2 and "not yours" in SENT[-1]["text"] and "rivate" not in SENT[-1]["text"], str(SENT[before:]))
 
         # Pick test senders that land in each group, by the same fixed hash.
         egg_ids = [f"egg_{i}" for i in range(200) if nudge.own_reel_group(f"egg_{i}") == "egg"]

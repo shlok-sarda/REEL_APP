@@ -123,6 +123,12 @@ def _own_reel(reel_id: str) -> bool:
         return False
 
 
+def reel_was_unreachable(message: str) -> bool:
+    """The reel itself could not be fetched (private, deleted, a bad link),
+    as opposed to something breaking on our side."""
+    return "Reel unavailable" in (message or "")
+
+
 def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
     """Fail the job and tell the owner. A failed job is final (nothing retries
     it), and the owner was already told their reel is processing, so without
@@ -133,7 +139,7 @@ def fail_reel_job(job: dict, message: str, claim_token: str | None) -> None:
     try:
         from app.services import nudge
 
-        nudge.fire(job["user_id"], "reel_failed")
+        nudge.fire(job["user_id"], "reel_failed" if reel_was_unreachable(message) else "reel_failed_ours")
     except Exception:
         pass
 

@@ -54,6 +54,13 @@ AD_CONTEXT_SECONDS = 180
 # A preview with nothing else waits this long before it is answered, so the
 # question that belongs with it can arrive first and get the one reply.
 AD_SETTLE_SECONDS = 8
+# How close to the ad's arrival a share must be to be taken for the ad's own
+# preview. Instagram puts the preview in within seconds of the referral; a
+# share after that is a reel the person went and found. The 3 minute window
+# above, and any ad answer, used to decide this too, so someone who read
+# "Open any reel, tap share, pick @clipnest.in" and did it straight away had
+# their reel dropped with no reply (2026-10-17, arnav.om27 and others).
+AD_PREVIEW_SECONDS = 30
 
 
 def _settle_then(func, *args) -> None:
@@ -280,6 +287,17 @@ def _describe_message(message_event: dict) -> str:
                 payload = att.get("payload") if isinstance(att.get("payload"), dict) else {}
                 kinds.append(f"{att.get('type')}({sorted(payload.keys())})")
         parts.append(f"attachments={kinds}")
+        # The ids alone, so whether a post id can be turned into a reel link
+        # can be checked against real shares rather than guessed.
+        ids = [
+            str(att["payload"].get(key))[:40]
+            for att in attachments
+            if isinstance(att, dict) and isinstance(att.get("payload"), dict)
+            for key in ("ig_post_media_id", "reel_video_id")
+            if att["payload"].get(key)
+        ]
+        if ids:
+            parts.append(f"media_ids={ids}")
     hosts = set()
     for text in _deep_strings(message):
         for match in _re.findall(r"https?://([A-Za-z0-9.-]+)", text or ""):
@@ -396,11 +414,10 @@ def _ad_referral_since(sender_id: str, since: str) -> bool:
         return False
 
 
-def _in_ad_visit(sender_id: str, user_id: str) -> bool:
-    """Did this person open the chat from the ad, or get an ad answer, in the
-    last few minutes?"""
-    since = _since(AD_CONTEXT_SECONDS)
-    return _ad_referral_since(sender_id, since) or nudge.ad_answer_sent_since(user_id, since)
+def _just_arrived_from_ad(sender_id: str) -> bool:
+    """Did this person open the chat from the ad a few seconds ago? Only then
+    can a share with no link be the ad's preview rather than their reel."""
+    return _ad_referral_since(sender_id, _since(AD_PREVIEW_SECONDS))
 
 
 def _answer_ad(user_id: str, sender_id: str, sender_username: str, trigger: str, has_words: bool) -> None:
@@ -429,15 +446,15 @@ def _answer_ad_visit(user_id: str, sender_id: str, sender_username: str) -> None
 
 def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
     """The reply to a share with no reel to save: a post or photo, a reel with
-    no link, or our own reel. Run after AD_SETTLE_SECONDS. Inside an ad visit
-    the share is the ad's preview, which the ad answer already covers, so it
-    gets nothing: never "only reels" to someone who tapped the ad.
+    no link, or our own reel. Run after AD_SETTLE_SECONDS. Seconds after the
+    ad opened, the share is the ad's preview, which the ad answer already
+    covers, so it gets nothing. Any later share is theirs and is answered.
 
     Our own reel shared again outside an ad visit is answered (with their
     library) even right after an earlier answer: only a real ad arrival in the
     last few minutes makes it the ad's preview."""
     own_again = trigger == "own_post" and not _ad_referral_since(sender_id, _since(AD_CONTEXT_SECONDS))
-    if not own_again and _in_ad_visit(sender_id, user_id):
+    if not own_again and _just_arrived_from_ad(sender_id):
         _log_webhook_event(
             "reel", sender_id=sender_id, sender_username=sender_username,
             outcome="ad_preview_ignored", detail=trigger,
@@ -903,7 +920,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             # The wall. Hold the reel rather than process it, and rather than
             # reject it: signing in then saves everything waiting in one go.
             urls, own_shared, own_urls = _saveable_urls(event)
-            in_ad_preview = not own_urls and _has_attachment(event) and _in_ad_visit(sender_id, user["id"])
+            in_ad_preview = not own_urls and _has_attachment(event) and _just_arrived_from_ad(sender_id)
             if own_urls or in_ad_preview:
                 # Our reel, or what may be the ad's preview: saved off the
                 # webhook path, since the preview's reel can need asking Meta.

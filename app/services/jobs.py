@@ -173,7 +173,8 @@ def notify_exhausted_owners() -> None:
         try:
             from app.services import nudge
 
-            nudge.fire(user_id, "reel_failed")
+            # Interrupted again and again: our side, not their reel.
+            nudge.fire(user_id, "reel_failed_ours")
         except Exception:
             pass
 

@@ -82,14 +82,18 @@ QUESTION_ANSWERS = {"ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_
 # exists for: "give me a few minutes", then silence. Measuring it against
 # itself still stops ten bad links producing ten replies.
 SELF_COOLDOWN = {
-    "m9_could_not_read",
     "m10_month_cap",
-    "m15_photo_post",
-    "m16_unreadable_share",
     "m17_already_saved",
     "m21_delete_ack",
     "m28_own_post",
 }
+
+# reel_failed: the reel itself could not be fetched (private, deleted).
+# reel_failed_ours: it broke on our side, so the reel is not blamed.
+FAILED_TRIGGERS = {"reel_failed", "reel_failed_ours"}
+
+# The replies to a reel that did not save. Never held back by a cooldown.
+ALWAYS_ANSWERED = {"m9_could_not_read", "m15_photo_post", "m16_unreadable_share"}
 
 # Messages that are nothing without the person's own link. With no link to
 # give (PUBLIC_BASE_URL unset) these are skipped rather than sent empty.
@@ -456,7 +460,7 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # Converted. The bot already got what it was for, so it speaks only
         # to answer something that went wrong: a reel that could not be read
         # leaves a signed in person with the same "is it broken" moment.
-        return "m9_could_not_read" if trigger == "reel_failed" else None
+        return "m9_could_not_read" if trigger in FAILED_TRIGGERS else None
 
     n = user["reel_count"]
     sent = user["already_sent"]
@@ -490,7 +494,7 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         elif n >= HOME_SCREEN_AT and "m4_home_screen" not in sent:
             candidates.append("m4_home_screen")
 
-    if trigger == "reel_failed":
+    if trigger in FAILED_TRIGGERS:
         # They were told it is processing. Silence here reads as a working
         # save, and the window shuts on it.
         candidates.append("m9_could_not_read")
@@ -688,6 +692,10 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         )
     if key == "m9_could_not_read":
         text = "I could not read that one. Private, deleted, or a photo post are the usual reasons. Try another reel."
+        if trigger == "reel_failed_ours":
+            # Our fault, not theirs: telling them the reel was private sent
+            # people away from reels that were fine (2026-10-17).
+            text = "Something broke on my side with that reel, not yours. Send it to me again and I will save it."
         # On a first reel that fails there is nothing to open, so no button.
         if int(user.get("completed_count") or 0) >= 1:
             return _message(text, legacy, buttons=open_library())
@@ -873,7 +881,11 @@ def _fire(user_id: str, trigger: str, title: str, direct: bool) -> str | None:
         # instantly, M2 fires a few minutes later once processing finishes,
         # and 10 minutes is comfortably inside that gap. This was silently
         # eating M2 for every single guest.
-        if key not in ONCE_EVER and not cooldown_clear(user, key, direct=direct):
+        # A reel that did not save is always answered, each one: under the
+        # cooldown a second failure inside 10 minutes got silence, and the
+        # person was left thinking it saved (2026-10-17). Each reply answers a
+        # reel they sent, so it cannot become a burst on its own.
+        if key not in ONCE_EVER and key not in ALWAYS_ANSWERED and not cooldown_clear(user, key, direct=direct):
             log_event("nudge", igsid, "skipped_cooldown", f"{user_id} last dm {user.get('last_dm_at')!r}")
             return None
         message = render(key, user, title=title, trigger=trigger)
