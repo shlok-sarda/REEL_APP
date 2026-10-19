@@ -483,7 +483,16 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # Converted. The bot already got what it was for, so it speaks only
         # to answer something that went wrong: a reel that could not be read
         # leaves a signed in person with the same "is it broken" moment.
-        return "m9_could_not_read" if trigger in FAILED_TRIGGERS else None
+        # So does a share that was not saved at all: a photo or post, or a
+        # reel Instagram sent with no link. Signed in people got silence on
+        # every post they shared, at any count (Shlok, 2026-10-19).
+        if trigger in FAILED_TRIGGERS:
+            return "m9_could_not_read"
+        if trigger == "photo_post":
+            return "m15_photo_post"
+        if trigger == "unreadable_share":
+            return "m16_unreadable_share"
+        return None
 
     n = user["reel_count"]
     sent = user["already_sent"]
