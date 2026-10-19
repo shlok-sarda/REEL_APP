@@ -334,6 +334,46 @@ _REEL_TYPES = {"ig_reel", "reel", "video", "unsupported_type"}
 _POST_TYPES = {"share", "ig_post", "post", "image", "photo", "carousel", "album"}
 
 
+def _probe_share_media(sender_id: str, sender_username: str, message_event: dict) -> None:
+    """What the media link of a reel shared with no link actually serves.
+
+    Instagram sends many feed shares as unsupported_type with nothing but a
+    lookaside.fbsbx.com link: no permalink, no media id (2026-10-19, 11 of
+    one person's 12 reels). Whether that link is the video itself decides
+    whether those reels can be saved at all, so its answer is logged (status,
+    type, size), never the link, which is signed. Only Meta's own media host
+    is ever asked, with no redirects followed and only the first 4 KB read.
+    """
+    from urllib.parse import urlparse
+
+    import requests
+
+    for att in (message_event.get("message") or {}).get("attachments") or []:
+        if not isinstance(att, dict) or str(att.get("type") or "").lower() != "unsupported_type":
+            continue
+        payload = att.get("payload") if isinstance(att.get("payload"), dict) else {}
+        url = str(payload.get("url") or "")
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != "lookaside.fbsbx.com":
+            continue
+        try:
+            resp = requests.get(url, headers={"Range": "bytes=0-4095"}, timeout=8, stream=True, allow_redirects=False)
+            head = next(resp.iter_content(64), b"")
+            detail = (
+                f"status={resp.status_code} type={resp.headers.get('Content-Type', '')!r} "
+                f"size={resp.headers.get('Content-Range') or resp.headers.get('Content-Length', '')!r} "
+                f"redirect_host={urlparse(resp.headers.get('Location', '')).hostname} first={head[:12].hex()}"
+            )
+            resp.close()
+        except Exception as exc:
+            detail = f"error={exc.__class__.__name__}"
+        _log_webhook_event(
+            "reel", sender_id=sender_id, sender_username=sender_username,
+            outcome="share_probe", detail=detail[:400],
+        )
+        return
+
+
 def _attachment_trigger(message_event: dict) -> str:
     """unreadable_share, photo_post, or needs_human for anything else (a
     story mention, a voice note, a sticker), which Shlok answers by hand."""
@@ -976,6 +1016,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     trigger = "own_post"
                 elif _has_attachment(event):
                     trigger = _attachment_trigger(event)
+                    if trigger == "unreadable_share":
+                        _reply_later(_probe_share_media, sender_id, sender_username, event)
                     if trigger == "photo_post" and _typed_text(event).strip():
                         # A post that came with their own words is someone
                         # talking, most likely asking about it: "I only save
