@@ -550,6 +550,24 @@ SCHEMA_STATEMENTS = [
         PRIMARY KEY (day, sender_id)
     )
     """,
+    # One row per reel someone shared with the bot, written when the webhook
+    # arrives. Keyed by Meta's message id, so a delivery Meta sends again is
+    # not counted twice. Kept forever (the webhook log keeps only 200 rows).
+    """
+    CREATE TABLE IF NOT EXISTS reel_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT NOT NULL,
+        item TEXT NOT NULL DEFAULT '',
+        sender_id TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        received_at TEXT NOT NULL,
+        outcome TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        reel_id TEXT NOT NULL DEFAULT '',
+        UNIQUE(message_id, item)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_reel_receipts_received ON reel_receipts(received_at)",
 ]
 
 # Migrate-by-ALTER pattern (see USER_EXTRA_COLUMNS below): folder_memberships

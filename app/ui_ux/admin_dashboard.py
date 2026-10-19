@@ -168,7 +168,35 @@ def _page_today(d: dict[str, Any]) -> str:
     return tiles + '<div class="grid">' + "".join([
         card("New people per day", f"Last 30 days. <b>{_n(sum(p['per_day']))}</b> joined, <b>{_n(sum(p['ig_per_day']))}</b> of them through the bot.", bars(p["per_day"], days)),
         card("Reels saved per day", f"Last 30 days. <b>{_n(sum(r['per_day']))}</b> reels, <b>{_n(sum(r['failed_per_day']))}</b> failed.", bars(r["per_day"], days)),
-    ]) + "</div>" + card("The windows side by side", "", strips, f"Cost is an estimate at Rs {c['per_reel']} per reel read. {older_note}")
+    ]) + "</div>" + _sent_card(d["sent"]) + card("The windows side by side", "", strips, f"Cost is an estimate at Rs {c['per_reel']} per reel read. {older_note}")
+
+
+def _sent_card(sent: dict[str, Any]) -> str:
+    """Reels people sent the bot versus reels saved, from reel_receipts."""
+    from app.services.reel_counter import REASONS
+
+    t, w, a = sent["today"], sent["last_7"], sent["all"]
+    lines = [
+        ("Sent to us", "received"),
+        ("Already in their library", "duplicates"),
+        ("Saved", "processed"),
+        ("Still being read", "in_progress"),
+        ("Not saved", "not_processed"),
+    ]
+    table = "<table><tr><th>Reels</th><th>Today</th><th>7 days</th><th>All time</th></tr>"
+    for label, key in lines:
+        table += f"<tr><td>{label}</td><td>{_n(t[key])}</td><td>{_n(w[key])}</td><td>{_n(a[key])}</td></tr>"
+    table += f'<tr><td><b>Gap</b></td><td><b>{_n(t["gap"])}</b></td><td><b>{_n(w["gap"])}</b></td><td><b>{_n(a["gap"])}</b></td></tr></table>'
+    reasons = hrows([(label, int(a["reasons"].get(code, 0))) for code, label in REASONS.items()])
+    since = _pretty_day(sent["since"]) if sent["since"] else "today"
+    return card(
+        "Reels sent versus saved",
+        "Counted when each reel reaches the bot. A reel Meta sends twice counts once. "
+        "Gap is sent, minus already in their library, minus saved.",
+        table + '<p class="sub" style="margin:16px 0 8px">Why not saved, all time</p>' + reasons,
+        f"Counting since {escape(since)}. Earlier totals: 217 sent, 164 saved on 18 Oct (audit). "
+        f"Our own ad reel shared back: {_n(a['ad'])}, not counted above.",
+    )
 
 
 def _page_people(d: dict[str, Any]) -> str:

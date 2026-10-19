@@ -449,6 +449,13 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         """
     ).fetchone()
 
+    # ---- reels sent versus saved (counted at the webhook) ------------------
+    from app.services import reel_counter
+
+    sent = reel_counter.counts(
+        c, _local_day("{col}"), today, days7[0], PEOPLE
+    )
+
     # ---- cost -------------------------------------------------------------
     def rupees(n: int) -> float:
         return round(n * REEL_COST_RUPEES, 2)
@@ -482,6 +489,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             "total": rupees(int(r["total"] or 0)),
         },
         "egg": egg,
+        "sent": sent,
         "bot": {
             "wrote_per_day": wrote_per_day,
             "wrote_today": wrote_per_day[-1],

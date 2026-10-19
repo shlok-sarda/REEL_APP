@@ -21,7 +21,7 @@ from app.services.instagram_profile import (
     resolve_instagram_username,
 )
 from app.services.instagram_send import send_text
-from app.services import admin_stats, nudge, own_media
+from app.services import admin_stats, nudge, own_media, reel_counter
 from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_post_url, is_valid_instagram_url
 
 
@@ -668,6 +668,26 @@ def _handle_needed_now() -> bool:
     return not (settings.guest_autocreate_for_everyone and settings.dm_reply_for_everyone)
 
 
+def _existing_reel(user_id: str, url: str) -> dict | None:
+    """The reel already in their library under this link, if any. Only for
+    counting, so a failed lookup is just "not there"."""
+    try:
+        return get_reel_by_url(canonical_reel_url(url), user_id=user_id)
+    except Exception:
+        return None
+
+
+def _media_id(message_event: dict) -> str:
+    """The media id of a share that came without a link, for the counter."""
+    for att in (message_event.get("message") or {}).get("attachments") or []:
+        payload = att.get("payload") if isinstance(att, dict) else None
+        if isinstance(payload, dict):
+            for key in _MEDIA_ID_KEYS:
+                if payload.get(key):
+                    return str(payload[key])[:80]
+    return ""
+
+
 def _over_cap(user_id: str, url: str) -> bool:
     """Would saving this use a reel the account no longer has this month?
     A reel already in the library is not a new one, so it is let through."""
@@ -704,10 +724,12 @@ def _drain_buffered_reels(sender_id: str, sender_username: str, user_id: str) ->
                     "reel", sender_id=sender_id, sender_username=sender_username,
                     outcome="over_month_cap", detail=url,
                 )
+                reel_counter.resolve_held(sender_id, url, user_id, reel_counter.REFUSED, "monthly_cap")
                 continue
             reel = append_reel(url, user_id=user_id, source="instagram")
             if reel.get("status") != "completed":
                 enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+            reel_counter.resolve_held(sender_id, url, user_id, reel_counter.QUEUED, reel_id=reel["id"])
             saved += 1
             _log_webhook_event(
                 "reel", sender_id=sender_id, sender_username=sender_username,
@@ -947,6 +969,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="buffered", detail=url,
                     )
+                    reel_counter.record(event, sender_id, "", url, reel_counter.HELD)
                 if not buffered_urls:
                     _log_webhook_event(
                         "reel", sender_id=sender_id, sender_username=sender_username,
@@ -985,6 +1008,10 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     _save_own_reels, user["id"], sender_id, sender_username, own_urls,
                     event if in_ad_preview else None, None,
                 )
+            # Our own reel shared back is counted on its own, never as one of
+            # theirs. An ad's preview is not something they shared at all.
+            for own_url in own_urls or (["ad"] if own_shared else []):
+                reel_counter.record(event, sender_id, user["id"], own_url, reel_counter.AD)
             if nudge.is_locked(user["id"]):
                 held = urls
                 for url in held:
@@ -992,6 +1019,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="buffered", detail=url,
                     )
+                    reel_counter.record(event, sender_id, user["id"], url, reel_counter.HELD)
                 if held:
                     _reply_later(nudge.fire, user["id"], "reel_held")
                     ignored_events += 1
@@ -1009,6 +1037,13 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # hand (decided 2026-10-14). "delete my data" is the exception:
                 # the data deletion page promises the reply, so it is sent, and
                 # the message is still flagged for Shlok like any other.
+                share_kind = _attachment_trigger(event) if _has_attachment(event) else ""
+                if not own_shared and not in_ad_preview and share_kind in ("unreadable_share", "photo_post"):
+                    # They shared something, but Instagram sent no link to save.
+                    reel_counter.record(
+                        event, sender_id, user["id"], _media_id(event), reel_counter.REFUSED,
+                        "no_link_reel" if share_kind == "unreadable_share" else "no_link_post",
+                    )
                 question = nudge.ad_question(_typed_text(event))
                 if own_shared:
                     # Our own ad or reel shared back: saved above, and
@@ -1062,6 +1097,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="buffered", detail=url,
                     )
+                    reel_counter.record(event, sender_id, user["id"], url, reel_counter.HELD)
                     held_here += 1
                     continue
                 if _over_cap(user["id"], url):
@@ -1071,9 +1107,17 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         "reel", sender_id=sender_id, sender_username=sender_username,
                         outcome="over_month_cap", detail=url,
                     )
+                    reel_counter.record(event, sender_id, user["id"], url, reel_counter.REFUSED, "monthly_cap")
                     capped_here += 1
                     continue
+                existing = _existing_reel(user["id"], url)
                 reel = append_reel(url, user_id=user["id"], source="instagram")
+                if existing and existing.get("status") != "failed":
+                    # Already in their library (saved, or still being read):
+                    # a duplicate, not a second reel processed.
+                    reel_counter.record(event, sender_id, user["id"], url, reel_counter.DUPLICATE, reel_id=reel["id"])
+                else:
+                    reel_counter.record(event, sender_id, user["id"], url, reel_counter.QUEUED, reel_id=reel["id"])
                 if reel.get("status") == "completed":
                     # They sent a reel that is already in their library. Queueing
                     # it again would pay for a second full extraction of the same
