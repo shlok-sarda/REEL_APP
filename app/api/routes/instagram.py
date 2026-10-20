@@ -334,19 +334,23 @@ _REEL_TYPES = {"ig_reel", "reel", "video", "unsupported_type"}
 _POST_TYPES = {"share", "ig_post", "post", "image", "photo", "carousel", "album"}
 
 
-def _probe_share_media(sender_id: str, sender_username: str, message_event: dict) -> None:
-    """What the media link of a reel shared with no link actually serves.
+# Where Meta serves the media of a share. The only host a shared video is
+# ever downloaded from.
+SHARE_MEDIA_HOST = "lookaside.fbsbx.com"
+# A shared video has no Instagram link, so it is stored under one of its own.
+SHARE_SHORTCODE_PREFIX = "share_"
+SHARE_MAX_BYTES = 150 * 1024 * 1024
+
+
+def _shared_video_link(message_event: dict) -> str:
+    """Meta's media link of a reel shared with no link, or "".
 
     Instagram sends many feed shares as unsupported_type with nothing but a
     lookaside.fbsbx.com link: no permalink, no media id (2026-10-19, 11 of
-    one person's 12 reels). Whether that link is the video itself decides
-    whether those reels can be saved at all, so its answer is logged (status,
-    type, size), never the link, which is signed. Only Meta's own media host
-    is ever asked, with no redirects followed and only the first 4 KB read.
+    one person's 12 reels). That link serves the video itself (tested
+    2026-10-20: 206, video/mp4), so the reel can be saved from it.
     """
     from urllib.parse import urlparse
-
-    import requests
 
     for att in (message_event.get("message") or {}).get("attachments") or []:
         if not isinstance(att, dict) or str(att.get("type") or "").lower() != "unsupported_type":
@@ -354,28 +358,103 @@ def _probe_share_media(sender_id: str, sender_username: str, message_event: dict
         payload = att.get("payload") if isinstance(att.get("payload"), dict) else {}
         url = str(payload.get("url") or "")
         parsed = urlparse(url)
-        if parsed.scheme != "https" or parsed.hostname != "lookaside.fbsbx.com":
-            continue
-        try:
-            resp = requests.get(url, headers={"Range": "bytes=0-4095"}, timeout=8, stream=True, allow_redirects=False)
-            head = next(resp.iter_content(64), b"")
-            detail = (
-                f"status={resp.status_code} type={resp.headers.get('Content-Type', '')!r} "
-                f"size={resp.headers.get('Content-Range') or resp.headers.get('Content-Length', '')!r} "
-                f"redirect_host={urlparse(resp.headers.get('Location', '')).hostname} first={head[:12].hex()}"
-            )
-            resp.close()
-        except Exception as exc:
-            detail = f"error={exc.__class__.__name__}"
-        # Kept out of the 200-row trim, and printed so it shows in the
-        # Render logs at once: the first test shares were trimmed away
-        # before anyone could read them (2026-10-19).
-        print(f"[instagram] share_probe {detail[:400]}", flush=True)
-        _log_webhook_event(
-            "reel", sender_id=sender_id, sender_username=sender_username,
-            outcome="share_probe", detail=detail[:400],
-        )
+        if parsed.scheme == "https" and parsed.hostname == SHARE_MEDIA_HOST:
+            return url
+    return ""
+
+
+def _share_asset_id(media_url: str) -> str:
+    """A stable name for a shared video: Meta's asset id, else a hash of the
+    link without its signature."""
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(media_url)
+    asset = (parse_qs(parsed.query).get("asset_id") or [""])[0]
+    if re.fullmatch(r"[0-9A-Za-z_-]{4,40}", asset or ""):
+        return asset
+    return hashlib.sha1(parsed.path.encode("utf-8")).hexdigest()[:16]
+
+
+def _shared_reel_url(media_url: str) -> str:
+    return f"https://www.instagram.com/reel/{SHARE_SHORTCODE_PREFIX}{_share_asset_id(media_url)}/"
+
+
+def _download_shared_video(media_url: str, target: "Path") -> bool:
+    """Fetch a shared video from Meta's media host into `target`. Only that
+    host, no redirects followed, video only, and never more than
+    SHARE_MAX_BYTES. True when a non-empty video landed."""
+    import requests
+
+    if _shared_video_link({"message": {"attachments": [{"type": "unsupported_type", "payload": {"url": media_url}}]}}) != media_url:
+        return False
+    part = target.with_suffix(".part")
+    try:
+        with requests.get(media_url, timeout=60, stream=True, allow_redirects=False) as resp:
+            kind = (resp.headers.get("Content-Type") or "").lower()
+            if resp.status_code != 200 or not kind.startswith("video/"):
+                print(f"[instagram] shared video refused: status={resp.status_code} type={kind!r}", flush=True)
+                return False
+            size = 0
+            with open(part, "wb") as handle:
+                for chunk in resp.iter_content(chunk_size=1 << 20):
+                    size += len(chunk)
+                    if size > SHARE_MAX_BYTES:
+                        raise ValueError("shared video too large")
+                    handle.write(chunk)
+        if size == 0:
+            part.unlink(missing_ok=True)
+            return False
+        part.replace(target)
+        return True
+    except Exception as exc:
+        print(f"[instagram] shared video download failed: {exc.__class__.__name__}", flush=True)
+        part.unlink(missing_ok=True)
+        return False
+
+
+def _save_shared_video(user_id: str, sender_id: str, sender_username: str, media_url: str, event: dict) -> None:
+    """Save a reel Instagram sent with no link, from the video Meta serves.
+
+    Runs off the webhook path. The wall and the monthly cap hold exactly as
+    for a linked reel. When the video cannot be had, or the guest is at the
+    wall (a held reel is replayed by its link, and this one has none), they
+    are told to copy the link, as before."""
+    from app.config import settings
+    from app.services.reel_ingest import update_reel_media
+
+    reel_url = _shared_reel_url(media_url)
+    if nudge.is_locked(user_id):
+        reel_counter.record(event, sender_id, user_id, reel_url, reel_counter.REFUSED, "no_link_reel")
+        nudge.fire(user_id, "unreadable_share")
         return
+    if _over_cap(user_id, reel_url):
+        reel_counter.record(event, sender_id, user_id, reel_url, reel_counter.REFUSED, "monthly_cap")
+        _log_webhook_event("reel", sender_id=sender_id, sender_username=sender_username, outcome="over_month_cap", detail=reel_url)
+        nudge.fire(user_id, "month_cap")
+        return
+    existing = get_reel_by_url(reel_url, user_id=user_id)
+    if existing and existing.get("status") == "completed":
+        reel_counter.record(event, sender_id, user_id, reel_url, reel_counter.DUPLICATE, reel_id=existing["id"])
+        _log_webhook_event("reel", sender_id=sender_id, sender_username=sender_username, outcome="already_saved", detail=reel_url)
+        nudge.fire(user_id, "already_saved")
+        return
+    returning = _away_for_a_while(user_id)
+    settings.videos_dir.mkdir(parents=True, exist_ok=True)
+    staged = settings.videos_dir / f"{SHARE_SHORTCODE_PREFIX}{_share_asset_id(media_url)}.mp4"
+    if not _download_shared_video(media_url, staged):
+        reel_counter.record(event, sender_id, user_id, reel_url, reel_counter.REFUSED, "no_link_reel")
+        _log_webhook_event("reel", sender_id=sender_id, sender_username=sender_username, outcome="share_download_failed", detail=reel_url)
+        nudge.fire(user_id, "unreadable_share")
+        return
+    reel = append_reel(reel_url, user_id=user_id, source="instagram")
+    video_path = settings.videos_dir / f"{reel['id']}.mp4"
+    staged.replace(video_path)
+    update_reel_media(reel_url, "ready", str(video_path), "", user_id=user_id)
+    enqueue_reel_job(reel["id"], user_id=reel["user_id"])
+    reel_counter.record(event, sender_id, user_id, reel_url, reel_counter.QUEUED, reel_id=reel["id"])
+    _log_webhook_event("reel", sender_id=sender_id, sender_username=sender_username, outcome="saved", detail=reel_url)
+    ensure_background_progress()
+    nudge.fire(user_id, "reel_returned" if returning else "reel_saved")
 
 
 def _attachment_trigger(message_event: dict) -> str:
@@ -1042,7 +1121,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 # the data deletion page promises the reply, so it is sent, and
                 # the message is still flagged for Shlok like any other.
                 share_kind = _attachment_trigger(event) if _has_attachment(event) else ""
-                if not own_shared and not in_ad_preview and share_kind in ("unreadable_share", "photo_post"):
+                shared_video = "" if own_shared or in_ad_preview else _shared_video_link(event)
+                if not shared_video and not own_shared and not in_ad_preview and share_kind in ("unreadable_share", "photo_post"):
                     # They shared something, but Instagram sent no link to save.
                     reel_counter.record(
                         event, sender_id, user["id"], _media_id(event), reel_counter.REFUSED,
@@ -1055,8 +1135,11 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     trigger = "own_post"
                 elif _has_attachment(event):
                     trigger = _attachment_trigger(event)
-                    if trigger == "unreadable_share":
-                        _reply_later(_probe_share_media, sender_id, sender_username, event)
+                    if trigger == "unreadable_share" and shared_video:
+                        # No link, but Meta's media link is the video: saved
+                        # from that, and answered like any saved reel.
+                        _reply_later(_save_shared_video, user["id"], sender_id, sender_username, shared_video, event)
+                        trigger = "shared_video"
                     if trigger == "photo_post" and _typed_text(event).strip():
                         # A post that came with their own words is someone
                         # talking, most likely asking about it: "I only save
@@ -1081,6 +1164,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     _log_needs_human(sender_id, sender_username, ",".join(kinds) or "text")
                 elif trigger in nudge.QUESTION_ANSWERS:
                     _reply_later(_answer_question, user["id"], sender_id, sender_username, trigger)
+                elif trigger == "shared_video":
+                    pass
                 elif sender_id not in pending_replies:
                     # A post, a photo, a reel with no link or our own reel.
                     # Answered after a short wait, and not at all when it turns
