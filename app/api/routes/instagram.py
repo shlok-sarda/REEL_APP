@@ -105,7 +105,7 @@ def _log_webhook_event(
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human', 'ad_referral')
+                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human', 'ad_referral', 'share_probe')
                   AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
                   ))
@@ -367,6 +367,10 @@ def _probe_share_media(sender_id: str, sender_username: str, message_event: dict
             resp.close()
         except Exception as exc:
             detail = f"error={exc.__class__.__name__}"
+        # Kept out of the 200-row trim, and printed so it shows in the
+        # Render logs at once: the first test shares were trimmed away
+        # before anyone could read them (2026-10-19).
+        print(f"[instagram] share_probe {detail[:400]}", flush=True)
         _log_webhook_event(
             "reel", sender_id=sender_id, sender_username=sender_username,
             outcome="share_probe", detail=detail[:400],
