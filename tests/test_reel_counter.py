@@ -157,6 +157,45 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     check("today and 7 days hold the same reels as all time here",
           t["received"] == counts()["last_7"]["received"] == a["received"], str(t))
 
+    # 8b. Queued and the day by day view.
+    full = counts()
+    check("queued counts the reels handed to the processing queue", full["all"]["queued"] == 3, str(full["all"]))
+    today_row = full["days"][-1] if full["days"] else {}
+    check("day by day has today's row", today_row.get("day") == admin_stats._today_local(), str(today_row))
+    check("today's row: sent, queued, saved",
+          (today_row.get("sent"), today_row.get("queued"), today_row.get("saved")) == (6, 3, 1), str(today_row))
+
+    # 8c. A reel sent with no link but with Meta's video link is saved from
+    # the video. If that save crashes, the reel is still counted as sent.
+    shared = {"type": "unsupported_type", "payload": {"url": "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=777&signature=x"}}
+    event = {"sender": {"id": "p7"}, "message": {"mid": "mid_shared_ok", "attachments": [shared]}}
+    with get_connection() as c:
+        c.execute("INSERT INTO users (id, display_name, created_at) VALUES ('user_ig_p7', 'p7', '2026-10-01T00:00:00')")
+    real_download = route._download_shared_video
+
+    def fake_download(url, target):
+        target.write_bytes(b"video")
+        return True
+
+    route._download_shared_video = fake_download
+    route._save_shared_video("user_ig_p7", "p7", "", shared["payload"]["url"], event)
+    a = counts()["all"]
+    check("shared video with no link counts as sent and queued", (a["received"], a["queued"]) == (7, 4), str(a))
+
+    def crash(url, target):
+        raise RuntimeError("disk gone")
+
+    route._download_shared_video = crash
+    crashed_event = {"sender": {"id": "p7"}, "message": {"mid": "mid_shared_crash", "attachments": [shared]}}
+    try:
+        route._save_shared_video("user_ig_p7", "p7", "", shared["payload"]["url"].replace("777", "778"), crashed_event)
+    except RuntimeError:
+        pass
+    route._download_shared_video = real_download
+    a = counts()["all"]
+    check("shared video save that crashes still counts as sent (our error)",
+          a["received"] == 8 and a["reasons"]["our_error"] == 1, str(a))
+
     # 9. A counter that breaks must never stop the reel from saving.
     real = reel_counter.get_connection
 
@@ -180,6 +219,8 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     page = client.get("/admin/dashboard")
     check("Today page shows the card", page.status_code == 200 and "Reels sent versus saved" in page.text, str(page.status_code))
     check("card carries the audit line", "Earlier totals: 217 sent, 164 saved on 18 Oct (audit)." in page.text)
+    check("card shows the queue line and the day by day table",
+          "Went to the processing queue" in page.text and "Day by day" in page.text)
     check("card has no long dashes", "—" not in page.text.split("Reels sent versus saved")[1].split("</section>")[0])
 
 print()

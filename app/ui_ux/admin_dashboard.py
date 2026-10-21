@@ -178,6 +178,7 @@ def _sent_card(sent: dict[str, Any]) -> str:
     t, w, a = sent["today"], sent["last_7"], sent["all"]
     lines = [
         ("Sent to us", "received"),
+        ("Went to the processing queue", "queued"),
         ("Already in their library", "duplicates"),
         ("Saved", "processed"),
         ("Still being read", "in_progress"),
@@ -189,11 +190,19 @@ def _sent_card(sent: dict[str, Any]) -> str:
     table += f'<tr><td><b>Gap</b></td><td><b>{_n(t["gap"])}</b></td><td><b>{_n(w["gap"])}</b></td><td><b>{_n(a["gap"])}</b></td></tr></table>'
     reasons = hrows([(label, int(a["reasons"].get(code, 0))) for code, label in REASONS.items()])
     since = _pretty_day(sent["since"]) if sent["since"] else "today"
+    # Day by day, newest first, from the day counting started.
+    days = [d for d in sent.get("days", []) if not sent["since"] or d["day"] >= sent["since"]]
+    daily = ""
+    if days:
+        daily = '<p class="sub" style="margin:16px 0 8px">Day by day</p><table><tr><th>Day</th><th>Sent</th><th>Queued</th><th>Saved</th></tr>'
+        for d in reversed(days):
+            daily += f'<tr><td>{_pretty_day(d["day"])}</td><td>{_n(d["sent"])}</td><td>{_n(d["queued"])}</td><td>{_n(d["saved"])}</td></tr>'
+        daily += "</table>"
     return card(
         "Reels sent versus saved",
         "Counted when each reel reaches the bot. A reel Meta sends twice counts once. "
         "Gap is sent, minus already in their library, minus saved.",
-        table + '<p class="sub" style="margin:16px 0 8px">Why not saved, all time</p>' + reasons,
+        table + daily + '<p class="sub" style="margin:16px 0 8px">Why not saved, all time</p>' + reasons,
         f"Counting since {escape(since)}. Earlier totals: 217 sent, 164 saved on 18 Oct (audit). "
         f"Our own ad reel shared back: {_n(a['ad'])}, not counted above.",
     )

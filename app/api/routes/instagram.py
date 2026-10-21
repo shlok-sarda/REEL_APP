@@ -413,6 +413,16 @@ def _download_shared_video(media_url: str, target: "Path") -> bool:
 
 
 def _save_shared_video(user_id: str, sender_id: str, sender_username: str, media_url: str, event: dict) -> None:
+    try:
+        _save_shared_video_now(user_id, sender_id, sender_username, media_url, event)
+    except Exception:
+        # Still counted as sent: a crash here must not hide the reel from
+        # the counter. Counted once; an earlier outcome for it stands.
+        reel_counter.record(event, sender_id, user_id, _shared_reel_url(media_url), reel_counter.REFUSED, "our_error")
+        raise
+
+
+def _save_shared_video_now(user_id: str, sender_id: str, sender_username: str, media_url: str, event: dict) -> None:
     """Save a reel Instagram sent with no link, from the video Meta serves.
 
     Runs off the webhook path. The wall and the monthly cap hold exactly as

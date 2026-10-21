@@ -93,16 +93,25 @@ def resolve_held(sender_id: str, item: str, user_id: str, outcome: str, reason: 
 
 
 def _blank() -> dict[str, Any]:
-    return {"received": 0, "duplicates": 0, "processed": 0, "in_progress": 0, "not_processed": 0,
+    return {"received": 0, "queued": 0, "duplicates": 0, "processed": 0, "in_progress": 0, "not_processed": 0,
             "gap": 0, "ad": 0, "reasons": {k: 0 for k in REASONS}}
 
 
-def counts(c: sqlite3.Connection, day_sql: str, today: str, week_start: str, people_sql: str) -> dict[str, Any]:
-    """Today, last 7 days and all time. `day_sql` turns a column into the
-    dashboard's local day; `people_sql` is a condition on user_id that keeps
-    only real people (a reel sent before the account existed has no user yet
-    and counts too)."""
-    out = {"today": _blank(), "last_7": _blank(), "all": _blank(), "since": ""}
+def counts(
+    c: sqlite3.Connection, day_sql: str, today: str, week_start: str, people_sql: str,
+    days: list[str] | None = None,
+) -> dict[str, Any]:
+    """Today, last 7 days, all time, and one row per day in `days`. `day_sql`
+    turns a column into the dashboard's local day; `people_sql` is a
+    condition on user_id that keeps only real people (a reel sent before the
+    account existed has no user yet and counts too).
+
+    Sent: every reel a person shared with the bot, ad reel excluded. Queued:
+    the ones handed to the processing queue. Saved: queued ones whose reel
+    finished."""
+    out = {"today": _blank(), "last_7": _blank(), "all": _blank(), "since": "",
+           "days": [{"day": d, "sent": 0, "queued": 0, "saved": 0} for d in (days or [])]}
+    by_day = {d["day"]: d for d in out["days"]}
     try:
         rows = c.execute(
             f"""
@@ -128,11 +137,17 @@ def counts(c: sqlite3.Connection, day_sql: str, today: str, week_start: str, peo
             windows.append(out["last_7"])
         if row["day"] == today:
             windows.append(out["today"])
+        per_day = by_day.get(row["day"])
+        if per_day is not None and state != AD:
+            per_day["sent"] += 1
+            per_day["queued"] += row["outcome"] == QUEUED
+            per_day["saved"] += state == "processed"
         for w in windows:
             if state == AD:
                 w["ad"] += 1
                 continue
             w["received"] += 1
+            w["queued"] += row["outcome"] == QUEUED
             if state == DUPLICATE:
                 w["duplicates"] += 1
             elif state == "processed":

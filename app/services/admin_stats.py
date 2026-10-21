@@ -453,7 +453,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
     from app.services import reel_counter
 
     sent = reel_counter.counts(
-        c, _local_day("{col}"), today, days7[0], PEOPLE
+        c, _local_day("{col}"), today, days7[0], PEOPLE, days30[-14:]
     )
 
     # ---- cost -------------------------------------------------------------
