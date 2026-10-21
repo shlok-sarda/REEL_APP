@@ -232,9 +232,10 @@ CLAIM_SCRIPT = """  <script>
 
       if (STAGE !== 'home' && !inInstagram) {
         const slot = document.createElement('div');
+        slot.style.colorScheme = 'light';
         action.appendChild(slot);
         const s = document.createElement('script');
-        s.src = 'https://accounts.google.com/gsi/client';
+        s.src = 'https://accounts.google.com/gsi/client?hl=en';
         s.async = true;
         s.onload = function () {
           window.google.accounts.id.initialize({
@@ -256,7 +257,7 @@ CLAIM_SCRIPT = """  <script>
             }
           });
           window.google.accounts.id.renderButton(slot, {
-            theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with',
+            theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', locale: 'en',
             width: Math.min(400, Math.max(200, action.clientWidth))
           });
         };

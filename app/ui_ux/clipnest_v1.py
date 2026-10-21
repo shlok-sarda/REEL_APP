@@ -3960,9 +3960,10 @@ def build_clipnest_v1_html(
           hint.textContent = 'Google sign-in isn’t available inside Instagram. ' + hint.textContent;
         } else if (GOOGLE_CLIENT_ID && LOGIN_CSRF) {
           const slot = document.createElement('div');
+          slot.style.colorScheme = 'light';
           action.appendChild(slot);
           const s = document.createElement('script');
-          s.src = 'https://accounts.google.com/gsi/client';
+          s.src = 'https://accounts.google.com/gsi/client?hl=en';
           s.async = true;
           s.onload = function () {
             window.google.accounts.id.initialize({
@@ -3987,7 +3988,7 @@ def build_clipnest_v1_html(
                 }
               }
             });
-            window.google.accounts.id.renderButton(slot, { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with' });
+            window.google.accounts.id.renderButton(slot, { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', locale: 'en' });
           };
           document.head.appendChild(s);
         }

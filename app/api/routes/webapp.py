@@ -1074,7 +1074,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     instagram_app_username = settings.instagram_app_username
     canonical_url = (settings.public_base_url or "https://clipnest.in").rstrip("/") + "/"
     google_script = (
-        '<script src="https://accounts.google.com/gsi/client" async defer></script>'
+        '<script src="https://accounts.google.com/gsi/client?hl=en" async defer></script>'
         if google_client_id
         else ""
     )
@@ -1326,7 +1326,9 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
     .cta-primary:focus-visible { outline:2px solid var(--tan, #f2a866); outline-offset:3px; }
     .cta-note { font-weight:500; opacity:0.62; font-size:0.8rem; }
     .cta-note::before { content:"·"; margin-right:8px; }
-    .google-shell { min-height:38px; display:flex; justify-content:center; }
+    /* Google's button is an iframe with a light page inside. On a dark page
+       the browser paints a white box behind it, so match its scheme. */
+    .google-shell { min-height:38px; display:flex; justify-content:center; color-scheme:light; }
     /* Stands in for the Google button inside Instagram's browser. Secondary
        weight, so it never competes with the primary CTA above it. */
     .escape-wrap { display:grid; gap:7px; }
@@ -2120,7 +2122,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
           el.dataset.mounted = '1';
           window.google.accounts.id.renderButton(
             el,
-            { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320 }
+            { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320, locale: 'en' }
           );
         });
         return true;
@@ -2145,7 +2147,7 @@ def build_landing_html(csrf_token: str, user: dict | None) -> str:
         el.dataset.mounted = '1';
         window.google.accounts.id.renderButton(
           el,
-          { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320 }
+          { theme: 'filled_black', size: 'medium', shape: 'pill', text: 'continue_with', width: 320, locale: 'en' }
         );
       });
       return true;
