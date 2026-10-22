@@ -447,10 +447,11 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
     decision on 2026-10-14. The bot does the reel job and nothing else.
     """
     if trigger == "month_cap":
-        # Said once a month, to signed-in accounts too: without it their
-        # reels would simply stop saving with no word why.
-        last = _parse((user.get("last_sent_at") or {}).get("m10_month_cap") or "")
-        return None if last and last >= _month_start() else "m10_month_cap"
+        # Every reel turned away is answered, signed-in accounts too: without
+        # it their reels would simply stop saving with no word why. Once a
+        # month was not enough: the 52nd reel got silence and read as saved
+        # (2026-10-22). Its own cooldown still turns a burst into one reply.
+        return "m10_month_cap"
 
     if trigger == "delete_request":
         # Signed in or not: the data deletion page promises this message is
