@@ -379,9 +379,14 @@ run("A signed in user types 'delete my data'", "the one question a signed in use
 
 uid20 = _fresh_guest("cap")
 _add_reel(uid20, 1, TITLES[0])
-run("Their 51st reel of the month arrives", "said once a month; the reel is not read or paid for",
+run("Their 51st reel of the month arrives", "the reel is not read or paid for",
     lambda: nudge.fire(uid20, "month_cap"))
-run("A 52nd arrives", "already told this month: silent",
+run("A 52nd arrives a minute later", "inside 10 minutes of the last one: one reply covers the burst",
+    lambda: nudge.fire(uid20, "month_cap"))
+_stamp(uid20, last_inbound_at=_ago(0))
+with get_connection() as c:
+    c.execute("UPDATE nudge_log SET sent_at = ? WHERE user_id = ? AND message_key = 'm10_month_cap'", (_ago(1), uid20))
+run("Another arrives an hour later", "every reel turned away gets a word; the reel is not read or paid for",
     lambda: nudge.fire(uid20, "month_cap"))
 
 uid21 = _fresh_guest("held_many")
