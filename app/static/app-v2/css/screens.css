@@ -351,7 +351,12 @@ button.w-tile { font: inherit; }
 
 /* ---------- search ---------- */
 .search-layer { position: absolute; inset: 0; z-index: 30; background: rgba(10, 10, 11, 0.97); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
-.search-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; padding: calc(var(--safe-top) + 22px) var(--gut) calc(var(--dock-h) + var(--dock-bottom) + var(--kb, 0px) + 28px); scrollbar-width: none; }
+.search-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; padding: calc(var(--safe-top) + 22px) var(--gut) 0; scrollbar-width: none; }
+.search-scroll > * { flex: none; }
+/* iOS Safari drops a flex scroller's bottom padding, so the last result sat
+   under the dock and a short list could not scroll at all. A real spacer
+   keeps the room above the dock on every browser. */
+.search-scroll::after { content: ""; flex: none; height: calc(var(--dock-h) + var(--dock-bottom) + var(--kb, 0px) + 28px); }
 .search-scroll::-webkit-scrollbar { display: none; }
 .search-title { margin-top: 10px; max-width: 16ch; }
 .search-layer.has-query .search-top { display: none; }
