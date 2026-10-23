@@ -152,6 +152,16 @@ SYNONYMS = {
     "ladies": ["woman", "girl"], "guy": ["man", "dude"], "man": ["guy"],
     "dude": ["man", "guy"], "shoe": ["sneaker", "footwear"],
     "sneaker": ["shoe", "footwear"],
+    # Indian city names people spell several ways. Measured miss: "work from
+    # cafe i banglore" found nothing although the reel was in the library.
+    "bangalore": ["bengaluru", "blr"], "bengaluru": ["bangalore", "blr"],
+    "banglore": ["bangalore", "bengaluru"], "bengalore": ["bangalore", "bengaluru"],
+    "blr": ["bangalore", "bengaluru"],
+    "mumbai": ["bombay"], "bombay": ["mumbai"],
+    "gurgaon": ["gurugram"], "gurugram": ["gurgaon"],
+    "kolkata": ["calcutta"], "calcutta": ["kolkata"],
+    "chennai": ["madras"], "madras": ["chennai"],
+    "pune": ["poona"], "poona": ["pune"],
 }
 
 
@@ -614,6 +624,36 @@ class _Index:
         )
         return out
 
+    def partial_matches(self, query: str) -> list[str]:
+        """Last-resort lane for multi-word queries where no reel holds EVERY
+        word. People add words their reel never mentions: "work from cafe i
+        banglore" found nothing while "work from cafe" found the reel,
+        because the strict passes needed "banglore" too. Returns the reels
+        that hold the most query words in trusted fields (at least all but
+        one), best coverage first. Typo corrections count toward coverage,
+        but a reel needs at least one word as typed, so a correction alone
+        never admits anything."""
+        tokens = _tokens(query)
+        meaningful = [t for t in tokens if t not in STOPWORDS]
+        if len(meaningful) < 2:
+            return []
+        wide_cols = "{" + " ".join(WIDE_COLUMNS) + "}"
+        coverage: dict[str, int] = defaultdict(int)
+        exact: set[str] = set()
+        for token in meaningful:
+            typed = self._fts(f"{wide_cols}: (" + " OR ".join(_quote(v) for v in _variants(token)) + ")")
+            exact.update(typed)
+            hits = set(typed)
+            corrections = self._correct(token)
+            if corrections:
+                hits.update(self._fts(f"{wide_cols}: (" + " OR ".join(_quote(c) for c in corrections) + ")"))
+            for rid in hits:
+                coverage[rid] += 1
+        best = max((coverage[rid] for rid in exact), default=0)
+        if best < len(meaningful) - 1:
+            return []
+        return [rid for rid in exact if coverage[rid] == best]
+
     def _blend(self, vector: np.ndarray) -> np.ndarray:
         ctx_sims = self.context_matrix @ vector
         subj_sims = self.subject_matrix @ vector
@@ -731,6 +771,21 @@ def search_documents_hybrid(
         results.append(payload)
         if len(results) >= limit:
             break
+    if not results:
+        # Nothing holds every word: show the reels that hold all but one
+        # rather than an empty screen.
+        partial = set(index.partial_matches(query))
+        for rid in ordered:
+            if rid not in partial:
+                continue
+            document = index.by_id.get(rid)
+            if not document:
+                continue
+            payload = _result_payload(document, int(round(fused[rid] * 100000)), _matched_fields(document, query))
+            payload["partial_match"] = True
+            results.append(payload)
+            if len(results) >= limit:
+                break
     if recall_fill > len(results):
         taken = {r["reel_id"] for r in results}
         for rid in ordered:
@@ -775,7 +830,12 @@ def search_documents_fts(documents: list[dict], query: str, limit: int = 20) -> 
 
     trusted = set(lex["phrase"]) | set(lex["and"]) | set(lex["focus"]) | set(lex["wide"]) | set(lex["glue"])
     ordered = sorted(fused, key=fused.get, reverse=True)
-    admitted = [rid for rid in ordered if rid in trusted] or ordered
+    partial = set(index.partial_matches(query)) if not trusted else set()
+    admitted = (
+        [rid for rid in ordered if rid in trusted]
+        or [rid for rid in ordered if rid in partial]
+        or ordered
+    )
 
     results = []
     for rid in admitted[:limit]:
