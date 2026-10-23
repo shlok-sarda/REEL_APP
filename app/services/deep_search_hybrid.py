@@ -629,8 +629,8 @@ class _Index:
         word. People add words their reel never mentions: "work from cafe i
         banglore" found nothing while "work from cafe" found the reel,
         because the strict passes needed "banglore" too. Returns the reels
-        that hold the most query words in trusted fields (at least all but
-        one), best coverage first. Typo corrections count toward coverage,
+        that hold the most query words in trusted fields (at least half of
+        half), best coverage first. Typo corrections count toward coverage,
         but a reel needs at least one word as typed, so a correction alone
         never admits anything."""
         tokens = _tokens(query)
@@ -650,7 +650,9 @@ class _Index:
             for rid in hits:
                 coverage[rid] += 1
         best = max((coverage[rid] for rid in exact), default=0)
-        if best < len(meaningful) - 1:
+        # At least half the words: "work from cafe in koramangala bangalore"
+        # still finds a cafe reel that names neither place.
+        if best < (len(meaningful) + 1) // 2:
             return []
         return [rid for rid in exact if coverage[rid] == best]
 
@@ -772,7 +774,7 @@ def search_documents_hybrid(
         if len(results) >= limit:
             break
     if not results:
-        # Nothing holds every word: show the reels that hold all but one
+        # Nothing holds every word: show the reels that hold the most of them
         # rather than an empty screen.
         partial = set(index.partial_matches(query))
         for rid in ordered:

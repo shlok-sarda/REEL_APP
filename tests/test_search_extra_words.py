@@ -64,6 +64,7 @@ library = [MUMBAI_CAFE] + OTHERS
 check("plain words still work", found(library, "work from cafe"), ["mumbai_cafe"])
 check("extra city word, misspelled", found(library, "work from cafe i banglore"), ["mumbai_cafe"])
 check("city the reel is not in", found(library, "cafes in indiranagar"), ["mumbai_cafe"])
+check("two extra place words", found(library, "work from cafe in koramangala bangalore"), ["mumbai_cafe"])
 check("nonsense still finds nothing", found(library, "blorptastic frimble"), [])
 check("one unknown word finds nothing", found(library, "cats"), [])
 
@@ -71,6 +72,7 @@ library = [MUMBAI_CAFE, BANGALORE_CAFE] + OTHERS
 check("banglore matches a Bengaluru reel only", found(library, "work from cafe i banglore"), ["bangalore_cafe"])
 check("bangalore matches a Bengaluru reel only", found(library, "work from cafe in bangalore"), ["bangalore_cafe"])
 check("indiranagar picks the right cafe", found(library, "cafes in indiranagar"), ["bangalore_cafe"])
+check("two place words pick the right cafe", found(library, "work from cafe in indiranagar bangalore"), ["bangalore_cafe"])
 check("mumbai picks the right cafe", found(library, "work from cafe in mumbai"), ["mumbai_cafe"])
 check("bombay means mumbai", found(library, "cafe in bombay"), ["mumbai_cafe"])
 
