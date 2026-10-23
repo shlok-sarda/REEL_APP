@@ -630,7 +630,7 @@ class _Index:
         banglore" found nothing while "work from cafe" found the reel,
         because the strict passes needed "banglore" too. Returns the reels
         that hold the most query words in trusted fields (at least half of
-        half), best coverage first. Typo corrections count toward coverage,
+        them), best coverage first. Typo corrections count toward coverage,
         but a reel needs at least one word as typed, so a correction alone
         never admits anything."""
         tokens = _tokens(query)
