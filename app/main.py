@@ -77,6 +77,7 @@ def _queue_janitor_loop():
     """
     time.sleep(20)
     tick = 0
+    backup_failed_at = 0.0
     while True:
         try:
             # Disk-space sweep first: on a full disk nothing else (locks, DB
@@ -116,14 +117,22 @@ def _queue_janitor_loop():
         except Exception as exc:
             print(f"[janitor] instagram token refresh failed: {exc}", flush=True)
 
-        # Database copy to object storage: once shortly after boot, then
-        # about every 6 hours (144 ticks of 150s).
-        if tick % 144 == 1:
+        # Database copy to object storage, about once an hour. Asked on every
+        # tick; backup_database itself skips until the last copy is old
+        # enough, so a restart does not reset the clock or copy twice.
+        # After a failure, wait 15 minutes before trying again rather than
+        # snapshotting the whole database every tick.
+        if time.time() - backup_failed_at > 900:
             try:
                 from app.services.db_backup import backup_database
 
-                print(f"[janitor] database backup: {backup_database()}", flush=True)
+                result = backup_database()
+                if not result.get("ok"):
+                    backup_failed_at = time.time()
+                if not result.get("skipped"):
+                    print(f"[janitor] database backup: {result}", flush=True)
             except Exception as exc:
+                backup_failed_at = time.time()
                 print(f"[janitor] database backup failed: {exc}", flush=True)
 
         time.sleep(150)

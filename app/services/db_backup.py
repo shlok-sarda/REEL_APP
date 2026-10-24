@@ -3,7 +3,7 @@
 The whole product state is one file on one disk. This takes a consistent
 snapshot with SQLite's own backup API (safe while the app is writing, WAL
 included), gzips it and uploads it to the private R2 bucket. Called from the
-queue janitor every few hours.
+queue janitor about once an hour.
 """
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ from app.services.object_storage import upload_file
 
 BACKUP_FLAG = "db_backup_last"
 BACKUP_PREFIX = "backups/app.db"
+# Just under an hour: the janitor asks every 150s, so this lands a new copy
+# roughly hourly instead of drifting to 62.5 minutes and skipping hour stamps.
+BACKUP_EVERY_SECONDS = 55 * 60
 
 
 def last_backup_at() -> str:
@@ -41,7 +44,7 @@ def backup_database(force: bool = False) -> dict:
     previous = last_backup_at()
     if previous and not force:
         try:
-            if (datetime.now() - datetime.fromisoformat(previous)).total_seconds() < 3600:
+            if (datetime.now() - datetime.fromisoformat(previous)).total_seconds() < BACKUP_EVERY_SECONDS:
                 return {"ok": True, "skipped": "backed up less than an hour ago", "at": previous}
         except ValueError:
             pass
