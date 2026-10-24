@@ -61,6 +61,11 @@ AD_SETTLE_SECONDS = 8
 # "Open any reel, tap share, pick @clipnest.in" and did it straight away had
 # their reel dropped with no reply (2026-10-17, arnav.om27 and others).
 AD_PREVIEW_SECONDS = 30
+# A post that arrives no more than this after an ad answer went out (or
+# before it) is that ad's preview. Short, so a feed reel shared after
+# reading the answer is still answered: nobody reads it, finds a reel and
+# shares it in 10 seconds.
+PREVIEW_AFTER_ANSWER_SECONDS = 10
 
 
 def _settle_then(func, *args) -> None:
@@ -562,14 +567,24 @@ def _answer_ad(user_id: str, sender_id: str, sender_username: str, trigger: str,
     if not has_words and nudge.ad_answer_sent_since(user_id, _since(AD_CONTEXT_SECONDS)):
         return
     if not nudge.fire(user_id, trigger) and has_words:
+        nudge.fire(user_id, "text")
         _log_needs_human(sender_id, sender_username, "ad")
 
 
 def _answer_question(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
     """One of the ad's questions, asked outside the ad. Its fixed answer, or,
-    when that answer was already given, left for Shlok."""
+    when that answer was already given, how it works, flagged for Shlok."""
     if not nudge.fire(user_id, trigger):
+        nudge.fire(user_id, "text")
         _log_needs_human(sender_id, sender_username, "question")
+
+
+def _answer_text(user_id: str, sender_id: str, sender_username: str, what: str) -> None:
+    """Words or a tap that are not a reel or a question we know. Told how it
+    works, so nobody from the ad is left with silence (2026-10-23), and
+    still counted for Shlok, who may want to say more by hand."""
+    nudge.fire(user_id, "text")
+    _log_needs_human(sender_id, sender_username, what)
 
 
 def _answer_ad_visit(user_id: str, sender_id: str, sender_username: str) -> None:
@@ -579,7 +594,24 @@ def _answer_ad_visit(user_id: str, sender_id: str, sender_username: str) -> None
     _answer_ad(user_id, sender_id, sender_username, trigger, False)
 
 
-def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: str) -> None:
+def _preview_of_answered_tap(user_id: str, trigger: str, since: str) -> bool:
+    """A "post" that arrived within seconds of them being told how it works
+    is the ad's preview, sent alongside the question they tapped. Meta often
+    sends no ad click with it, so without this the photo line followed the
+    right answer (4 new people, 23 to 24 Oct). `since` is
+    PREVIEW_AFTER_ANSWER_SECONDS before the post arrived."""
+    return trigger == "photo_post" and bool(since) and nudge.ad_answer_sent_since(user_id, since)
+
+
+def _record_post_later(event: dict, sender_id: str, user_id: str, since: str) -> None:
+    """Count a post with no link, unless it turns out to be the ad's preview
+    (see _preview_of_answered_tap), which nobody shared."""
+    if _just_arrived_from_ad(sender_id) or _preview_of_answered_tap(user_id, "photo_post", since):
+        return
+    reel_counter.record(event, sender_id, user_id, _media_id(event), reel_counter.REFUSED, "no_link_post")
+
+
+def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: str, since: str = "") -> None:
     """The reply to a share with no reel to save: a post or photo, a reel with
     no link, or our own reel. Run after AD_SETTLE_SECONDS. Seconds after the
     ad opened, the share is the ad's preview, which the ad answer already
@@ -589,7 +621,7 @@ def _answer_share(user_id: str, sender_id: str, sender_username: str, trigger: s
     library) even right after an earlier answer: only a real ad arrival in the
     last few minutes makes it the ad's preview."""
     own_again = trigger == "own_post" and not _ad_referral_since(sender_id, _since(AD_CONTEXT_SECONDS))
-    if not own_again and _just_arrived_from_ad(sender_id):
+    if not own_again and (_just_arrived_from_ad(sender_id) or _preview_of_answered_tap(user_id, trigger, since)):
         _log_webhook_event(
             "reel", sender_id=sender_id, sender_username=sender_username,
             outcome="ad_preview_ignored", detail=trigger,
@@ -1072,15 +1104,19 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                 continue
 
             if tapped:
-                # A tapped ice breaker or chip is a person talking, so it is
-                # left for Shlok like typed text. It must never fall through to
-                # the reel branches below.
+                # A tapped ice breaker or chip is a person talking, answered
+                # like typed text. It must never fall through to the reel
+                # branches below.
                 if _is_delete_request(tap_title, tap_payload):
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], "delete_request")
                 elif nudge.ad_question(tap_title):
                     # One of the ad's questions: its fixed answer.
                     _reply_later(_answer_question, user["id"], sender_id, sender_username, nudge.ad_question(tap_title))
+                    continue
+                else:
+                    # Any other tap, Meta's own ad questions among them.
+                    _reply_later(_answer_text, user["id"], sender_id, sender_username, "tap")
                     continue
                 _log_needs_human(sender_id, sender_username, "tap")
                 continue
@@ -1124,20 +1160,19 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     outcome="ignored",
                     detail="no reel url found :: " + _describe_message(event),
                 )
-                # The bot answers reels and posts only. A reel it could not
-                # find a link in, and a post, each get their one line; anything
-                # else a person writes is left unread for Shlok to answer by
-                # hand (decided 2026-10-14). "delete my data" is the exception:
-                # the data deletion page promises the reply, so it is sent, and
-                # the message is still flagged for Shlok like any other.
+                # A reel it could not find a link in, and a post, each get
+                # their one line. Anything else a guest writes is told how it
+                # works (2026-10-23; until then it was left for Shlok) and is
+                # still flagged for Shlok. "delete my data" gets its own reply.
                 share_kind = _attachment_trigger(event) if _has_attachment(event) else ""
                 shared_video = "" if own_shared or in_ad_preview else _shared_video_link(event)
                 if not shared_video and not own_shared and not in_ad_preview and share_kind in ("unreadable_share", "photo_post"):
                     # They shared something, but Instagram sent no link to save.
-                    reel_counter.record(
-                        event, sender_id, user["id"], _media_id(event), reel_counter.REFUSED,
-                        "no_link_reel" if share_kind == "unreadable_share" else "no_link_post",
-                    )
+                    # A post is counted after the settle: it may be the ad's preview.
+                    if share_kind == "unreadable_share":
+                        reel_counter.record(event, sender_id, user["id"], _media_id(event), reel_counter.REFUSED, "no_link_reel")
+                    else:
+                        _settle_then(_record_post_later, event, sender_id, user["id"], _since(PREVIEW_AFTER_ANSWER_SECONDS))
                 question = nudge.ad_question(_typed_text(event))
                 if own_shared:
                     # Our own ad or reel shared back: saved above, and
@@ -1155,12 +1190,12 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         # talking, most likely asking about it: "I only save
                         # reels" would answer the wrong thing. One of the ad's
                         # questions is answered; anything else is for Shlok.
-                        trigger = question or "needs_human"
+                        trigger = question or "text"
                 elif _is_delete_request(_typed_text(event)):
                     trigger = "delete_request"
                 else:
                     # The ad's questions typed later get their fixed answer.
-                    trigger = question or "needs_human"
+                    trigger = question or "text"
                 if trigger == "delete_request":
                     _log_delete_request(sender_id, sender_username, user["id"])
                     _reply_later(nudge.fire, user["id"], trigger)
@@ -1172,6 +1207,8 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                         if isinstance(att, dict)
                     )
                     _log_needs_human(sender_id, sender_username, ",".join(kinds) or "text")
+                elif trigger == "text":
+                    _reply_later(_answer_text, user["id"], sender_id, sender_username, "text")
                 elif trigger in nudge.QUESTION_ANSWERS:
                     _reply_later(_answer_question, user["id"], sender_id, sender_username, trigger)
                 elif trigger == "shared_video":
@@ -1180,7 +1217,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
                     # A post, a photo, a reel with no link or our own reel.
                     # Answered after a short wait, and not at all when it turns
                     # out to be the preview of an ad visit.
-                    _settle_then(_answer_share, user["id"], sender_id, sender_username, trigger)
+                    _settle_then(_answer_share, user["id"], sender_id, sender_username, trigger, _since(PREVIEW_AFTER_ANSWER_SECONDS))
             saved_here = 0
             saved_reels_here = 0
             already_saved = 0

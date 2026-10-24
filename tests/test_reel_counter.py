@@ -52,7 +52,9 @@ from app.services import admin_stats, nudge, reel_counter  # noqa: E402
 # Nothing leaves the machine: no sends, no worker, no Graph lookups.
 nudge.fire = lambda *a, **k: ""
 route._reply_later = lambda func, *args: None
-route._settle_then = lambda func, *args: None
+# Replies are dropped; a post with no link is counted after the settle wait,
+# so that one runs at once.
+route._settle_then = lambda func, *args: func(*args) if func is route._record_post_later else None
 route.fill_username_for_sender = lambda sender_id: None
 route.ensure_background_progress = lambda: None
 route.own_media._known = lambda: ({"17900000000000001"}, {"ADREEL0001"})

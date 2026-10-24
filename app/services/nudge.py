@@ -79,8 +79,12 @@ ONCE_EVER = {
 # same question twice is left for Shlok.
 AD_ANSWERS = {
     "m24_ad_hello", "m25_ad_how", "m26_ad_free", "m27_ad_share", "m29_own_reel_egg",
-    "m31_how_long", "m32_free_forever",
+    "m31_how_long", "m32_free_forever", "m33_how_again",
 }
+# Everyone who joined before the launch is a core user: the bot never starts
+# talking to them about how it works (Shlok, 2026-10-14).
+CORE_USERS_BEFORE = "2026-10-14"
+
 QUESTION_ANSWERS = {
     "ad_q_how": "m25_ad_how", "ad_q_free": "m26_ad_free", "ad_q_share": "m27_ad_share",
     # Asked often enough by hand to answer by themselves (Shlok, 2026-10-18).
@@ -98,6 +102,7 @@ SELF_COOLDOWN = {
     "m17_already_saved",
     "m21_delete_ack",
     "m28_own_post",
+    "m33_how_again",
 }
 
 # reel_failed: the reel itself could not be fetched (private, deleted).
@@ -313,7 +318,7 @@ def load_state(user_id: str) -> dict[str, Any] | None:
     with get_connection() as connection:
         row = connection.execute(
             "SELECT id, email, google_sub, instagram_user_id, instagram_username, "
-            "library_token, last_dm_at, last_inbound_at "
+            "library_token, last_dm_at, last_inbound_at, created_at "
             "FROM users WHERE id = ? LIMIT 1",
             (user_id,),
         ).fetchone()
@@ -463,6 +468,17 @@ def decide(user: dict[str, Any], trigger: str) -> str | None:
         # question is the same whoever asks it.
         key = QUESTION_ANSWERS[trigger]
         return None if key in user["already_sent"] else key
+
+    if trigger == "text":
+        # Anything a guest types or taps that is not a reel, a link or a
+        # question we know: Meta's own ad questions ("What's your process for
+        # saving and sharing recommendations?"), "What's the next step?",
+        # "hi". Silence left new people from the ad stuck (2026-10-23), so
+        # every one is told how it works. Signed in people and the core users
+        # from before the launch are still left for Shlok.
+        if user["signed_in"] or str(user.get("created_at") or "") < CORE_USERS_BEFORE:
+            return None
+        return "m33_how_again" if user["already_sent"] & AD_ANSWERS else "m24_ad_hello"
 
     if trigger == "ad_open":
         # Opened the chat from an ad with no question we know, or only the
@@ -809,6 +825,12 @@ def render(key: str, user: dict[str, Any], title: str = "", trigger: str = "") -
         return _message(
             "Open the reel, tap the share arrow, pick @clipnest.in and send. "
             "I save it for you, and later you find it by searching in plain words.",
+            buttons=open_library(),
+        )
+    if key == "m33_how_again":
+        return _message(
+            "To save a reel, open it, tap share, pick @clipnest.in and send it to me. "
+            "Your searchable library link comes back here. It is free and there is no app.",
             buttons=open_library(),
         )
     if key == "m30_linked":
