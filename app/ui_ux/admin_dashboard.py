@@ -1,4 +1,4 @@
-"""The admin dashboard: three server-rendered pages, plain HTML and CSS, bar
+"""The admin dashboard: four server-rendered pages, plain HTML and CSS, bar
 charts as inline SVG. No scripts, no libraries, nothing loaded from outside.
 Built phone-first (375px) and widens to a two-column grid on a laptop.
 
@@ -11,7 +11,7 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
-PAGES = [("today", "Today"), ("people", "People"), ("bot", "Bot and ads")]
+PAGES = [("today", "Today"), ("people", "People"), ("bot", "Bot and ads"), ("savers", "Savers")]
 
 CSS = """
 :root{color-scheme:dark;--s0:#0a0a0b;--s1:#141417;--s2:#1c1c20;--line:#232327;--line-strong:#2e2e34;
@@ -309,28 +309,113 @@ def _page_bot(d: dict[str, Any]) -> str:
 
 
 def render(page: str, d: dict[str, Any]) -> str:
-    page = page if page in dict(PAGES) else "today"
-    body = {"today": _page_today, "people": _page_people, "bot": _page_bot}[page](d)
-    tabs = "".join(
-        f'<a href="/admin/dashboard{"" if key == "today" else "/" + key}" class="{"on" if key == page else ""}">{escape(label)}</a>'
-        for key, label in PAGES
-    )
+    pages = {"today": _page_today, "people": _page_people, "bot": _page_bot}
+    page = page if page in pages else "today"
     offset = d["utc_offset_minutes"]
     sign = "+" if offset >= 0 else "-"
     zone = f"UTC{sign}{abs(offset) // 60}:{abs(offset) % 60:02d}"
     stamp = f"Fresh on every open. Computed in {d['computed_in_ms']} ms. Days run on {zone}. Today is {_pretty_day(d['today'])}."
+    return _shell(page, stamp, pages[page](d))
+
+
+def _shell(page: str, stamp: str, body: str, extra_css: str = "") -> str:
+    tabs = "".join(
+        f'<a href="/admin/dashboard{"" if key == "today" else "/" + key}" class="{"on" if key == page else ""}">{escape(label)}</a>'
+        for key, label in PAGES
+    )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <title>ClipNest numbers</title>
-<style>{CSS}</style></head>
+<style>{CSS}{extra_css}</style></head>
 <body><div class="wrap">
 <header><h1>ClipNest <em>numbers</em></h1><a class="back" href="/app">Back to app</a></header>
 <p class="stamp">{escape(stamp)} <a href="/admin/comment-reels">Comment-to-get reels</a></p>
 <nav class="tabs">{tabs}</nav>
 {body}
 </div></body></html>"""
+
+
+SAVERS_CSS = """
+nav.tabs a{font-size:.8125rem;padding:9px 4px}
+.sv{width:100%;border-collapse:collapse;font-size:.9375rem}
+.sv th{padding:0 6px 8px;text-align:right}
+.sv th.p,.sv td.p{text-align:left}
+.sv td{padding:10px 6px;vertical-align:middle;border-top:1px solid var(--line);text-align:right;color:var(--text)}
+.sv td.p{color:var(--text);min-width:0;overflow-wrap:anywhere}
+.sv td.n{font:600 1.125rem/1 var(--serif);font-variant-numeric:tabular-nums}
+.sv td.n.z{color:var(--faint);font-weight:400}
+.sv tr:target td{background:var(--accent-tint)}
+.sv .h{color:var(--accent);text-decoration:none;font-weight:600;border-bottom:1px solid rgba(242,168,102,.35)}
+.sv .h:hover,.sv .h:focus-visible{border-color:var(--accent)}
+.sv .nm{display:block;font-size:.75rem;color:var(--faint);margin-top:2px}
+.sv td.c{width:44px;padding-left:0;text-align:left}
+.sv form{margin:0}
+.tick{appearance:none;width:30px;height:30px;border-radius:8px;border:1.5px solid var(--line-strong);background:var(--s2);color:transparent;
+font:700 1rem/1 var(--sans);cursor:pointer;display:grid;place-items:center;padding:0}
+.tick:hover,.tick:focus-visible{border-color:var(--accent);outline:none}
+.tick:active{transform:scale(.94)}
+.tick.on{background:var(--ok);border-color:var(--ok);color:#06210f}
+tr.done .h,tr.done .nm{text-decoration:line-through;color:var(--faint);border-color:transparent}
+tr.done td.n{color:var(--faint)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.6875rem;font-weight:600;letter-spacing:.02em;margin-left:6px;vertical-align:1px;white-space:nowrap}
+.pill.keep{background:rgba(95,211,154,.14);color:var(--ok)}
+.pill.blk{background:var(--s2);color:var(--muted)}
+"""
+
+
+def _saver_row(p: dict[str, Any]) -> str:
+    uid = escape(p["user_id"])
+    label = escape("@" + p["handle"]) if p["handle"] else "no handle"
+    link = f'<a class="h" href="{escape(p["url"])}" target="_blank" rel="noopener noreferrer">{label}</a>' if p["url"] else label
+    if p["core"]:
+        box = ""
+        link += '<span class="pill keep">core, keep</span>'
+    else:
+        on = p["crossed"]
+        hint = "Untick: not blocked" if on else "Tick: I blocked this person"
+        box = (f'<form method="post" action="/admin/dashboard/savers/cross"><input type="hidden" name="user_id" value="{uid}">'
+               f'<input type="hidden" name="crossed" value="{"0" if on else "1"}">'
+               f'<button class="tick{" on" if on else ""}" aria-pressed="{"true" if on else "false"}" title="{hint}" aria-label="{hint}">&#10003;</button></form>')
+        if on:
+            link += '<span class="pill blk">blocked by me</span>'
+    name = f'<span class="nm">{escape(p["name"])}</span>' if p["name"] else ""
+    cls = ' class="done"' if p["crossed"] else ""
+    today_cls = "n" if p["today"] else "n z"
+    return (f'<tr id="{uid}"{cls}><td class="c">{box}</td><td class="p">{link}{name}</td>'
+            f'<td class="{today_cls}">{_n(p["today"])}</td><td class="n">{_n(p["total"])}</td></tr>')
+
+
+def _savers_table(rows: list[dict[str, Any]]) -> str:
+    head = '<table class="sv"><tr><th class="c"></th><th class="p">Person</th><th>Today</th><th>Total</th></tr>'
+    return head + "".join(_saver_row(p) for p in rows) + "</table>"
+
+
+def render_savers(d: dict[str, Any]) -> str:
+    """The Heavy savers tab: who saves the most reels, today first, then in total.
+    Tap a handle to open their Instagram; tick the box once you have blocked them."""
+    open_rows = [p for p in d["people"] if not p["crossed"]]
+    done_rows = [p for p in d["people"] if p["crossed"]]
+    saved_today = sum(1 for p in d["people"] if p["today"])
+    tiles = '<div class="tiles">' + "".join([
+        tile(_n(len(d["people"])), "Instagram people with a saved reel"),
+        tile(_n(saved_today), "Saved a reel today"),
+        tile(_n(d["crossed"]), "Blocked by me", "ticked on this page"),
+        tile(_n(d["core"]), "Core, keep", "never block"),
+    ]) + "</div>"
+    body = tiles + card(
+        "Heavy savers",
+        "Most reels today first, then most in total. Tap a name to open their Instagram. "
+        "After you block someone there, tick their box here.",
+        _savers_table(open_rows) if open_rows else '<p class="empty">No one to show yet.</p>',
+        "This page only keeps your ticks. It never blocks anyone. Our own ad reel and failed reels are not counted. "
+        "Core users from before 14 Oct (old Google accounts) are not listed.",
+    )
+    if done_rows:
+        body += card("Blocked by me", f"<b>{_n(len(done_rows))}</b> {'person' if len(done_rows) == 1 else 'people'} you ticked. Tap the green box to undo.", _savers_table(done_rows))
+    stamp = f"Fresh on every open. Today is {_pretty_day(d['today'])} (India time)."
+    return _shell("savers", stamp, body, SAVERS_CSS)
 
 
 PROMISE_LABELS = {"link": "Link", "recipe": "Recipe", "file": "File or PDF", "code": "Code or discount",

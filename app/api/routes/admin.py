@@ -45,6 +45,41 @@ def admin_dashboard_bot(request: Request):
     return _dashboard_page(request, "bot")
 
 
+@router.get("/dashboard/savers", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_savers(request: Request):
+    """Instagram people who save the most reels, with a cross-off box. It only
+    lists people; blocking happens by hand in Instagram."""
+    from app.db.database import get_connection
+    from app.services.heavy_savers import heavy_savers
+    from app.ui_ux.admin_dashboard import render_savers
+
+    _admin_or_not_found(request)
+    with get_connection() as connection:
+        data = heavy_savers(connection)
+    return HTMLResponse(render_savers(data), headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+@router.post("/dashboard/savers/cross", include_in_schema=False)
+async def admin_dashboard_savers_cross(request: Request):
+    """Tick or untick "blocked by me" for one person. Saves a note, nothing else."""
+    from urllib.parse import parse_qs
+
+    from fastapi.responses import RedirectResponse
+
+    from app.db.database import get_connection
+    from app.services.heavy_savers import set_crossed
+
+    _admin_or_not_found(request)
+    form = parse_qs((await request.body()).decode("utf-8", "replace"))
+    user_id = (form.get("user_id") or [""])[0].strip()
+    crossed = (form.get("crossed") or [""])[0] == "1"
+    if not user_id.startswith("user_ig_"):
+        raise HTTPException(status_code=400, detail="Unknown person")
+    with get_connection() as connection:
+        set_crossed(connection, user_id, crossed)
+    return RedirectResponse(f"/admin/dashboard/savers#{user_id}", status_code=303)
+
+
 @router.get("/dashboard.json", include_in_schema=False)
 def admin_dashboard_json(request: Request):
     """The same numbers as data, for a quick look or a future widget."""
