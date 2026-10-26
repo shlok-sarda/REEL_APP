@@ -568,6 +568,19 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_reel_receipts_received ON reel_receipts(received_at)",
+    # Every message the account sent, by the bot or by hand (echo with an id
+    # the bot never sent). Read by the daily unanswered messages report. 30 days.
+    """
+    CREATE TABLE IF NOT EXISTS dm_outgoing (
+        mid TEXT PRIMARY KEY,
+        recipient_id TEXT NOT NULL DEFAULT '',
+        sent_at TEXT NOT NULL,
+        by_bot INTEGER NOT NULL DEFAULT 0,
+        echoed INTEGER NOT NULL DEFAULT 0,
+        words TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_dm_outgoing_recipient ON dm_outgoing(recipient_id, sent_at)",
 ]
 
 # Migrate-by-ALTER pattern (see USER_EXTRA_COLUMNS below): folder_memberships

@@ -286,6 +286,21 @@ def main() -> None:
         page = render_messages(dm)
         check("the Messages tab renders the words", "Tapped: Can you show examples?" in page and "Messages" in page, page[:200])
 
+        # --- hand replies: echoes the bot did not send ----------------------
+        from app.services import dm_outgoing
+
+        dm_outgoing.note_bot_send("typed_a", {"message": {"text": "bot line"}}, '{"recipient_id": "typed_a", "message_id": "mid_bot_1"}')
+        deliver(client, {"sender": {"id": "biz"}, "recipient": {"id": "typed_a"}, "message": {"mid": "mid_bot_1", "is_echo": True, "text": "bot line"}})
+        fired, sent = deliver(client, {"sender": {"id": "biz"}, "recipient": {"id": "typed_a"}, "message": {"mid": "mid_hand_1", "is_echo": True, "text": "Thanks, will do"}})
+        check("an echo is not answered as a message", sent == [] and fired == [], str(sent))
+        dm_outgoing.note_bot_send("tap_how", {"message": {"text": "late note"}}, '{"message_id": "mid_bot_2"}')
+        deliver(client, {"sender": {"id": "biz"}, "recipient": {"id": "tap_how"}, "message": {"mid": "mid_bot_2", "is_echo": True, "text": "late note"}})
+        with get_connection() as c:
+            out = {r["mid"]: dict(r) for r in c.execute("SELECT * FROM dm_outgoing")}
+        check("the bot's own send is marked as the bot", out.get("mid_bot_1", {}).get("by_bot") == 1, str(out))
+        check("an echo the bot never sent is a hand reply", out.get("mid_hand_1", {}).get("by_bot") == 0 and out["mid_hand_1"]["recipient_id"] == "typed_a" and out["mid_hand_1"]["words"] == "Thanks, will do", str(out))
+        check("the bot's send is recognised whichever lands first", out.get("mid_bot_2", {}).get("by_bot") == 1 and out["mid_bot_2"]["echoed"] == 1, str(out))
+
         from app.api.routes.health import _instagram_webhook_debug
 
         listed = _instagram_webhook_debug().get("delete_requests") or []

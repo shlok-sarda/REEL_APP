@@ -24,7 +24,7 @@ from __future__ import annotations
 import requests
 
 from app.config import settings
-from app.services import instagram_token
+from app.services import dm_outgoing, instagram_token
 
 GRAPH_HOST = "https://graph.instagram.com"
 # Meta's send endpoint has repeatedly taken longer than 8s from Render, and
@@ -80,6 +80,8 @@ def _post(igsid: str, body: dict, timeout: float = REQUEST_TIMEOUT_SECONDS) -> d
     instagram_token.note_result(response.status_code, response.text)
     if response.status_code != 200:
         return {"ok": False, "detail": f"http_{response.status_code}: {response.text[:200]}"}
+    if "message" in body:
+        dm_outgoing.note_bot_send(igsid, body, response.text)
     return {"ok": True, "detail": response.text[:200]}
 
 

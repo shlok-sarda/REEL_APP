@@ -21,7 +21,7 @@ from app.services.instagram_profile import (
     resolve_instagram_username,
 )
 from app.services.instagram_send import send_text
-from app.services import admin_stats, nudge, own_media, reel_counter
+from app.services import admin_stats, dm_outgoing, nudge, own_media, reel_counter
 from app.services.reel_ingest import append_reel, canonical_reel_url, get_reel_by_url, is_post_url, is_valid_instagram_url
 
 
@@ -267,8 +267,12 @@ def _iter_message_events(payload: Any):
                 # delivers a copy back with the business account as `sender`,
                 # which previously logged as a stranger "not linked to any
                 # account" and made ordinary replies look like failed signups.
+                # The echo is still noted: one the bot did not send is a hand
+                # reply, which the unanswered messages report looks for.
                 message = current.get("message")
-                if not (isinstance(message, dict) and message.get("is_echo")):
+                if isinstance(message, dict) and message.get("is_echo"):
+                    dm_outgoing.note_echo(current)
+                else:
                     yield current
             for value in current.values():
                 if isinstance(value, (dict, list)):
