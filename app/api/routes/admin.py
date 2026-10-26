@@ -59,6 +59,19 @@ def admin_dashboard_savers(request: Request):
     return HTMLResponse(render_savers(data), headers={"Cache-Control": "no-store, must-revalidate"})
 
 
+@router.get("/dashboard/messages", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_messages(request: Request):
+    """What people typed or tapped in the bot's chat, word for word."""
+    from app.db.database import get_connection
+    from app.services.dm_messages import recent_messages
+    from app.ui_ux.admin_dashboard import render_messages
+
+    _admin_or_not_found(request)
+    with get_connection() as connection:
+        data = recent_messages(connection)
+    return HTMLResponse(render_messages(data), headers={"Cache-Control": "no-store, must-revalidate"})
+
+
 @router.post("/dashboard/savers/cross", include_in_schema=False)
 async def admin_dashboard_savers_cross(request: Request):
     """Tick or untick "blocked by me" for one person. Saves a note, nothing else."""

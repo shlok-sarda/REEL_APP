@@ -11,7 +11,7 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
-PAGES = [("today", "Today"), ("people", "People"), ("bot", "Bot and ads"), ("savers", "Savers")]
+PAGES = [("today", "Today"), ("people", "People"), ("bot", "Bot and ads"), ("savers", "Savers"), ("messages", "Messages")]
 
 CSS = """
 :root{color-scheme:dark;--s0:#0a0a0b;--s1:#141417;--s2:#1c1c20;--line:#232327;--line-strong:#2e2e34;
@@ -33,7 +33,7 @@ h1 em{color:var(--accent);font-style:italic}
 .back:active{transform:scale(.97)}
 .stamp{color:var(--faint);font-size:.75rem;margin:0 0 14px}
 nav.tabs{display:flex;gap:6px;padding:4px;background:var(--s1);border:1px solid var(--line);border-radius:999px;box-shadow:var(--sh);margin-bottom:18px;position:sticky;top:8px;z-index:3}
-nav.tabs a{flex:1;text-align:center;text-decoration:none;font-size:.875rem;font-weight:600;color:var(--muted);padding:9px 6px;border-radius:999px;
+nav.tabs a{flex:1;text-align:center;text-decoration:none;font-size:.75rem;font-weight:600;color:var(--muted);padding:9px 2px;white-space:nowrap;border-radius:999px;
 transition:transform .12s ease,opacity .12s ease;outline:none}
 nav.tabs a:hover{color:var(--text)}
 nav.tabs a:focus-visible{box-shadow:0 0 0 2px var(--accent)}
@@ -346,7 +346,7 @@ def _shell(page: str, stamp: str, body: str, extra_css: str = "") -> str:
 
 
 SAVERS_CSS = """
-nav.tabs a{font-size:.8125rem;padding:9px 4px}
+nav.tabs a{font-size:.75rem;padding:9px 2px}
 .sv{width:100%;border-collapse:collapse;font-size:.9375rem}
 .sv th{padding:0 6px 8px;text-align:right}
 .sv th.p,.sv td.p{text-align:left}
@@ -424,6 +424,33 @@ def render_savers(d: dict[str, Any]) -> str:
         body += card("Blocked by me", f"<b>{_n(len(done_rows))}</b> {'person' if len(done_rows) == 1 else 'people'} you ticked. Tap the green box to undo.", _savers_table(done_rows))
     stamp = f"Fresh on every open. Today is {_pretty_day(d['today'])} (India time)."
     return _shell("savers", stamp, body, SAVERS_CSS)
+
+
+MESSAGES_CSS = """
+.dm{border-top:1px solid var(--line);padding:12px 0}
+.dm .h{color:var(--accent);text-decoration:none;font-weight:600}
+.dm .w{margin:6px 0 0;color:var(--text);overflow-wrap:anywhere;white-space:pre-wrap}
+.dm .t{display:block;font-size:.75rem;color:var(--faint)}
+"""
+
+
+def render_messages(d: dict[str, Any]) -> str:
+    """The Messages tab: what each person typed or tapped, newest first."""
+    blocks = []
+    for p in d["people"]:
+        label = escape("@" + p["handle"]) if p["handle"] else "no handle yet"
+        who = f'<a class="h" href="{escape(p["url"])}" target="_blank" rel="noopener noreferrer">{label}</a>' if p["url"] else label
+        said = "".join(f'<p class="w"><span class="t">{escape(m["at"])}</span>{escape(m["words"])}</p>' for m in p["messages"])
+        blocks.append(f'<div class="dm">{who}{said}</div>')
+    body = card(
+        "What people wrote",
+        f"<b>{_n(d['count'])}</b> messages from <b>{_n(len(d['people']))}</b> people in the last {d['days']} days. "
+        "Newest conversation first. Tap a name to open their Instagram.",
+        "".join(blocks) if blocks else '<p class="empty">No messages yet. New ones show here from 26 Oct.</p>',
+        "Every typed message and tapped question, word for word, kept 30 days. Reels are not listed. "
+        "Reading this page does not mark any chat as seen.",
+    )
+    return _shell("messages", "Fresh on every open. Times are India time.", body, MESSAGES_CSS)
 
 
 PROMISE_LABELS = {"link": "Link", "recipe": "Recipe", "file": "File or PDF", "code": "Code or discount",

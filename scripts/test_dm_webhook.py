@@ -269,6 +269,22 @@ def main() -> None:
             route._log_webhook_event("filler", sender_id="filler", outcome="noise", detail=str(i))
         check("a delete request survives the log being trimmed", "delete_requested" in outcomes("deleter"))
         check("a waiting message survives the log being trimmed", "needs_human" in outcomes("typed_a"))
+        check("their words survive the log being trimmed", "said" in outcomes("typed_a"))
+
+        # --- the Messages tab: what people wrote, word for word -------------
+        from app.services.dm_messages import recent_messages
+        from app.ui_ux.admin_dashboard import render_messages
+
+        check("typed words are kept word for word", any(d and d not in ("text",) and "said" == o for d, o in zip(details("typed_a"), outcomes("typed_a"))), str(details("typed_a")))
+        check("a tapped question is kept as a tap", any(d.startswith("Tapped: ") for d in details("tap_how")), str(details("tap_how")))
+        check("a voice note is noted", "[voice note]" in details("voice"), str(details("voice")))
+        with get_connection() as c:
+            dm = recent_messages(c)
+        senders = {p["sender_id"] for p in dm["people"]}
+        check("the Messages tab lists who wrote", {"typed_a", "tap_how", "voice"} <= senders, str(senders)[:300])
+        check("a shared reel is not listed as a message", not any("instagram.com/reel/" in m["words"] for p in dm["people"] for m in p["messages"] if not p["sender_id"].startswith("typed")), "")
+        page = render_messages(dm)
+        check("the Messages tab renders the words", "Tapped: Can you show examples?" in page and "Messages" in page, page[:200])
 
         from app.api.routes.health import _instagram_webhook_debug
 

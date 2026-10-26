@@ -104,17 +104,18 @@ def _log_webhook_event(
             # was being held. They become prunable once drained. Requests to
             # delete data are kept for the same reason: each one is a promise
             # that is acted on by hand, days later, from the health page.
-            # Messages waiting for a person are kept for 30 days, so the
+            # Messages waiting for a person, and the words people wrote, are
+            # kept for 30 days, so the
             # health page count is not wiped by a busy hour. So are ad
             # arrivals: a preview delivered on its own is recognised by them.
             connection.execute(
                 """
                 DELETE FROM instagram_webhook_events
-                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human', 'ad_referral', 'share_probe')
+                WHERE (outcome NOT IN ('buffered', 'delete_requested', 'needs_human', 'ad_referral', 'share_probe', 'said')
                   AND id NOT IN (
                     SELECT id FROM instagram_webhook_events ORDER BY id DESC LIMIT 200
                   ))
-                  OR (outcome IN ('needs_human', 'ad_referral') AND received_at < ?)
+                  OR (outcome IN ('needs_human', 'ad_referral', 'said') AND received_at < ?)
                 """,
                 (_thirty_days_ago(),),
             )
@@ -194,11 +195,34 @@ def _log_needs_human(sender_id: str, sender_username: str, what: str) -> None:
     """Someone wrote something that is not a reel or a post. The bot says
     nothing and sends no "seen", so the message stays unread in the
     @clipnest.in inbox and Instagram alerts Shlok, who answers by hand. The
-    row is the count on the health page. The text itself is not stored."""
+    row is the count on the health page. Their words are kept separately,
+    by _log_said, for the dashboard's Messages tab."""
     _log_webhook_event(
         "human", sender_id=sender_id, sender_username=sender_username,
         outcome="needs_human", detail=what[:60],
     )
+
+
+def _log_said(message_event: dict, sender_id: str, sender_username: str, tap_title: str) -> None:
+    """What a person typed or tapped, word for word, so hand replies can be
+    written from the dashboard without opening each chat (2026-10-26). A
+    voice note or a photo with no words is noted as such. Reels are not."""
+    words = (tap_title or _typed_text(message_event)).strip()
+    if not words:
+        kinds = {
+            str(att.get("type") or "")
+            for att in ((message_event.get("message") or {}).get("attachments") or [])
+            if isinstance(att, dict)
+        }
+        if "audio" in kinds:
+            words = "[voice note]"
+        elif "image" in kinds:
+            words = "[photo]"
+    if words:
+        _log_webhook_event(
+            "said", sender_id=sender_id, sender_username=sender_username,
+            outcome="said", detail=("Tapped: " + words) if tap_title else words,
+        )
 
 
 def _only_a_reaction(message_event: dict) -> bool:
@@ -984,6 +1008,7 @@ def _handle_delivery(raw_body: bytes, x_hub_signature_256: str, background: Back
             nudge.record_inbound(sender_id)
 
             tapped, tap_payload, tap_title = _tap(event)
+            _log_said(event, sender_id, sender_username, tap_title if tapped else "")
             if tapped:
                 # Counted per payload: the only direct measure of whether
                 # anyone taps what the bot sends.
