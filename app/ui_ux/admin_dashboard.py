@@ -233,6 +233,14 @@ def _page_people(d: dict[str, Any]) -> str:
     )
     if cap["cap"]:
         cap_body = hrows([("At the cap", cap["at_cap"]), ("Near it (80%+)", cap["near_cap"]), ("Reels refused", cap["refused"])])
+        named = cap.get("at_cap_people") or []
+        if named:
+            items = []
+            for x in named:
+                label = "@" + x["handle"] if x["handle"] else (x["name"] or "no Instagram name")
+                link = f'<a href="{escape(x["url"])}" target="_blank" rel="noopener">{escape(label)}</a>' if x["url"] else escape(label)
+                items.append(f'<tr><td>{link}</td><td>{_n(x["reels"])} of {_n(x["cap"])}</td></tr>')
+            cap_body += '<p class="sub" style="margin:16px 0 8px">Who is at the cap</p><table>' + "".join(items) + "</table>"
         cap_note = f"Cap is {cap['cap']} reels a month (100 for Easter egg accounts). Counted since {escape(cap['since'][:10])}."
     else:
         cap_body = '<p class="empty">No monthly cap is set.</p>'

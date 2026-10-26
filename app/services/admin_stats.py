@@ -348,13 +348,14 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
     cap_since = max(month_start + " 00:00:00", (cap_live_row["executed_at"] if cap_live_row else "").replace("T", " ")[:19])
     at_cap = 0
     near_cap = 0
+    at_cap_people: list[dict[str, Any]] = []
     if cap > 0:
         has_override = _has_column(c, "users", "monthly_cap_override")
         own_cap = "CASE WHEN COALESCE(u.monthly_cap_override, 0) > 0 THEN u.monthly_cap_override ELSE ? END" if has_override else "?"
         rows = c.execute(
             f"""
             SELECT (SELECT COUNT(*) FROM reels r WHERE r.user_id = u.id AND COALESCE(r.source, '') <> 'clipnest_ad' AND {_norm('r.received_at')} >= ?) AS n,
-                   {own_cap} AS cap
+                   {own_cap} AS cap, u.instagram_username AS handle, u.display_name AS name
             FROM users u WHERE u.{PEOPLE}
             """,
             (cap_since, cap),
@@ -363,6 +364,15 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             n, user_cap = int(row["n"] or 0), int(row["cap"] or 0)
             if user_cap and n >= user_cap:
                 at_cap += 1
+                # Named, so Shlok can see who hit it and open their profile.
+                handle = (row["handle"] or "").strip().lstrip("@")
+                at_cap_people.append({
+                    "handle": handle,
+                    "name": (row["name"] or "").strip(),
+                    "url": f"https://www.instagram.com/{handle}/" if handle else "",
+                    "reels": n,
+                    "cap": user_cap,
+                })
             elif user_cap and n >= user_cap * 0.8:
                 near_cap += 1
 
@@ -481,7 +491,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         "ad_items": ad_items,
         "zero_post_only": zero_post_only,
         "older": {"people": int(older["people"] or 0), "reels": int(older["reels"] or 0)},
-        "cap": {"cap": cap, "at_cap": at_cap, "near_cap": near_cap, "since": cap_since, "refused": metric_totals.get("over_month_cap", 0)},
+        "cap": {"cap": cap, "at_cap": at_cap, "at_cap_people": sorted(at_cap_people, key=lambda x: -x["reels"]), "near_cap": near_cap, "since": cap_since, "refused": metric_totals.get("over_month_cap", 0)},
         "cost": {
             "per_reel": REEL_COST_RUPEES,
             "today": rupees(int(r["today"] or 0)),

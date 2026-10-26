@@ -100,6 +100,7 @@ def seed() -> None:
             "INSERT INTO reels (id, user_id, url, shortcode, received_at, status, source, created_at, updated_at) VALUES ('ad_r', 'user_ig_7', 'https://www.instagram.com/reel/ADx/', 'ADx', ?, 'completed', 'clipnest_ad', ?, ?)",
             (iso(NOW), iso(NOW), iso(NOW)),
         )
+        c.execute("UPDATE users SET instagram_username = 'cap_tester' WHERE id = 'user_ig_6'")
         c.execute("INSERT INTO nudge_log (user_id, message_key, sent_at) VALUES ('user_ig_1', 'm24_ad_hello', ?)", (iso(NOW),))
         c.execute("INSERT INTO nudge_log (user_id, message_key, sent_at) VALUES ('user_ig_1', 'm26_ad_free', ?)", (iso(NOW),))
 
@@ -161,6 +162,9 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     check("waiting for a human", data["bot"]["waiting_for_human_7d"] == 1)
 
     res = client.get("/admin/dashboard/people")
+    named = data["cap"]["at_cap_people"]
+    check("cap: the person at the cap is named with a link", [(x["handle"], x["url"], x["reels"]) for x in named] == [("cap_tester", "https://www.instagram.com/cap_tester/", 50)], str(named))
+    check("people page lists who is at the cap", "Who is at the cap" in res.text and 'href="https://www.instagram.com/cap_tester/"' in res.text and "@cap_tester" in res.text)
     check("people page shows Who stays", "Who stays" in res.text and "After 3 days" in res.text)
     check("people page says failed and ad copies are handled", "failed ones included" in res.text and "ClipNest ad" in res.text)
     check("ad copies counted separately", data["ad_items"] == 1, str(data["ad_items"]))
