@@ -484,6 +484,39 @@ def get_user_by_library_token(token: str) -> dict[str, Any] | None:
     return row_to_user(row)
 
 
+# Link preview fetchers. Instagram builds a card for a pasted link by fetching
+# it with facebookexternalhit, which is not the person opening it.
+_PREVIEW_AGENTS = ("facebookexternalhit", "facebot", "meta-external", "whatsapp", "telegrambot", "slackbot",
+                   "discordbot", "twitterbot", "linkedinbot", "bot/", "bot;", "crawler", "spider", "preview")
+
+
+def is_link_preview_agent(user_agent: str) -> bool:
+    ua = (user_agent or "").lower()
+    return not ua or any(marker in ua for marker in _PREVIEW_AGENTS)
+
+
+def record_library_open(user_id: str, user_agent: str) -> None:
+    """Note that a person opened their library link. Never raises: a failed
+    counter must not stop the library from opening."""
+    if is_link_preview_agent(user_agent):
+        return
+    now = iso_now()
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET library_opened_at = CASE WHEN COALESCE(library_opened_at, '') = '' THEN ? ELSE library_opened_at END,
+                    library_last_opened_at = ?,
+                    library_opens = COALESCE(library_opens, 0) + 1
+                WHERE id = ?
+                """,
+                (now, now, normalize(user_id)),
+            )
+    except Exception:
+        pass
+
+
 def get_or_create_library_token(user_id: str) -> str:
     """This user's permanent library-link token, minting one on first use.
 

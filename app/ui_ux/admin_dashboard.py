@@ -313,7 +313,15 @@ def _page_bot(d: dict[str, Any]) -> str:
     f = b["funnel"]
     funnel_rows = [(f[k]["label"], f[k]["people"]) for k in ("m1_first_ack", "m2_first_library", "m3_quiet_nudge", "m4_home_screen")]
     funnel_card = card("What the bot sent", "Different people who got each message, all time.", hrows(funnel_rows))
-    return tiles + '<div class="grid">' + wrote_card + created_card + ad_card + funnel_card + "</div>"
+    lo = b.get("link_opens") or {}
+    opens_card = card(
+        "Library link opened",
+        f"People whose first library link came from {_pretty_day(lo.get('since_day', ''))} onwards. Did they ever open it?",
+        hrows([("Got the link", lo.get("got", 0)), ("Opened it", lo.get("opened", 0)), ("Never opened it", lo.get("never", 0))], muted_zero=False),
+        f"<b>{_n(lo.get('opened_today', 0))}</b> people opened their link today, <b>{_n(lo.get('opened_ever', 0))}</b> since counting began. "
+        "Instagram's own link preview is not counted as an open.",
+    )
+    return tiles + '<div class="grid">' + opens_card + wrote_card + created_card + ad_card + funnel_card + "</div>"
 
 
 def render(page: str, d: dict[str, Any]) -> str:

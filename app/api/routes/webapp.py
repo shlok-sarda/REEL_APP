@@ -4019,6 +4019,11 @@ def library_link_login(token: str, request: Request, preview: str = "", signin: 
     if not user:
         return RedirectResponse(url="/", status_code=303)
 
+    if request.method == "GET":
+        from app.services.auth import record_library_open
+
+        record_library_open(user["id"], request.headers.get("user-agent", ""))
+
     # Someone already properly signed in as this account should not be
     # downgraded to a restricted session just for tapping their own link.
     existing = current_user(request)

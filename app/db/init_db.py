@@ -624,6 +624,12 @@ USER_EXTRA_COLUMNS = {
     # "egg" or "plain": which answer they got for sharing our own reel back,
     # so the two groups can be compared. Empty for everyone else.
     "own_reel_group": "TEXT NOT NULL DEFAULT ''",
+    # When a person first and last opened their /g/<token> library link, and
+    # how many times. Link preview bots (Instagram's own included) are not
+    # counted, so this answers "got the link but never opened it".
+    "library_opened_at": "TEXT NOT NULL DEFAULT ''",
+    "library_last_opened_at": "TEXT NOT NULL DEFAULT ''",
+    "library_opens": "INTEGER NOT NULL DEFAULT 0",
 }
 
 # Same migrate-by-ALTER pattern for reels: a long-lived production table was

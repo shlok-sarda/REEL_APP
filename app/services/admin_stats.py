@@ -32,6 +32,10 @@ CACHE_SECONDS = 20
 
 SEED_FLAG = "bot_daily_seeded_v1"
 
+# Library link opens are recorded from 27 Oct 2026 (India midnight, in UTC).
+# Only people whose first link came after this can be counted as never opened.
+LINK_OPENS_FROM = os.getenv("DASHBOARD_LINK_OPENS_FROM", "2026-10-26 18:30:00").strip() or "2026-10-26 18:30:00"
+
 BUCKETS = ["0", "1", "2 to 4", "5 to 9", "10 to 19", "20 to 49", "50+"]
 
 # Only accounts made by the bot count as people. The older accounts are the
@@ -446,6 +450,30 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             (days7[0], key),
         ).fetchone()
         funnel[key] = {"label": label, "people": int(row["people"] or 0), "last_7": int(row["last_7"] or 0)}
+    # Library link opens, recorded from LINK_OPENS_FROM. Only people whose
+    # first link arrived after that can be split into opened and never opened.
+    link_opens = {"since_day": _local_day_of(LINK_OPENS_FROM), "got": 0, "opened": 0, "never": 0, "opened_today": 0, "opened_ever": 0}
+    if _has_column(c, "users", "library_opened_at"):
+        row = c.execute(
+            f"""
+            SELECT COUNT(*) AS got,
+                   SUM(CASE WHEN COALESCE(u.library_opened_at, '') <> '' THEN 1 ELSE 0 END) AS opened
+            FROM (SELECT user_id, MIN({_norm('sent_at')}) AS first_sent FROM nudge_log
+                  WHERE message_key = 'm2_first_library' GROUP BY user_id) f
+            JOIN users u ON u.id = f.user_id
+            WHERE f.first_sent >= {_norm('?')}
+            """,
+            (LINK_OPENS_FROM,),
+        ).fetchone()
+        got, opened = int(row["got"] or 0), int(row["opened"] or 0)
+        link_opens.update(got=got, opened=opened, never=got - opened)
+        link_opens["opened_today"] = int(c.execute(
+            f"SELECT COUNT(*) FROM users WHERE COALESCE(library_last_opened_at, '') <> '' AND {_local_day('library_last_opened_at')} = ?",
+            (today,),
+        ).fetchone()[0] or 0)
+        link_opens["opened_ever"] = int(c.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(library_opened_at, '') <> ''"
+        ).fetchone()[0] or 0)
     waiting = c.execute(
         f"SELECT COUNT(*) FROM instagram_webhook_events WHERE outcome = 'needs_human' AND {_norm('received_at')} >= datetime('now', '-7 days')"
     ).fetchone()[0]
@@ -511,6 +539,7 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             "ad": ad_counts,
             "ad_hello_per_day": ad_hello_per_day,
             "funnel": funnel,
+            "link_opens": link_opens,
             "waiting_for_human_7d": int(waiting or 0),
         },
     }
