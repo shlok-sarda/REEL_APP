@@ -11,7 +11,7 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
-PAGES = [("today", "Today"), ("people", "People"), ("bot", "Bot and ads"), ("savers", "Savers"), ("messages", "Messages")]
+PAGES = [("today", "Today"), ("features", "Features"), ("messages", "Messages"), ("people", "People"), ("bot", "Bot")]
 
 CSS = """
 :root{color-scheme:dark;--s0:#0a0a0b;--s1:#141417;--s2:#1c1c20;--line:#232327;--line-strong:#2e2e34;
@@ -68,6 +68,9 @@ td{padding:8px 0;border-top:1px solid var(--line);text-align:right;font-variant-
 td:first-child{color:var(--muted)}
 .note{font-size:.8125rem;color:var(--faint);margin:10px 0 0}
 .empty{font-size:.875rem;color:var(--muted);padding:6px 0}
+.tile-link,.card-link{display:block;text-decoration:none;color:inherit}
+.tile-link .tile{height:100%;border-color:rgba(242,168,102,.35)}
+.card-link .card h2::after{content:" \\203A";color:var(--accent)}
 .grid{display:grid;grid-template-columns:1fr;gap:0 14px}
 @media(min-width:760px){.tiles{grid-template-columns:repeat(4,1fr)}.tile.hero{grid-column:span 2}.grid{grid-template-columns:1fr 1fr}
 h1{font-size:2.125rem}.tile .n{font-size:2.5rem}.tile.hero .n{font-size:3.5rem}}
@@ -143,32 +146,66 @@ def card(title: str, sub: str, body: str, note: str = "") -> str:
 
 
 # --------------------------------------------------------------------------
-# Pages
+# Pages. Few words on purpose: a short title per card, the number, and at
+# most one short line under it.
 # --------------------------------------------------------------------------
 
 def _page_today(d: dict[str, Any]) -> str:
     p, r, c, b = d["people"], d["reels"], d["cost"], d["bot"]
     days = d["days30"]
+    need = d.get("need_you") or {"people": 0}
     tiles = '<div class="tiles">' + "".join([
-        tile(_n(p["total"]), "People in total", f'<b>+{_n(p["today"])}</b> today, <b>+{_n(p["last_7"])}</b> this week', hero=True),
-        tile(_n(r["total"]), "Reels saved in total", f'<b>+{_n(r["today"])}</b> today by {_n(r["savers_today"])} people', hero=True),
-        tile(_n(p["today"]), "New people today"),
-        tile(_n(r["today"]), "Reels saved today"),
-        tile(_n(b["wrote_today"]), "Wrote to the bot today"),
-        tile(_rs(c["today"]), "Cost today", f"at Rs {c['per_reel']} a reel"),
+        tile(_n(p["total"]), "People", f'<b>+{_n(p["today"])}</b> today', hero=True),
+        tile(_n(r["total"]), "Reels saved", f'<b>+{_n(r["today"])}</b> today', hero=True),
+        tile(_n(b["wrote_today"]), "Wrote today"),
+        f'<a class="tile-link" href="/admin/dashboard/messages">{tile(_n(need["people"]), "Need you", "last 7 days")}</a>',
     ]) + "</div>"
-    strips = f"""<table><tr><th>Window</th><th>New people</th><th>Reels</th><th>Cost</th></tr>
+    totals = f"""<table><tr><th></th><th>People</th><th>Reels</th><th>Cost</th></tr>
 <tr><td>Today</td><td>{_n(p["today"])}</td><td>{_n(r["today"])}</td><td>{_rs(c["today"])}</td></tr>
-<tr><td>Last 7 days</td><td>{_n(p["last_7"])}</td><td>{_n(r["last_7"])}</td><td>{_rs(r["last_7"] * c["per_reel"])}</td></tr>
-<tr><td>Last 30 days</td><td>{_n(p["last_30"])}</td><td>{_n(r["last_30"])}</td><td>{_rs(r["last_30"] * c["per_reel"])}</td></tr>
-<tr><td>This month</td><td>{_n(p["this_month"])}</td><td>{_n(r["this_month"])}</td><td>{_rs(c["this_month"])}</td></tr>
+<tr><td>7 days</td><td>{_n(p["last_7"])}</td><td>{_n(r["last_7"])}</td><td>{_rs(r["last_7"] * c["per_reel"])}</td></tr>
+<tr><td>30 days</td><td>{_n(p["last_30"])}</td><td>{_n(r["last_30"])}</td><td>{_rs(r["last_30"] * c["per_reel"])}</td></tr>
 <tr><td>All time</td><td>{_n(p["total"])}</td><td>{_n(r["total"])}</td><td>{_rs(c["total"])}</td></tr></table>"""
-    older = d["older"]
-    older_note = f'Counting people who came through the bot. Not counted: {_n(older["people"])} older accounts with {_n(older["reels"])} reels (you and testers).'
     return tiles + '<div class="grid">' + "".join([
-        card("New people per day", f"Last 30 days. <b>{_n(sum(p['per_day']))}</b> joined, <b>{_n(sum(p['ig_per_day']))}</b> of them through the bot.", bars(p["per_day"], days)),
-        card("Reels saved per day", f"Last 30 days. <b>{_n(sum(r['per_day']))}</b> reels, <b>{_n(sum(r['failed_per_day']))}</b> failed.", bars(r["per_day"], days)),
-    ]) + "</div>" + _sent_card(d["sent"]) + card("The windows side by side", "", strips, f"Cost is an estimate at Rs {c['per_reel']} per reel read. {older_note}")
+        card("New people per day", "", bars(p["per_day"], days)),
+        card("Reels saved per day", "", bars(r["per_day"], days)),
+    ]) + "</div>" + card("Totals", "", totals, f"Cost at Rs {c['per_reel']} a reel.")
+
+
+FEATURES_CSS = """
+.fx{display:grid;grid-template-columns:minmax(0,1.3fr) 1.6fr 40px 40px;align-items:center;gap:10px;font-size:.875rem;padding:7px 0}
+.fx .k{color:var(--text);font-size:.875rem;line-height:1.25}
+.fx .v{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.fx .w{text-align:right;font-variant-numeric:tabular-nums;color:var(--faint)}
+.fx.head{padding:0 0 4px;font-size:.6875rem;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.fx.head span{text-align:right}
+.fx .bar{height:12px;border-radius:6px;background:var(--s2);overflow:hidden;position:relative}
+.fx .bar i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,var(--accent),var(--accent-deep));border-radius:6px;min-width:2px}
+.fx.zero .k,.fx.zero .v{color:var(--faint)}
+.fx.zero .bar i{background:var(--line-strong)}
+"""
+
+
+def _page_features(d: dict[str, Any]) -> str:
+    f = d.get("features") or {"rows": [], "new_people": 0, "since": ""}
+    rows = sorted(f["rows"], key=lambda x: -x["people"])
+    peak = max((x["people"] for x in rows), default=0) or 1
+    by_key = {x["key"]: x for x in rows}
+    new = f["new_people"]
+    tiles = '<div class="tiles">' + "".join([
+        tile(_n(new), "New people", f'since {_pretty_day(f["since"])}'),
+        tile(_n(by_key.get("save", {}).get("people", 0)), "Saved a reel", f'<b>{_pct(by_key.get("save", {}).get("people", 0), new)}</b> of them'),
+        tile(_n(by_key.get("search", {}).get("people", 0)), "Deep search", f'<b>{_pct(by_key.get("search", {}).get("people", 0), new)}</b> of them'),
+        tile(_n(by_key.get("list", {}).get("people", 0)), "Smart list", f'<b>{_pct(by_key.get("list", {}).get("people", 0), new)}</b> of them'),
+    ]) + "</div>"
+    out = ['<div class="fx head"><span style="text-align:left">Feature</span><span></span><span>All</span><span>7 days</span></div>']
+    for x in rows:
+        width = 100.0 * x["people"] / peak
+        zero = " zero" if x["people"] == 0 else ""
+        out.append(
+            f'<div class="fx{zero}"><span class="k">{escape(x["label"])}</span><span class="bar"><i style="width:{width:.1f}%"></i></span>'
+            f'<span class="v">{_n(x["people"])}</span><span class="w">{_n(x["week"])}</span></div>'
+        )
+    return tiles + card("People per feature", "", "".join(out), "New people only. You, testers and core users are not counted.")
 
 
 def _sent_card(sent: dict[str, Any]) -> str:
@@ -176,63 +213,32 @@ def _sent_card(sent: dict[str, Any]) -> str:
     from app.services.reel_counter import REASONS
 
     t, w, a = sent["today"], sent["last_7"], sent["all"]
-    lines = [
-        ("Sent to us", "received"),
-        ("Went to the processing queue", "queued"),
-        ("Already in their library", "duplicates"),
-        ("Saved", "processed"),
-        ("Still being read", "in_progress"),
-        ("Not saved", "not_processed"),
-    ]
-    table = "<table><tr><th>Reels</th><th>Today</th><th>7 days</th><th>All time</th></tr>"
+    lines = [("Sent", "received"), ("Already saved before", "duplicates"), ("Saved", "processed"), ("Still reading", "in_progress"), ("Not saved", "not_processed")]
+    table = "<table><tr><th></th><th>Today</th><th>7 days</th><th>All</th></tr>"
     for label, key in lines:
         table += f"<tr><td>{label}</td><td>{_n(t[key])}</td><td>{_n(w[key])}</td><td>{_n(a[key])}</td></tr>"
-    table += f'<tr><td><b>Gap</b></td><td><b>{_n(t["gap"])}</b></td><td><b>{_n(w["gap"])}</b></td><td><b>{_n(a["gap"])}</b></td></tr></table>'
+    table += "</table>"
     reasons = hrows([(label, int(a["reasons"].get(code, 0))) for code, label in REASONS.items()])
     since = _pretty_day(sent["since"]) if sent["since"] else "today"
-    # Day by day, newest first, from the day counting started.
-    days = [d for d in sent.get("days", []) if not sent["since"] or d["day"] >= sent["since"]]
-    daily = ""
-    if days:
-        daily = '<p class="sub" style="margin:16px 0 8px">Day by day</p><table><tr><th>Day</th><th>Sent</th><th>Queued</th><th>Saved</th></tr>'
-        for d in reversed(days):
-            daily += f'<tr><td>{_pretty_day(d["day"])}</td><td>{_n(d["sent"])}</td><td>{_n(d["queued"])}</td><td>{_n(d["saved"])}</td></tr>'
-        daily += "</table>"
-    return card(
-        "Reels sent versus saved",
-        "Counted when each reel reaches the bot. A reel Meta sends twice counts once. "
-        "Gap is sent, minus already in their library, minus saved.",
-        table + daily + '<p class="sub" style="margin:16px 0 8px">Why not saved, all time</p>' + reasons,
-        f"Counting since {escape(since)}. Earlier totals: 217 sent, 164 saved on 18 Oct (audit). "
-        f"Our own ad reel shared back: {_n(a['ad'])}, not counted above.",
-    )
+    return card("Reels sent vs saved", "", table + '<p class="sub" style="margin:16px 0 8px">Why not saved</p>' + reasons, f"Since {escape(since)}.")
 
 
 def _page_people(d: dict[str, Any]) -> str:
     p, r, cap, egg = d["people"], d["reels"], d["cap"], d["egg"]
     days = d["days30"]
     tiles = '<div class="tiles">' + "".join([
-        tile(_n(p["guests"]), "Guests", "saved reels, never signed in"),
-        tile(_n(p["signed_in"]), "Signed in with Google"),
-        tile(f'{_n(p["returned_after_week"])}<span style="font-size:.5em;color:var(--muted)"> of {_n(p["eligible_for_return"])}</span>', "Came back a week later",
-             f'<b>{_pct(p["returned_after_week"], p["eligible_for_return"])}</b> of people older than 7 days'),
-        tile(_n(p["guests_who_signed_in"]), "Guests who later signed in", f'of {_n(p["from_instagram"])} who came through the bot'),
+        tile(_n(p["guests"]), "Guests"),
+        tile(_n(p["signed_in"]), "Signed in"),
+        tile(_pct(p["returned_after_week"], p["eligible_for_return"]), "Back after a week", f'{_n(p["returned_after_week"])} of {_n(p["eligible_for_return"])}'),
+        tile(_n(p["guests_who_signed_in"]), "Guests who signed in"),
     ]) + "</div>"
+    savers_card = ('<a class="card-link" href="/admin/dashboard/savers"><section class="card"><h2>Heavy savers</h2>'
+                   '<p class="sub">Who saves the most. Tick who you blocked.</p></section></a>')
     bucket_items = [(x["label"] + (" reel" if x["label"] == "1" else " reels"), x["people"]) for x in d["buckets"]]
-    bucket_card = card("Reels per person", f"How many reels each of the <b>{_n(p['total'])}</b> people has sent us.", hrows(bucket_items),
-                       f'Counts every reel that reached us, failed ones included ({_n(r["failed"])} failed). '
-                       f'0 reels is mostly people from the ad who only asked a question; {_n(d.get("zero_post_only", 0))} of them sent a post we could not save. '
-                       f'Not counted: {_n(d.get("ad_items", 0))} copies of our own ad saved as ClipNest ad, and '
-                       f'{_n(d["older"]["people"])} older accounts (you and testers) with {_n(d["older"]["reels"])} reels.')
-    stays_card = _stays_card(d["stays"])
-    reels_card = card(
-        "Reels",
-        f'<b>{_n(r["total"])}</b> saved, <b>{_n(r["failed"])}</b> failed, <b>{_n(r["in_progress"])}</b> in progress right now.',
-        bars(r["failed_per_day"], days, "var(--danger)"),
-        "Failed reels per day, last 30 days.",
-    )
+    bucket_card = card("Reels per person", "", hrows(bucket_items))
+    reels_card = card("Failed reels per day", f'<b>{_n(r["failed"])}</b> failed in total.', bars(r["failed_per_day"], days, "var(--danger)"))
     if cap["cap"]:
-        cap_body = hrows([("At the cap", cap["at_cap"]), ("Near it (80%+)", cap["near_cap"]), ("Reels refused", cap["refused"])])
+        cap_body = hrows([("At the cap", cap["at_cap"]), ("Near it", cap["near_cap"]), ("Reels refused", cap["refused"])])
         named = cap.get("at_cap_people") or []
         if named:
             items = []
@@ -241,54 +247,46 @@ def _page_people(d: dict[str, Any]) -> str:
                 link = f'<a href="{escape(x["url"])}" target="_blank" rel="noopener">{escape(label)}</a>' if x["url"] else escape(label)
                 items.append(f'<tr><td>{link}</td><td>{_n(x["reels"])} of {_n(x["cap"])}</td></tr>')
             cap_body += '<p class="sub" style="margin:16px 0 8px">Who is at the cap</p><table>' + "".join(items) + "</table>"
-        cap_note = f"Cap is {cap['cap']} reels a month (100 for Easter egg accounts). Counted since {escape(cap['since'][:10])}."
+        cap_note = f"{cap['cap']} reels a month, 100 for Easter egg."
     else:
-        cap_body = '<p class="empty">No monthly cap is set.</p>'
+        cap_body = '<p class="empty">No cap set.</p>'
         cap_note = ""
     cap_card = card("Monthly cap", "", cap_body, cap_note)
-    if not egg["live"]:
-        egg_body = '<p class="empty">Not live on this server yet. It will show here on its own once the Easter egg change is deployed.</p>'
-    elif not egg["groups"]:
-        egg_body = '<p class="empty">Live, waiting for the first person to share our own reel back.</p>'
+    if not egg["live"] or not egg["groups"]:
+        egg_body = '<p class="empty">No one yet.</p>'
     else:
         rows = "".join(
-            f'<tr><td>{escape({"egg": "Easter egg (100 a month)", "plain": "Plain answer"}.get(g["group"], g["group"]))}</td><td>{_n(g["people"])}</td><td>{_n(g["saved_a_reel"])}</td><td>{_pct(g["saved_a_reel"], g["people"])}</td></tr>'
+            f'<tr><td>{escape({"egg": "Easter egg", "plain": "Plain answer"}.get(g["group"], g["group"]))}</td><td>{_n(g["people"])}</td><td>{_n(g["saved_a_reel"])}</td><td>{_pct(g["saved_a_reel"], g["people"])}</td></tr>'
             for g in egg["groups"]
         )
-        egg_body = f"<table><tr><th>Group</th><th>People</th><th>Saved a reel</th><th>Rate</th></tr>{rows}</table>"
-    egg_card = card("Easter egg test", "People who shared our own reel back, split 20 / 80.", egg_body)
-    return tiles + stays_card + '<div class="grid">' + bucket_card + reels_card + cap_card + egg_card + "</div>"
+        egg_body = f"<table><tr><th></th><th>People</th><th>Saved</th><th>Rate</th></tr>{rows}</table>"
+    egg_card = card("Easter egg test", "", egg_body)
+    return tiles + savers_card + _stays_card(d["stays"]) + '<div class="grid">' + bucket_card + reels_card + cap_card + egg_card + "</div>"
 
 
 def _stays_card(st: dict[str, Any]) -> str:
     d1 = _pct(st["d1_stayed"], st["d1_people"]) if st["d1_people"] else "not yet"
     d3 = _pct(st["d3_stayed"], st["d3_people"]) if st["d3_people"] else "not yet"
     head = '<div class="tiles" style="margin-bottom:12px">' + "".join([
-        tile(d1, "Back after 1 day", f'{_n(st["d1_stayed"])} of {_n(st["d1_people"])} people'),
-        tile(d3, "Back after 3 days", f'{_n(st["d3_stayed"])} of {_n(st["d3_people"])} people'),
+        tile(d1, "Back after 1 day", f'{_n(st["d1_stayed"])} of {_n(st["d1_people"])}'),
+        tile(d3, "Back after 3 days", f'{_n(st["d3_stayed"])} of {_n(st["d3_people"])}'),
     ]) + "</div>"
 
     def cell(stayed: Any, joined: int, so_far: bool) -> str:
         if stayed is None:
-            return '<td style="color:var(--faint)">not yet</td>'
-        tail = " so far" if so_far else ""
-        return f"<td>{_pct(stayed, joined)} <span style=\"color:var(--faint)\">({_n(stayed)}){tail}</span></td>"
+            return '<td style="color:var(--faint)">-</td>'
+        tail = "*" if so_far else ""
+        return f"<td>{_pct(stayed, joined)}{tail}</td>"
 
     if st["rows"]:
         rows = "".join(
             f'<tr><td>{_pretty_day(x["day"])}</td><td>{_n(x["joined"])}</td>{cell(x["day1"], x["joined"], x["day1_so_far"])}{cell(x["day3"], x["joined"], x["day3_so_far"])}</tr>'
             for x in st["rows"]
         )
-        table = f"<table><tr><th>Joined</th><th>People</th><th>After 1 day</th><th>After 3 days</th></tr>{rows}</table>"
+        table = f"<table><tr><th>First reel</th><th>People</th><th>1 day</th><th>3 days</th></tr>{rows}</table>"
     else:
-        table = '<p class="empty">No one has sent a reel yet.</p>'
-    return card(
-        "Who stays",
-        "People grouped by the day of their first reel, and how many sent another reel later.",
-        head + table,
-        "After 1 day: sent a reel on any later day. After 3 days: sent one on the third day after joining or later. "
-        "The two big numbers only use groups whose day is fully over; rows still running say so far. Days in India time. Our own ad is not counted as a reel.",
-    )
+        table = '<p class="empty">No one yet.</p>'
+    return card("Who stays", "", head + table, "* still counting")
 
 
 def _page_bot(d: dict[str, Any]) -> str:
@@ -298,40 +296,33 @@ def _page_bot(d: dict[str, Any]) -> str:
     arrivals = b["totals"].get("ad_referral", 0)
     hello = ad["m24_ad_hello"]["total"] + ad["m29_own_reel_egg"]["total"]
     tiles = '<div class="tiles">' + "".join([
-        tile(_n(b["wrote_today"]), "Wrote to the bot today", f'<b>{_n(b["wrote_7"])}</b> in the last 7 days'),
-        tile(_n(p["ig_per_day"][-1]), "New accounts from the bot today", f'<b>{_n(sum(p["ig_per_day"][-7:]))}</b> this week'),
-        tile(_n(b["waiting_for_human_7d"]), "Messages waiting for you", "typed messages, last 7 days"),
-        tile(_n(hello), "People from the ad", f'<b>{_n(ad["m24_ad_hello"]["today"] + ad["m29_own_reel_egg"]["today"])}</b> today'),
+        tile(_n(b["wrote_today"]), "Wrote today", f'<b>{_n(b["wrote_7"])}</b> this week'),
+        tile(_n(p["ig_per_day"][-1]), "New accounts today", f'<b>{_n(sum(p["ig_per_day"][-7:]))}</b> this week'),
+        tile(_n(hello), "From the ad", f'<b>{_n(ad["m24_ad_hello"]["today"] + ad["m29_own_reel_egg"]["today"])}</b> today'),
+        tile(_n(b["link_opens"].get("opened_today", 0) if b.get("link_opens") else 0), "Opened link today"),
     ]) + "</div>"
-    wrote_card = card("People who wrote per day", f"Anyone who sent the bot anything. <b>{_n(b['wrote_total_people'])}</b> different people so far.", bars(b["wrote_per_day"], days),
-                      f"Daily bot history is kept from {_pretty_day(b['history_from']) if b['history_from'] else 'today'} onwards.")
-    created_card = card("Accounts the bot created per day", "A stranger's first reel makes an account.", bars(p["ig_per_day"], days))
+    wrote_card = card("People who wrote per day", "", bars(b["wrote_per_day"], days))
+    created_card = card("New accounts per day", "", bars(p["ig_per_day"], days))
     q_rows = [(ad[k]["label"], ad[k]["total"]) for k in ("m25_ad_how", "m26_ad_free", "m27_ad_share")]
-    ad_body = hrows([("Arrived from an ad", arrivals), ("Got the ad hello", hello)] + q_rows)
-    ad_card = card("Ads", "Who tapped into the chat from an ad, and which question they tapped.", ad_body + bars(b["ad_hello_per_day"], days),
-                   "Ad hellos per day, last 30 days. A question only counts when the bot answered it.")
+    ad_card = card("Ads", "", hrows([("Came from an ad", arrivals), ("Got the ad hello", hello)] + q_rows) + bars(b["ad_hello_per_day"], days))
     f = b["funnel"]
     funnel_rows = [(f[k]["label"], f[k]["people"]) for k in ("m1_first_ack", "m2_first_library", "m3_quiet_nudge", "m4_home_screen")]
-    funnel_card = card("What the bot sent", "Different people who got each message, all time.", hrows(funnel_rows))
+    funnel_card = card("What the bot sent", "", hrows(funnel_rows))
     lo = b.get("link_opens") or {}
     opens_card = card(
-        "Library link opened",
-        f"People whose first library link came from {_pretty_day(lo.get('since_day', ''))} onwards. Did they ever open it?",
-        hrows([("Got the link", lo.get("got", 0)), ("Opened it", lo.get("opened", 0)), ("Never opened it", lo.get("never", 0))], muted_zero=False),
-        f"<b>{_n(lo.get('opened_today', 0))}</b> people opened their link today, <b>{_n(lo.get('opened_ever', 0))}</b> since counting began. "
-        "Instagram's own link preview is not counted as an open.",
+        "Library link",
+        "",
+        hrows([("Got the link", lo.get("got", 0)), ("Opened it", lo.get("opened", 0)), ("Never opened", lo.get("never", 0))], muted_zero=False),
+        f"Since {_pretty_day(lo.get('since_day', ''))}.",
     )
-    return tiles + '<div class="grid">' + opens_card + wrote_card + created_card + ad_card + funnel_card + "</div>"
+    return tiles + '<div class="grid">' + opens_card + wrote_card + created_card + ad_card + funnel_card + "</div>" + _sent_card(d["sent"])
 
 
 def render(page: str, d: dict[str, Any]) -> str:
-    pages = {"today": _page_today, "people": _page_people, "bot": _page_bot}
+    pages = {"today": _page_today, "features": _page_features, "people": _page_people, "bot": _page_bot}
     page = page if page in pages else "today"
-    offset = d["utc_offset_minutes"]
-    sign = "+" if offset >= 0 else "-"
-    zone = f"UTC{sign}{abs(offset) // 60}:{abs(offset) % 60:02d}"
-    stamp = f"Fresh on every open. Computed in {d['computed_in_ms']} ms. Days run on {zone}. Today is {_pretty_day(d['today'])}."
-    return _shell(page, stamp, pages[page](d))
+    stamp = f"Updated just now. Today is {_pretty_day(d['today'])}, India time."
+    return _shell(page, stamp, pages[page](d), FEATURES_CSS if page == "features" else "")
 
 
 def _shell(page: str, stamp: str, body: str, extra_css: str = "") -> str:
@@ -346,8 +337,8 @@ def _shell(page: str, stamp: str, body: str, extra_css: str = "") -> str:
 <title>ClipNest numbers</title>
 <style>{CSS}{extra_css}</style></head>
 <body><div class="wrap">
-<header><h1>ClipNest <em>numbers</em></h1><a class="back" href="/app">Back to app</a></header>
-<p class="stamp">{escape(stamp)} <a href="/admin/comment-reels">Comment-to-get reels</a></p>
+<header><h1>ClipNest</h1><a class="back" href="/app">Back to app</a></header>
+<p class="stamp">{escape(stamp)}</p>
 <nav class="tabs">{tabs}</nav>
 {body}
 </div></body></html>"""
@@ -415,23 +406,20 @@ def render_savers(d: dict[str, Any]) -> str:
     done_rows = [p for p in d["people"] if p["crossed"]]
     saved_today = sum(1 for p in d["people"] if p["today"])
     tiles = '<div class="tiles">' + "".join([
-        tile(_n(len(d["people"])), "Instagram people with a saved reel"),
-        tile(_n(saved_today), "Saved a reel today"),
-        tile(_n(d["crossed"]), "Blocked by me", "ticked on this page"),
-        tile(_n(d["core"]), "Core, keep", "never block"),
+        tile(_n(len(d["people"])), "People with a reel"),
+        tile(_n(saved_today), "Saved today"),
+        tile(_n(d["crossed"]), "Blocked by me"),
+        tile(_n(d["core"]), "Core, keep"),
     ]) + "</div>"
-    body = tiles + card(
+    body = '<p class="stamp"><a href="/admin/dashboard/people">&lsaquo; People</a></p>' + tiles + card(
         "Heavy savers",
-        "Most reels today first, then most in total. Tap a name to open their Instagram. "
-        "After you block someone there, tick their box here.",
-        _savers_table(open_rows) if open_rows else '<p class="empty">No one to show yet.</p>',
-        "This page only keeps your ticks. It never blocks anyone. Our own ad reel and failed reels are not counted. "
-        "Core users from before 14 Oct (old Google accounts) are not listed.",
+        "Tap a name to open Instagram. Tick after you block.",
+        _savers_table(open_rows) if open_rows else '<p class="empty">No one yet.</p>',
     )
     if done_rows:
-        body += card("Blocked by me", f"<b>{_n(len(done_rows))}</b> {'person' if len(done_rows) == 1 else 'people'} you ticked. Tap the green box to undo.", _savers_table(done_rows))
-    stamp = f"Fresh on every open. Today is {_pretty_day(d['today'])} (India time)."
-    return _shell("savers", stamp, body, SAVERS_CSS)
+        body += card("Blocked by me", "Tap the green box to undo.", _savers_table(done_rows))
+    stamp = f"Updated just now. Today is {_pretty_day(d['today'])}, India time."
+    return _shell("people", stamp, body, SAVERS_CSS)
 
 
 MESSAGES_CSS = """
@@ -439,26 +427,33 @@ MESSAGES_CSS = """
 .dm .h{color:var(--accent);text-decoration:none;font-weight:600}
 .dm .w{margin:6px 0 0;color:var(--text);overflow-wrap:anywhere;white-space:pre-wrap}
 .dm .t{display:block;font-size:.75rem;color:var(--faint)}
+.pill{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--accent-tint);color:var(--accent);font-size:.8125rem;text-decoration:none}
 """
 
 
 def render_messages(d: dict[str, Any]) -> str:
-    """The Messages tab: what each person typed or tapped, newest first."""
+    """The Messages tab: only what the bot has no fixed answer for, newest
+    person first. The rest is one tap away."""
     blocks = []
     for p in d["people"]:
         label = escape("@" + p["handle"]) if p["handle"] else "no handle yet"
         who = f'<a class="h" href="{escape(p["url"])}" target="_blank" rel="noopener noreferrer">{label}</a>' if p["url"] else label
         said = "".join(f'<p class="w"><span class="t">{escape(m["at"])}</span>{escape(m["words"])}</p>' for m in p["messages"])
         blocks.append(f'<div class="dm">{who}{said}</div>')
+    if d.get("show_all"):
+        title = "Everything people wrote"
+        toggle = '<a class="pill" href="/admin/dashboard/messages">Show only what needs you</a>'
+    else:
+        title = "Need your reply"
+        hidden = int(d.get("hidden", 0))
+        toggle = f'<a class="pill" href="/admin/dashboard/messages?all=1">{_n(hidden)} hidden, the bot answers them. Show</a>' if hidden else ""
     body = card(
-        "What people wrote",
-        f"<b>{_n(d['count'])}</b> messages from <b>{_n(len(d['people']))}</b> people in the last {d['days']} days. "
-        "Newest conversation first. Tap a name to open their Instagram.",
-        "".join(blocks) if blocks else '<p class="empty">No messages yet. New ones show here from 26 Oct.</p>',
-        "Every typed message and tapped question, word for word, kept 30 days. Reels are not listed. "
-        "Reading this page does not mark any chat as seen.",
+        title,
+        f"<b>{_n(len(d['people']))}</b> people, last {d['days']} days.",
+        "".join(blocks) if blocks else '<p class="empty">Nothing needs you.</p>',
+        toggle,
     )
-    return _shell("messages", "Fresh on every open. Times are India time.", body, MESSAGES_CSS)
+    return _shell("messages", "India time. Opening this page does not mark chats as seen.", body, MESSAGES_CSS)
 
 
 PROMISE_LABELS = {"link": "Link", "recipe": "Recipe", "file": "File or PDF", "code": "Code or discount",

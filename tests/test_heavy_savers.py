@@ -99,7 +99,7 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     client.get("/dev-login", params={"user_id": "admin"}, follow_redirects=False)
     res = client.get("/admin/dashboard/savers")
     check("admin sees the tab", res.status_code == 200 and "Heavy savers" in res.text, str(res.status_code))
-    check("tab is in the nav on every page", 'href="/admin/dashboard/savers"' in client.get("/admin/dashboard").text)
+    check("savers is linked from the People tab", 'href="/admin/dashboard/savers"' in client.get("/admin/dashboard/people").text)
     html = res.text
     order = [h for h in ("also_today", "busy_today", "big_total") if h in html]
     pos = [html.index("@" + h) for h in order]

@@ -45,6 +45,11 @@ def admin_dashboard_bot(request: Request):
     return _dashboard_page(request, "bot")
 
 
+@router.get("/dashboard/features", response_class=HTMLResponse, include_in_schema=False)
+def admin_dashboard_features(request: Request):
+    return _dashboard_page(request, "features")
+
+
 @router.get("/dashboard/savers", response_class=HTMLResponse, include_in_schema=False)
 def admin_dashboard_savers(request: Request):
     """Instagram people who save the most reels, with a cross-off box. It only
@@ -60,15 +65,16 @@ def admin_dashboard_savers(request: Request):
 
 
 @router.get("/dashboard/messages", response_class=HTMLResponse, include_in_schema=False)
-def admin_dashboard_messages(request: Request):
-    """What people typed or tapped in the bot's chat, word for word."""
+def admin_dashboard_messages(request: Request, all: int = Query(default=0)):
+    """What people typed in the bot's chat, word for word. Only messages the
+    bot has no fixed answer for, unless ?all=1."""
     from app.db.database import get_connection
     from app.services.dm_messages import recent_messages
     from app.ui_ux.admin_dashboard import render_messages
 
     _admin_or_not_found(request)
     with get_connection() as connection:
-        data = recent_messages(connection)
+        data = recent_messages(connection, show_all=bool(all))
     return HTMLResponse(render_messages(data), headers={"Cache-Control": "no-store, must-revalidate"})
 
 

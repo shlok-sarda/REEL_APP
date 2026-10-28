@@ -279,7 +279,7 @@ def main() -> None:
         check("a tapped question is kept as a tap", any(d.startswith("Tapped: ") for d in details("tap_how")), str(details("tap_how")))
         check("a voice note is noted", "[voice note]" in details("voice"), str(details("voice")))
         with get_connection() as c:
-            dm = recent_messages(c)
+            dm = recent_messages(c, show_all=True)
         senders = {p["sender_id"] for p in dm["people"]}
         check("the Messages tab lists who wrote", {"typed_a", "tap_how", "voice"} <= senders, str(senders)[:300])
         check("a shared reel is not listed as a message", not any("instagram.com/reel/" in m["words"] for p in dm["people"] for m in p["messages"] if not p["sender_id"].startswith("typed")), "")

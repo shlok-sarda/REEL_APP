@@ -118,14 +118,14 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 with TestClient(app, client=("127.0.0.1", 50000)) as client:
     seed()
     # 1. Logged out: every dashboard address is "not found".
-    for path in ("/admin/dashboard", "/admin/dashboard/people", "/admin/dashboard/bot", "/admin/dashboard.json"):
+    for path in ("/admin/dashboard", "/admin/dashboard/people", "/admin/dashboard/bot", "/admin/dashboard/features", "/admin/dashboard.json"):
         res = client.get(path)
         check(f"logged out gets 404 at {path}", res.status_code == 404, str(res.status_code))
 
     # 2. A signed-in non-admin: still "not found".
     res = client.get("/dev-login", params={"user_id": "plain"}, follow_redirects=False)
     check("dev-login works for a plain user", res.status_code == 303, str(res.status_code))
-    for path in ("/admin/dashboard", "/admin/dashboard/people", "/admin/dashboard/bot", "/admin/dashboard.json"):
+    for path in ("/admin/dashboard", "/admin/dashboard/people", "/admin/dashboard/bot", "/admin/dashboard/features", "/admin/dashboard.json"):
         res = client.get(path)
         check(f"non-admin gets 404 at {path}", res.status_code == 404, str(res.status_code))
     check("non-admin session says not admin", client.get("/auth/session").json().get("user", {}).get("is_admin") is False)
@@ -165,9 +165,38 @@ with TestClient(app, client=("127.0.0.1", 50000)) as client:
     named = data["cap"]["at_cap_people"]
     check("cap: the person at the cap is named with a link", [(x["handle"], x["url"], x["reels"]) for x in named] == [("cap_tester", "https://www.instagram.com/cap_tester/", 50)], str(named))
     check("people page lists who is at the cap", "Who is at the cap" in res.text and 'href="https://www.instagram.com/cap_tester/"' in res.text and "@cap_tester" in res.text)
-    check("people page shows Who stays", "Who stays" in res.text and "After 3 days" in res.text)
-    check("people page says failed and ad copies are handled", "failed ones included" in res.text and "ClipNest ad" in res.text)
+    check("people page shows Who stays", "Who stays" in res.text and "Back after 3 days" in res.text)
+    check("people page links to Heavy savers", 'href="/admin/dashboard/savers"' in res.text)
     check("ad copies counted separately", data["ad_items"] == 1, str(data["ad_items"]))
+
+    # 4a. Features tab: new people per feature, older accounts left out.
+    with get_connection() as c:
+        c.execute("INSERT INTO search_queries (user_id, query, created_at, updated_at) VALUES ('user_ig_2', 'cafe', ?, ?)", (iso(NOW), iso(NOW)))
+        c.execute("INSERT INTO search_queries (user_id, query, created_at, updated_at) VALUES ('admin', 'cafe', ?, ?)", (iso(NOW), iso(NOW)))
+        c.execute("INSERT INTO user_folders (user_id, name, created_at, updated_at) VALUES ('user_ig_3', 'Cafes', ?, ?)", (iso(NOW), iso(NOW)))
+    from app.services.admin_stats import feature_usage
+
+    with get_connection() as c:
+        fu = feature_usage(c)
+    by = {x["key"]: x for x in fu["rows"]}
+    check("features: deep search counts new people only", by["search"]["people"] == 1, str(by["search"]))
+    check("features: smart list counted", by["list"]["people"] == 1 and by["list"]["week"] == 1, str(by["list"]))
+    res = client.get("/admin/dashboard/features")
+    check("admin sees the Features tab", res.status_code == 200 and "People per feature" in res.text and "Deep search" in res.text and "Smart list" in res.text, str(res.status_code))
+
+    # 4a2. Messages tab: what the bot answers is hidden, the rest shows.
+    from app.services.dm_messages import bot_answers
+
+    for words, hide in (("How does it work?", True), ("is it free", True), ("Tapped: I want to share a reel", True), ("hi", True), ("Thank you!", True),
+                        ("can i save youtube videos too?", False), ("delete my data", False), ("[voice note]", False)):
+        check(f"messages: {words!r} {'hidden' if hide else 'shown'}", bot_answers(words) is hide)
+    with get_connection() as c:
+        for i, w in enumerate(("How does it work?", "my reel is not showing")):
+            c.execute("INSERT INTO instagram_webhook_events (received_at, kind, sender_id, outcome, detail) VALUES (?, 'said', 'msg_person', 'said', ?)", (iso(NOW - timedelta(minutes=5 - i)), w))
+    res = client.get("/admin/dashboard/messages")
+    check("messages tab hides what the bot answers", "my reel is not showing" in res.text and "How does it work?" not in res.text and "1 hidden" in res.text)
+    res = client.get("/admin/dashboard/messages", params={"all": 1})
+    check("messages tab shows everything on ask", "How does it work?" in res.text)
 
     # 4b. Who stays: cohort math on hand-made days.
     from app.services.admin_stats import cohorts

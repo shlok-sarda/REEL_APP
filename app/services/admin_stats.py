@@ -478,6 +478,15 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         f"SELECT COUNT(*) FROM instagram_webhook_events WHERE outcome = 'needs_human' AND {_norm('received_at')} >= datetime('now', '-7 days')"
     ).fetchone()[0]
 
+    features = feature_usage(c)
+    from app.services.dm_messages import recent_messages
+
+    try:
+        need = recent_messages(c)
+        need_you = {"people": len(need["people"]), "messages": need["count"]}
+    except sqlite3.Error:
+        need_you = {"people": 0, "messages": 0}
+
     # ---- older accounts, reported once and left out of everything above ----
     older = c.execute(
         f"""
@@ -528,6 +537,8 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
         },
         "egg": egg,
         "sent": sent,
+        "features": features,
+        "need_you": need_you,
         "bot": {
             "wrote_per_day": wrote_per_day,
             "wrote_today": wrote_per_day[-1],
@@ -543,3 +554,52 @@ def _compute(c: sqlite3.Connection) -> dict[str, Any]:
             "waiting_for_human_7d": int(waiting or 0),
         },
     }
+
+
+# --------------------------------------------------------------------------
+# Feature use: how many new people used each feature (Features tab)
+# --------------------------------------------------------------------------
+
+# New people: bot accounts made from launch day on. Core users (older
+# accounts) and the founder's own test accounts are left out.
+FEATURES_FROM = "2026-10-14"
+FEATURE_SKIP_HANDLES = {"maybe_shlokkk", "bomkkot_axr", "url_testing", "url_testing_finale", "clipnest.in", "clipnest"}
+
+
+def feature_usage(c: sqlite3.Connection) -> dict[str, Any]:
+    """People per feature, all time and last 7 days. Each feature is a query
+    giving (uid, at) rows; a feature whose table is missing shows 0."""
+    family = {h.strip().lower().lstrip("@") for h in os.getenv("HEAVY_SAVERS_KEEP", "").split(",") if h.strip()}
+    skip = ",".join("'" + h.replace("'", "") + "'" for h in sorted(FEATURE_SKIP_HANDLES | {"_.scootyyyy"} | family))
+    new = (
+        f"SELECT id FROM users WHERE id LIKE 'user_ig_%' AND {_norm('created_at')} >= '{FEATURES_FROM}' "
+        f"AND lower(COALESCE(instagram_username, '')) NOT IN ({skip})"
+    )
+    week = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    sources = [
+        ("save", "Save a reel", f"SELECT user_id AS uid, received_at AS at FROM reels WHERE {THEIRS}"),
+        ("link", "Open library link", "SELECT id AS uid, library_last_opened_at AS at FROM users WHERE COALESCE(library_opened_at, '') <> ''"),
+        ("search", "Deep search", "SELECT user_id AS uid, created_at AS at FROM search_queries"),
+        ("google", "Google sign in", "SELECT id AS uid, last_login_at AS at FROM users WHERE COALESCE(google_sub, '') <> ''"),
+        ("click", "Tap a search result", "SELECT user_id AS uid, created_at AS at FROM search_clicks"),
+        ("list", "Smart list", "SELECT user_id AS uid, created_at AS at FROM user_folders"),
+        ("add", "Add reel to a list", "SELECT user_id AS uid, created_at AS at FROM folder_memberships WHERE source = 'manual'"),
+        ("name", "Set your name", "SELECT id AS uid, updated_at AS at FROM users WHERE COALESCE(preferred_name, '') <> ''"),
+        ("telegram", "Telegram", "SELECT id AS uid, created_at AS at FROM users WHERE COALESCE(telegram_user_id, '') <> ''"),
+    ]
+    rows = []
+    for key, label, sql in sources:
+        try:
+            got = c.execute(
+                f"""
+                SELECT COUNT(DISTINCT uid), COUNT(DISTINCT CASE WHEN {_norm('at')} >= ? THEN uid END)
+                FROM ({sql}) WHERE uid IN ({new})
+                """,
+                (week,),
+            ).fetchone()
+            people, recent = int(got[0] or 0), int(got[1] or 0)
+        except sqlite3.Error:
+            people, recent = 0, 0
+        rows.append({"key": key, "label": label, "people": people, "week": recent})
+    total = int(c.execute(f"SELECT COUNT(*) FROM ({new})").fetchone()[0] or 0)
+    return {"since": FEATURES_FROM, "new_people": total, "rows": rows}
