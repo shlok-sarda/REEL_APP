@@ -61,7 +61,11 @@ def _caller() -> str:
         frame = sys._getframe(2)
         while frame is not None:
             filename = frame.f_code.co_filename
-            if filename != str(_HERE) and "openai" not in Path(filename).parts:
+            if (
+                filename != str(_HERE)
+                and "openai" not in Path(filename).parts
+                and Path(filename).name != "claude_adapter.py"
+            ):
                 return f"{Path(filename).name}:{frame.f_code.co_name}"
             frame = frame.f_back
     except Exception:
@@ -164,7 +168,11 @@ def _wrap(resource, kind: str) -> None:
     def create(*args, **kwargs):
         response = original(*args, **kwargs)
         try:
-            record(kind, kwargs.get("model", ""), response, _caller())
+            # A Claude answer names the model that really ran, not the
+            # OpenAI name the call site asked for.
+            served = str(getattr(response, "model", "") or "")
+            model = served if served.startswith("claude") else kwargs.get("model", "")
+            record(kind, model, response, _caller())
         except Exception:
             pass
         return response

@@ -20,13 +20,17 @@ from app.db.database import get_connection
 # window updates that row instead of adding a new one.
 TYPING_WINDOW_SECONDS = 20
 # USD per million tokens (input, cached input, output), OpenAI list prices as
-# used in the July-September cost measurements. Models missing here are
+# used in the July-September cost measurements, and Claude list prices from
+# October 2026 (Haiku 5.5 price holds for prompts under 100K tokens, which
+# every call here is). Models missing here are
 # reported with tokens only, never a guessed cost.
 PRICE_USD_PER_M = {
     "gpt-4.1": (2.00, 0.50, 8.00),
     "gpt-4.1-mini": (0.40, 0.10, 1.60),
     "gpt-4.1-nano": (0.10, 0.025, 0.40),
     "text-embedding-3-small": (0.02, 0.02, 0.0),
+    "claude-haiku-5-5": (0.10, 0.01, 0.50),
+    "claude-sonnet-5-5": (2.00, 0.20, 10.00),
 }
 USD_INR = 88.0
 
@@ -147,7 +151,10 @@ def recent_searches(days: int = 30, limit: int = 500) -> dict[str, Any]:
 
 
 def _cost_inr(model: str, prompt: int, cached: int, completion: int) -> float | None:
-    price = PRICE_USD_PER_M.get(model)
+    # A dated name ("gpt-4.1-mini-2025-04-14") prices like its base model.
+    price = PRICE_USD_PER_M.get(model) or next(
+        (p for name, p in PRICE_USD_PER_M.items() if model.startswith(name + "-20")), None
+    )
     if not price:
         return None
     usd = ((prompt - cached) * price[0] + cached * price[1] + completion * price[2]) / 1_000_000

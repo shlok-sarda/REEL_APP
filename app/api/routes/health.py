@@ -26,6 +26,25 @@ def _queue_snapshot() -> dict:
         return {}
 
 
+def _chat_provider() -> str:
+    try:
+        from claude_adapter import claude_enabled
+
+        return "claude" if claude_enabled() else "openai"
+    except Exception:
+        return "openai"
+
+
+def _served_model(openai_model: str) -> str:
+    """The model that actually answers a call written for openai_model."""
+    try:
+        from claude_adapter import claude_enabled, claude_model_for
+
+        return claude_model_for(openai_model) if claude_enabled() else openai_model
+    except Exception:
+        return openai_model
+
+
 def _config_summary() -> dict:
     """Which switches are on, for checking the host's settings with one curl.
 
@@ -45,10 +64,12 @@ def _config_summary() -> dict:
     return {
         "app_env": settings.app_env,
         "openai_key_set": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "anthropic_key_set": bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
+        "chat_provider": _chat_provider(),
         "apify_configured": bool(settings.apify_token),
         "instagram_app_secret_set": bool(settings.instagram_app_secret),
         "session_secret_default": settings.session_secret.strip() in {"", "change-me-before-launch"},
-        "extraction_model": os.getenv("EXTRACTION_MODEL", "").strip() or "gpt-4.1-mini",
+        "extraction_model": _served_model(os.getenv("EXTRACTION_MODEL", "").strip() or "gpt-4.1-mini"),
         "keyframe_max_edge": keyframe_max_edge,
         "outbound_dm_test": settings.outbound_dm_test,
         "guest_autocreate_for_everyone": settings.guest_autocreate_for_everyone,

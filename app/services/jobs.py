@@ -37,6 +37,8 @@ _QUOTA_ERROR_SIGNATURES = (
     "processing is paused",
     "exceeded your current quota",
     "check your plan and billing",
+    # Claude's wording for an empty prepaid balance.
+    "credit balance is too low",
 )
 
 # A momentary rate limit is a different thing: it clears in seconds. Treating
@@ -46,6 +48,8 @@ _RATE_LIMIT_SIGNATURES = (
     "rate_limit",
     "rate limit",
     "429",
+    # Claude busy for a moment (HTTP 529), clears like a rate limit.
+    "overloaded",
 )
 RATE_LIMIT_RETRY_SECONDS = 60
 
