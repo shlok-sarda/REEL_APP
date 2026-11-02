@@ -39,6 +39,8 @@ _QUOTA_ERROR_SIGNATURES = (
     "check your plan and billing",
     # Claude's wording for an empty prepaid balance.
     "credit balance is too low",
+    # OpenAI's newer wording for the same thing, sent as a plain 429.
+    "no credits remaining",
 )
 
 # A momentary rate limit is a different thing: it clears in seconds. Treating
