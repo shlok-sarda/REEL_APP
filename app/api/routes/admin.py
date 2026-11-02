@@ -147,6 +147,47 @@ def admin_users(request: Request):
     return {"users": list_users_admin()}
 
 
+@router.post("/retry-failed")
+def admin_retry_failed(
+    request: Request,
+    since: str = Query(..., min_length=10, max_length=19),
+    error: str = Query(..., min_length=5, max_length=120),
+    run: bool = Query(default=False),
+):
+    """Re-run every reel whose latest job failed with an error starting with
+    `error` since `since`, across all users. Lists them unless run=1, since
+    each re-run is paid. For failures that were the platform's fault, like an
+    empty AI balance, which owners cannot re-run themselves."""
+    require_admin(request)
+    from app.db.database import get_connection
+    from app.services.jobs import enqueue_reel_job, ensure_background_progress
+    from app.services.reel_ingest import reset_reel_for_retry
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT j.reel_id, r.user_id FROM processing_jobs j
+            JOIN reels r ON r.id = j.reel_id
+            WHERE j.job_type = 'process_reel' AND j.status = 'failed'
+              AND j.created_at >= ? AND j.error_message LIKE ? || '%'
+              AND r.status != 'completed'
+              AND NOT EXISTS (
+                SELECT 1 FROM processing_jobs k
+                WHERE k.reel_id = j.reel_id AND k.job_type = j.job_type AND k.id > j.id
+              )
+            ORDER BY j.id
+            """,
+            (since, error),
+        ).fetchall()
+    reels = [{"reel_id": row["reel_id"], "user_id": row["user_id"]} for row in rows]
+    if run:
+        for reel in reels:
+            reset_reel_for_retry(reel["reel_id"])
+            reel["job_status"] = enqueue_reel_job(reel["reel_id"], user_id=reel["user_id"])["status"]
+        ensure_background_progress()
+    return {"run": run, "count": len(reels), "reels": reels}
+
+
 @router.get("/llm-usage")
 def admin_llm_usage(request: Request, days: int = Query(default=7, ge=1, le=365)):
     """OpenAI tokens and rupees by call site, from the llm_usage log."""
